@@ -23,7 +23,8 @@ export default function HeartRateApp() {
     }
   };
 
-  // NIEUW: Luisteren naar de teller via Firebase (Remote Trigger)
+  // 2. NIEUWE FUNCTIONALITEIT: Luisteren naar de teller via Firebase (Remote Trigger)
+  // De opname start/stopt nu op basis van de teller applicatie
   useEffect(() => {
     if (skipperName) {
       const recordingRef = ref(db, `live_sessions/${skipperName}/isRecording`);
@@ -34,7 +35,7 @@ export default function HeartRateApp() {
     }
   }, [skipperName]);
 
-  // 2. Synchronisatie naar Firebase (alleen bij recording)
+  // 3. Synchronisatie naar Firebase (alleen bij recording)
   useEffect(() => {
     if (isConnected && isRecording && heartRate > 0 && skipperName) {
       const sessionRef = ref(db, 'live_sessions/' + skipperName);
@@ -51,7 +52,7 @@ export default function HeartRateApp() {
     }
   }, [heartRate, isConnected, isRecording, skipperName]);
 
-  // 3. Bluetooth Logica
+  // 4. Bluetooth Logica (OORSPRONKELIJK)
   const parseHeartRate = (value) => {
     const flags = value.getUint8(0);
     const is16Bits = flags & 0x1;
@@ -90,7 +91,7 @@ export default function HeartRateApp() {
     }
   };
 
-  // 4. Sessie acties
+  // 5. Sessie acties (OORSPRONKELIJK)
   const saveSession = async () => {
     if (history.length === 0) return;
     
@@ -151,56 +152,50 @@ export default function HeartRateApp() {
         />
       </div>
 
-      {/* Recording Status Card */}
+      {/* Control Card (NU AUTOMATISCH VIA TELLER) */}
       <div style={styles.card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '5px' }}>OPNAME STATUS</div>
-            <div style={{ fontSize: '18px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ 
-                width: '10px', 
-                height: '10px', 
-                borderRadius: '50%', 
-                backgroundColor: isRecording ? '#22c55e' : '#ef4444',
-                boxShadow: isRecording ? '0 0 10px #22c55e' : 'none'
-              }}></div>
-              {isRecording ? "LIVE BEZIG" : "WACHTEN OP START"}
+          <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+            <div style={{ textAlign: 'center' }}>
+              <Heart color={isRecording ? "#ef4444" : "#475569"} size={48} fill={isRecording ? "#ef4444" : "none"} />
+              <div style={{ fontSize: '32px', fontWeight: '900' }}>{heartRate}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: '14px', color: '#94a3b8' }}>RECORDING STATUS</div>
+              <div style={{ fontSize: '18px', fontWeight: 'bold', color: isRecording ? '#22c55e' : '#ef4444' }}>
+                {isRecording ? 'LIVE: OPNAME BEZIG' : 'STAND-BY: WACHTEN OP TELLER'}
+              </div>
             </div>
           </div>
-          <button 
-            onClick={saveSession}
-            disabled={!history.length}
-            style={{ ...styles.button, backgroundColor: '#1e293b', color: '#94a3b8', border: '1px solid #334155', opacity: history.length ? 1 : 0.5 }}
-          >
-            <Save size={20} /> Opslaan
-          </button>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button 
+              onClick={saveSession}
+              disabled={!history.length}
+              style={{ ...styles.button, backgroundColor: '#1e293b', color: '#94a3b8', border: '1px solid #334155', opacity: history.length ? 1 : 0.5 }}
+            >
+              <Save size={20} /> Opslaan
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Heart Rate Display */}
-      <div style={{ ...styles.card, textAlign: 'center' }}>
-        <Heart color="#ef4444" size={48} style={{ margin: '0 auto 10px' }} fill="#ef4444" />
-        <div style={{ fontSize: '64px', fontWeight: '900' }}>{heartRate}</div>
-        <div style={{ color: '#94a3b8', letterSpacing: '2px' }}>BPM</div>
-      </div>
-
-      {/* Graph Area */}
-      <div style={{ ...styles.card, height: '350px' }}>
+      {/* Graph Area (HERSTELD NAAR OORSPRONKELIJK MET LABELS) */}
+      <div style={{ ...styles.card, height: '400px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-          <div style={{ fontWeight: 'bold' }}>LIVE MONITOR</div>
+          <div style={{ fontWeight: 'bold' }}>HARTSSLAG VERLOOP</div>
           <select 
-            style={{ backgroundColor: '#0f172a', border: 'none', color: '#64748b' }}
+            style={{ backgroundColor: '#0f172a', border: 'none', color: '#64748b', borderRadius: '5px', padding: '5px' }}
             onChange={(e) => setViewTime(Number(e.target.value))}
             value={viewTime}
           >
-            <option value="60">60 sec</option>
-            <option value="120">2 min</option>
-            <option value="300">5 min</option>
+            <option value="60">Laatste minuut</option>
+            <option value="120">Laatste 2 min</option>
+            <option value="300">Laatste 5 min</option>
           </select>
         </div>
         
-        <ResponsiveContainer width="100%" height="80%">
-          <LineChart data={history.slice(-viewTime)} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+        <ResponsiveContainer width="100%" height="85%">
+          <LineChart data={history.slice(-viewTime)} margin={{ top: 5, right: 10, left: -20, bottom: 20 }}>
             <CartesianGrid stroke="#334155" vertical={false} strokeDasharray="3 3" />
             <XAxis 
               dataKey="time" 
@@ -208,6 +203,7 @@ export default function HeartRateApp() {
               fontSize={10} 
               tickLine={false} 
               axisLine={false}
+              label={{ value: 'Tijdstip', position: 'insideBottom', offset: -10, fill: '#64748b', fontSize: 10 }}
             />
             <YAxis 
               stroke="#64748b" 
@@ -215,6 +211,7 @@ export default function HeartRateApp() {
               tickLine={false} 
               axisLine={false} 
               domain={['dataMin - 5', 'dataMax + 5']}
+              label={{ value: 'BPM', angle: -90, position: 'insideLeft', offset: 10, fill: '#64748b', fontSize: 10 }}
             />
             <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', color: 'white', borderRadius: '8px' }} />
             <Line 
