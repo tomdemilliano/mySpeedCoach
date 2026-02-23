@@ -25,14 +25,14 @@ export default function HeartRateApp() {
 
   // 2. Synchronisatie naar Firebase (alleen bij recording)
   useEffect(() => {
-    if (isConnected && isRecording && heartRate > 0 && skipperName) {
+    if (isConnected && isRecording && heartRate > 0 && Name) {
       const sessionRef = ref(db, 'live_sessions/' + skipperName);
       
       update(sessionRef, {
         name: skipperName,
         bpm: heartRate,
         isRecording: isRecording,
-        startTime: isRecording ? (skipper.startTime || Date.now()) : null,
+        startTime: isRecording ? (skipperName.startTime || Date.now()) : null,
         lastUpdate: Date.now()
       });
     }
