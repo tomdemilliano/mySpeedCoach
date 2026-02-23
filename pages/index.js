@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebaseConfig';
-import { ref, set, get, update } from "firebase/database";
+import { ref, set, get, update, push } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Heart, Activity, Bluetooth, Play, Square, Save } from 'lucide-react';
 
@@ -78,6 +78,39 @@ export default function HeartRateApp() {
       alert(`Toestel gekoppeld aan ${skipperName}`);
     }
   };
+
+const stopRecording = async () => {
+  setIsRecording(false);
+
+  if (history.length > 0) {
+    // 1. Maak een uniek historiek-object
+    const sessionData = {
+      skipper: skipperName,
+      date: new Date().toISOString(),
+      finalSteps: 0, // Dit halen we zo op uit de live-data
+      heartRateHistory: history, // De volledige array van de grafiek
+      averageBPM: Math.round(history.reduce((a, b) => a + b.bpm, 0) / history.length),
+      maxBPM: Math.max(...history.map(o => o.bpm))
+    };
+
+    // 2. Haal de laatste stappenstand op uit de live sessie
+    const liveRef = ref(db, `live_sessions/${skipperName}`);
+    const snapshot = await get(liveRef);
+    if (snapshot.exists()) {
+      sessionData.finalSteps = snapshot.val().steps || 0;
+    }
+
+    // 3. Opslaan in het archief
+    const historyRef = ref(db, 'session_history');
+    await push(historyRef, sessionData);
+
+    // 4. Optioneel: de live sessie opschonen
+    update(liveRef, { isRecording: false, steps: 0 });
+    
+    alert("Sessie opgeslagen in historiek!");
+    setHistory([]); // Reset lokale grafiek voor volgende ronde
+  }
+};
 
   // --- STYLING (Hetzelfde als de gewenste versie) ---
   const styles = {
