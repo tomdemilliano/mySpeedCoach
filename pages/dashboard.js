@@ -8,34 +8,42 @@ export default function Dashboard() {
   const [sessions, setSessions] = useState({});
   const [history, setHistory] = useState({});
   const [viewTime, setViewTime] = useState(60);
+  const [lastSteps, setLastSteps] = useState({}); // Om het verschil in stappen te onthouden
 
   useEffect(() => {
     const sessionsRef = ref(db, 'live_sessions/');
     
-    // Luister live naar alle data in de database
     return onValue(sessionsRef, (snapshot) => {
       const data = snapshot.val() || {};
       setSessions(data);
 
-      // Werk de grafiek-geschiedenis bij voor elke skipper
       setHistory(prevHistory => {
         const newHistory = { ...prevHistory };
         const now = new Date().toLocaleTimeString();
 
         Object.keys(data).forEach(name => {
           if (data[name].isRecording) {
+            // Tempo berekening: (Huidige stappen - Vorige stappen) * 30
+            const currentTotalSteps = data[name].steps || 0;
+            const previousTotalSteps = lastSteps[name] || 0;
+            const stepsThisSecond = currentTotalSteps - previousTotalSteps;
+            const currentTempo = stepsThisSecond * 30;
+
             const skipperPoints = newHistory[name] || [];
-            // Voeg nieuw punt toe en behoud buffer
             newHistory[name] = [...skipperPoints, { 
               time: now, 
-              bpm: data[name].bpm || 0 
+              bpm: data[name].bpm || 0,
+              tempo: currentTempo
             }].slice(-300);
+
+            // Update de referentie voor de volgende seconde
+            setLastSteps(prev => ({ ...prev, [name]: currentTotalSteps }));
           }
         });
         return newHistory;
       });
     });
-  }, []);
+  }, [lastSteps]); // Afhankelijkheid van lastSteps voor correcte berekening
 
   const styles = {
     container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '20px' },
@@ -50,7 +58,6 @@ export default function Dashboard() {
 
   return (
     <div style={styles.container}>
-      {/* Header sectie */}
       <div style={styles.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
           <div style={{ backgroundColor: '#ef4444', padding: '8px', borderRadius: '10px' }}>
@@ -79,28 +86,26 @@ export default function Dashboard() {
         <div style={styles.noData}>
           <Users size={64} style={{ marginBottom: '20px', opacity: 0.2 }} />
           <h2>Wachten op actieve skippers...</h2>
-          <p>Zodra een skipper "Start Recording" drukt, verschijnt de data hier.</p>
+          <p>Zodra een skipper "Start Recording" drukt op Toestel A, verschijnt de data hier.</p>
         </div>
       ) : (
         <div style={styles.grid}>
           {activeSessions.map((skipper) => (
             <div key={skipper.name} style={styles.card}>
-              {/* Naam en Status */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h2 style={{ margin: 0, fontSize: '26px', fontWeight: '900', color: '#f8fafc' }}>{skipper.name}</h2>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#22c55e' }}>
-                  <div style={{ width: '8px', height: '8px', backgroundColor: '#22c55e', borderRadius: '50%', animation: 'pulse 2s infinite' }}></div>
+                  <div style={{ width: '8px', height: '8px', backgroundColor: '#22c55e', borderRadius: '50%', opacity: 0.8 }}></div>
                   LIVE VERBINDING
                 </div>
               </div>
 
-              {/* Hoofdstatistieken: Hartslag & Steps */}
               <div style={{ display: 'flex', gap: '15px', marginBottom: '25px' }}>
                 <div style={styles.statBox}>
                   <div style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>HARTSLAG</div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
                     <span style={{ fontSize: '48px', fontWeight: '900', color: '#ef4444' }}>{skipper.bpm || 0}</span>
-                    <span style={{ color: '#ef4444', fontWeight: 'bold' }}>BPM</span>
+                    <span style={{ color: '#ef4444', fontWeight: 'bold', fontSize: '14px' }}>BPM</span>
                   </div>
                   <Heart fill="#ef4444" stroke="none" size={16} />
                 </div>
@@ -109,34 +114,39 @@ export default function Dashboard() {
                   <div style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>SPEEDSTEPS</div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
                     <span style={{ fontSize: '48px', fontWeight: '900', color: '#22c55e' }}>{skipper.steps || 0}</span>
-                    <span style={{ color: '#22c55e', fontWeight: 'bold' }}>STPS</span>
+                    <span style={{ color: '#22c55e', fontWeight: 'bold', fontSize: '14px' }}>STPS</span>
                   </div>
                   <TrendingUp color="#22c55e" size={16} />
                 </div>
               </div>
 
-              {/* Grafiek-sectie */}
-              <div style={{ height: '220px', backgroundColor: '#0f172a', padding: '15px', borderRadius: '12px' }}>
-                <ResponsiveContainer width="100%" height="100%">
+              <div style={{ height: '250px', backgroundColor: '#0f172a', padding: '15px', borderRadius: '12px' }}>
+                <div style={{ display: 'flex', gap: '20px', marginBottom: '10px', fontSize: '10px', fontWeight: 'bold' }}>
+                  <span style={{ color: '#ef4444' }}>● HARTSLAG (BPM)</span>
+                  <span style={{ color: '#60a5fa' }}>● TEMPO (STEPS/30S)</span>
+                </div>
+                <ResponsiveContainer width="100%" height="90%">
                   <LineChart data={(history[skipper.name] || []).slice(-viewTime)} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-                    <CartesianGrid stroke="#1e293b" vertical={false} />
+                    <CartesianGrid stroke="#1e293b" vertical={false} strokeDasharray="3 3" />
                     <XAxis dataKey="time" hide />
-                    <YAxis 
-                      domain={['dataMin - 10', 'dataMax + 10']} 
-                      stroke="#475569" 
-                      fontSize={10} 
-                      tickLine={false} 
-                      axisLine={false} 
-                    />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '12px' }}
-                      itemStyle={{ color: '#ef4444' }}
-                    />
+                    <YAxis yAxisId="left" domain={['dataMin - 10', 'dataMax + 10']} stroke="#ef4444" fontSize={10} tickLine={false} axisLine={false} />
+                    <YAxis yAxisId="right" orientation="right" domain={[0, 120]} stroke="#60a5fa" fontSize={10} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', fontSize: '12px', color: 'white' }} />
                     <Line 
+                      yAxisId="left"
                       type="monotone" 
                       dataKey="bpm" 
                       stroke="#ef4444" 
                       strokeWidth={4} 
+                      dot={false} 
+                      isAnimationActive={false} 
+                    />
+                    <Line 
+                      yAxisId="right"
+                      type="stepAfter" 
+                      dataKey="tempo" 
+                      stroke="#60a5fa" 
+                      strokeWidth={3} 
                       dot={false} 
                       isAnimationActive={false} 
                     />
