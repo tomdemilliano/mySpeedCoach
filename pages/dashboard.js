@@ -8,7 +8,7 @@ export default function Dashboard() {
   const [sessions, setSessions] = useState({});
   const [history, setHistory] = useState({});
   const [viewTime, setViewTime] = useState(60);
-  const [lastSteps, setLastSteps] = useState({}); 
+  const [stepsBuffer, setStepsBuffer] = useState({}); // Buffer voor stabiele tempo-berekening
 
   useEffect(() => {
     const sessionsRef = ref(db, 'live_sessions/');
@@ -24,28 +24,42 @@ export default function Dashboard() {
         Object.keys(data).forEach(name => {
           if (data[name].isRecording) {
             const currentTotalSteps = data[name].steps || 0;
-            const previousTotalSteps = lastSteps[name] || 0;
-            const stepsThisSecond = currentTotalSteps - previousTotalSteps;
             
-            // Tempo berekening: steps in laatste seconde * 30
-            // We zorgen dat het tempo nooit negatief is (bijv. bij reset)
-            const currentTempo = Math.max(0, stepsThisSecond * 30);
+            // 1. Haal de buffer op voor deze skipper en voeg nieuwe meting toe
+            const skipperBuffer = stepsBuffer[name] || [];
+            const updatedBuffer = [...skipperBuffer, { t: Date.now(), s: currentTotalSteps }].slice(-4);
+            
+            // 2. Bereken het gemiddelde tempo over de buffer (ca. 3 seconden)
+            let calculatedTempo = 0;
+            if (updatedBuffer.length >= 2) {
+              const first = updatedBuffer[0];
+              const last = updatedBuffer[updatedBuffer.length - 1];
+              
+              const timeDiffSeconds = (last.t - first.t) / 1000;
+              const stepDiff = last.s - first.s;
+              
+              if (timeDiffSeconds > 0) {
+                // (delta stappen / delta tijd) * 30 seconden
+                calculatedTempo = Math.round((stepDiff / timeDiffSeconds) * 30);
+              }
+            }
 
+            // 3. Voeg punt toe aan de grafiek-geschiedenis
             const skipperPoints = newHistory[name] || [];
             newHistory[name] = [...skipperPoints, { 
               time: now, 
               bpm: data[name].bpm || 0,
-              tempo: currentTempo
+              tempo: calculatedTempo 
             }].slice(-300);
 
-            // Update de referentie voor de volgende seconde
-            setLastSteps(prev => ({ ...prev, [name]: currentTotalSteps }));
+            // 4. Werk de buffer bij in de state voor de volgende seconde
+            setStepsBuffer(prev => ({ ...prev, [name]: updatedBuffer }));
           }
         });
         return newHistory;
       });
     });
-  }, [lastSteps]);
+  }, [stepsBuffer]); 
 
   const styles = {
     container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '20px' },
@@ -93,7 +107,6 @@ export default function Dashboard() {
       ) : (
         <div style={styles.grid}>
           {activeSessions.map((skipper) => {
-            // Haal het meest recente tempo op uit de history voor de display
             const skipperHistory = history[skipper.name] || [];
             const currentTempo = skipperHistory.length > 0 ? skipperHistory[skipperHistory.length - 1].tempo : 0;
 
@@ -107,7 +120,6 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Drie Statistiekenboxen: Hartslag, Totaal Steps, Actueel Tempo */}
                 <div style={{ display: 'flex', gap: '10px', marginBottom: '25px' }}>
                   <div style={styles.statBox}>
                     <div style={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold', marginBottom: '5px' }}>HARTSLAG</div>
@@ -159,7 +171,7 @@ export default function Dashboard() {
                       />
                       <Line 
                         yAxisId="right"
-                        type="stepAfter" 
+                        type="monotone" 
                         dataKey="tempo" 
                         stroke="#60a5fa" 
                         strokeWidth={3} 
