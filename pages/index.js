@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebaseConfig';
-import { ref, set, get } from "firebase/database";
+import { ref, set, get, update } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Heart, Activity, Bluetooth, Play, Square, Save } from 'lucide-react';
 
@@ -26,7 +26,9 @@ export default function HeartRateApp() {
   // 2. Synchronisatie naar Firebase (alleen bij recording)
   useEffect(() => {
     if (isConnected && isRecording && heartRate > 0 && skipperName) {
-      set(ref(db, 'live_sessions/' + skipperName), {
+      const sessionRef = ref(db, 'live_sessions/' + skipperName);
+      
+      update(sessionRef, {
         name: skipperName,
         bpm: heartRate,
         isRecording: isRecording,
