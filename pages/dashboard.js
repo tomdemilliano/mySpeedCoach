@@ -2,18 +2,18 @@ import { useState, useEffect, useRef } from 'react';
 import { db } from '../firebaseConfig';
 import { ref, onValue } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, Heart, Users, Hash, Zap } from 'lucide-react';
+import { Activity, Heart, Users, Hash, Zap, Timer, TrendingUp } from 'lucide-react';
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState({});
   const [history, setHistory] = useState({});
   const [viewTime, setViewTime] = useState(60);
+  const [elapsedTimes, setElapsedTimes] = useState({}); // Voor de live secondeteller
   
-  // Refs gebruiken we voor waarden die we nodig hebben in de berekening zonder re-renders te triggeren
   const lastStepsRef = useRef({});
   const currentSessionsRef = useRef({});
 
-  // 1. Luister continu naar de database en update de 'current' ref
+  // 1. Luister live naar de database updates
   useEffect(() => {
     const sessionsRef = ref(db, 'live_sessions/');
     return onValue(sessionsRef, (snapshot) => {
@@ -23,39 +23,51 @@ export default function Dashboard() {
     });
   }, []);
 
-  // 2. De "Klok": Elke seconde berekenen we het tempo op basis van het verschil
+  // 2. De Centrale Klok: Elke seconde tempo berekenen + timer bijwerken
   useEffect(() => {
     const interval = setInterval(() => {
       const data = currentSessionsRef.current;
-      const now = new Date().toLocaleTimeString();
+      const now = new Date();
+      const nowString = now.toLocaleTimeString();
+      const newElapsedTimes = {};
 
       setHistory(prevHistory => {
         const newHistory = { ...prevHistory };
 
         Object.keys(data).forEach(name => {
           if (data[name].isRecording) {
+            // --- A. Chronometer Logica ---
+            if (data[name].startTime) {
+              const diffInSecs = Math.floor((Date.now() - data[name].startTime) / 1000);
+              const mins = Math.floor(diffInSecs / 60);
+              const secs = diffInSecs % 60;
+              newElapsedTimes[name] = `${mins}:${secs.toString().padStart(2, '0')}`;
+            } else {
+              newElapsedTimes[name] = "0:00";
+            }
+
+            // --- B. Tempo Logica (Stabiele 1s meting) ---
             const currentTotalSteps = data[name].steps || 0;
             const previousTotalSteps = lastStepsRef.current[name] || 0;
-            
-            // Berekening: verschil in stappen in de afgelopen seconde * 30
-            // Omdat we exact elke 1000ms draaien, is timeDiff altijd 1s.
             const stepsThisSecond = Math.max(0, currentTotalSteps - previousTotalSteps);
             const calculatedTempo = stepsThisSecond * 30;
 
             const skipperPoints = newHistory[name] || [];
             newHistory[name] = [...skipperPoints, { 
-              time: now, 
+              time: nowString, 
               bpm: data[name].bpm || 0,
               tempo: calculatedTempo 
             }].slice(-300);
 
-            // Update de referentie voor de volgende seconde
+            // Update referentie voor de volgende seconde
             lastStepsRef.current[name] = currentTotalSteps;
           }
         });
         return newHistory;
       });
-    }, 1000); // Exact elke seconde
+      
+      setElapsedTimes(newElapsedTimes);
+    }, 1000);
 
     return () => clearInterval(interval);
   }, []);
@@ -64,8 +76,9 @@ export default function Dashboard() {
     container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '20px' },
     header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: '1200px', margin: '0 auto 30px', borderBottom: '1px solid #334155', paddingBottom: '15px' },
     grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))', gap: '30px', maxWidth: '1200px', margin: '0 auto' },
-    card: { backgroundColor: '#1e293b', padding: '25px', borderRadius: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.5)', border: '1px solid #334155' },
+    card: { backgroundColor: '#1e293b', padding: '25px', borderRadius: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.5)', border: '1px solid #334155', position: 'relative' },
     statBox: { backgroundColor: '#0f172a', padding: '15px', borderRadius: '12px', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', border: '1px solid #1e293b' },
+    timerBadge: { display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#334155', padding: '6px 16px', borderRadius: '12px', fontSize: '20px', fontWeight: 'bold', color: '#60a5fa', fontFamily: 'monospace', border: '1px solid #475569' },
     noData: { textAlign: 'center', marginTop: '150px', color: '#64748b' }
   };
 
@@ -101,7 +114,7 @@ export default function Dashboard() {
         <div style={styles.noData}>
           <Users size={64} style={{ marginBottom: '20px', opacity: 0.2 }} />
           <h2>Wachten op actieve skippers...</h2>
-          <p>Zodra een skipper "Start Recording" drukt op Toestel A, verschijnt de data hier.</p>
+          <p>Start de opname op Toestel A om de monitoring te starten.</p>
         </div>
       ) : (
         <div style={styles.grid}>
@@ -111,14 +124,16 @@ export default function Dashboard() {
 
             return (
               <div key={skipper.name} style={styles.card}>
+                {/* Naam en Timer Header */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                   <h2 style={{ margin: 0, fontSize: '26px', fontWeight: '900', color: '#f8fafc' }}>{skipper.name}</h2>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#22c55e' }}>
-                    <div style={{ width: '8px', height: '8px', backgroundColor: '#22c55e', borderRadius: '50%' }}></div>
-                    LIVE
+                  <div style={styles.timerBadge}>
+                    <Timer size={20} />
+                    {elapsedTimes[skipper.name] || "0:00"}
                   </div>
                 </div>
 
+                {/* Hoofdstatistieken: Hartslag, Totaal Steps, Actueel Tempo */}
                 <div style={{ display: 'flex', gap: '10px', marginBottom: '25px' }}>
                   <div style={styles.statBox}>
                     <div style={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold', marginBottom: '5px' }}>HARTSLAG</div>
@@ -147,10 +162,11 @@ export default function Dashboard() {
                   </div>
                 </div>
 
+                {/* Grafiek-sectie */}
                 <div style={{ height: '250px', backgroundColor: '#0f172a', padding: '15px', borderRadius: '12px' }}>
                   <div style={{ display: 'flex', gap: '20px', marginBottom: '10px', fontSize: '10px', fontWeight: 'bold' }}>
-                    <span style={{ color: '#ef4444' }}>● HARTSLAG</span>
-                    <span style={{ color: '#60a5fa' }}>● TEMPO (/30S)</span>
+                    <span style={{ color: '#ef4444' }}>● HARTSLAG (BPM)</span>
+                    <span style={{ color: '#60a5fa' }}>● TEMPO (STEPS/30S)</span>
                   </div>
                   <ResponsiveContainer width="100%" height="90%">
                     <LineChart data={skipperHistory.slice(-viewTime)} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
