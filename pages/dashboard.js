@@ -2,13 +2,13 @@ import { useState, useEffect } from 'react';
 import { db } from '../firebaseConfig';
 import { ref, onValue } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, Heart, Users, Hash, TrendingUp } from 'lucide-react';
+import { Activity, Heart, Users, Hash, TrendingUp, Zap } from 'lucide-react';
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState({});
   const [history, setHistory] = useState({});
   const [viewTime, setViewTime] = useState(60);
-  const [lastSteps, setLastSteps] = useState({}); // Om het verschil in stappen te onthouden
+  const [lastSteps, setLastSteps] = useState({}); 
 
   useEffect(() => {
     const sessionsRef = ref(db, 'live_sessions/');
@@ -23,11 +23,13 @@ export default function Dashboard() {
 
         Object.keys(data).forEach(name => {
           if (data[name].isRecording) {
-            // Tempo berekening: (Huidige stappen - Vorige stappen) * 30
             const currentTotalSteps = data[name].steps || 0;
             const previousTotalSteps = lastSteps[name] || 0;
             const stepsThisSecond = currentTotalSteps - previousTotalSteps;
-            const currentTempo = stepsThisSecond * 30;
+            
+            // Tempo berekening: steps in laatste seconde * 30
+            // We zorgen dat het tempo nooit negatief is (bijv. bij reset)
+            const currentTempo = Math.max(0, stepsThisSecond * 30);
 
             const skipperPoints = newHistory[name] || [];
             newHistory[name] = [...skipperPoints, { 
@@ -43,14 +45,14 @@ export default function Dashboard() {
         return newHistory;
       });
     });
-  }, [lastSteps]); // Afhankelijkheid van lastSteps voor correcte berekening
+  }, [lastSteps]);
 
   const styles = {
     container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '20px' },
     header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: '1200px', margin: '0 auto 30px', borderBottom: '1px solid #334155', paddingBottom: '15px' },
     grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))', gap: '30px', maxWidth: '1200px', margin: '0 auto' },
     card: { backgroundColor: '#1e293b', padding: '25px', borderRadius: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.5)', border: '1px solid #334155' },
-    statBox: { backgroundColor: '#0f172a', padding: '15px', borderRadius: '12px', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' },
+    statBox: { backgroundColor: '#0f172a', padding: '15px', borderRadius: '12px', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', border: '1px solid #1e293b' },
     noData: { textAlign: 'center', marginTop: '150px', color: '#64748b' }
   };
 
@@ -86,75 +88,90 @@ export default function Dashboard() {
         <div style={styles.noData}>
           <Users size={64} style={{ marginBottom: '20px', opacity: 0.2 }} />
           <h2>Wachten op actieve skippers...</h2>
-          <p>Zodra een skipper "Start Recording" drukt op Toestel A, verschijnt de data hier.</p>
+          <p>Start de opname op Toestel A en begin te tellen op Toestel C.</p>
         </div>
       ) : (
         <div style={styles.grid}>
-          {activeSessions.map((skipper) => (
-            <div key={skipper.name} style={styles.card}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h2 style={{ margin: 0, fontSize: '26px', fontWeight: '900', color: '#f8fafc' }}>{skipper.name}</h2>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#22c55e' }}>
-                  <div style={{ width: '8px', height: '8px', backgroundColor: '#22c55e', borderRadius: '50%', opacity: 0.8 }}></div>
-                  LIVE VERBINDING
-                </div>
-              </div>
+          {activeSessions.map((skipper) => {
+            // Haal het meest recente tempo op uit de history voor de display
+            const skipperHistory = history[skipper.name] || [];
+            const currentTempo = skipperHistory.length > 0 ? skipperHistory[skipperHistory.length - 1].tempo : 0;
 
-              <div style={{ display: 'flex', gap: '15px', marginBottom: '25px' }}>
-                <div style={styles.statBox}>
-                  <div style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>HARTSLAG</div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
-                    <span style={{ fontSize: '48px', fontWeight: '900', color: '#ef4444' }}>{skipper.bpm || 0}</span>
-                    <span style={{ color: '#ef4444', fontWeight: 'bold', fontSize: '14px' }}>BPM</span>
+            return (
+              <div key={skipper.name} style={styles.card}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <h2 style={{ margin: 0, fontSize: '26px', fontWeight: '900', color: '#f8fafc' }}>{skipper.name}</h2>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#22c55e' }}>
+                    <div style={{ width: '8px', height: '8px', backgroundColor: '#22c55e', borderRadius: '50%' }}></div>
+                    LIVE
                   </div>
-                  <Heart fill="#ef4444" stroke="none" size={16} />
                 </div>
 
-                <div style={{ ...styles.statBox, border: '1px solid #22c55e44' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>SPEEDSTEPS</div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
-                    <span style={{ fontSize: '48px', fontWeight: '900', color: '#22c55e' }}>{skipper.steps || 0}</span>
-                    <span style={{ color: '#22c55e', fontWeight: 'bold', fontSize: '14px' }}>STPS</span>
+                {/* Drie Statistiekenboxen: Hartslag, Totaal Steps, Actueel Tempo */}
+                <div style={{ display: 'flex', gap: '10px', marginBottom: '25px' }}>
+                  <div style={styles.statBox}>
+                    <div style={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold', marginBottom: '5px' }}>HARTSLAG</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
+                      <span style={{ fontSize: '32px', fontWeight: '900', color: '#ef4444' }}>{skipper.bpm || 0}</span>
+                      <span style={{ color: '#ef4444', fontWeight: 'bold', fontSize: '12px' }}>BPM</span>
+                    </div>
+                    <Heart fill="#ef4444" stroke="none" size={14} />
                   </div>
-                  <TrendingUp color="#22c55e" size={16} />
-                </div>
-              </div>
 
-              <div style={{ height: '250px', backgroundColor: '#0f172a', padding: '15px', borderRadius: '12px' }}>
-                <div style={{ display: 'flex', gap: '20px', marginBottom: '10px', fontSize: '10px', fontWeight: 'bold' }}>
-                  <span style={{ color: '#ef4444' }}>● HARTSLAG (BPM)</span>
-                  <span style={{ color: '#60a5fa' }}>● TEMPO (STEPS/30S)</span>
+                  <div style={{ ...styles.statBox, border: '1px solid #22c55e44' }}>
+                    <div style={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold', marginBottom: '5px' }}>TOTAAL</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
+                      <span style={{ fontSize: '32px', fontWeight: '900', color: '#22c55e' }}>{skipper.steps || 0}</span>
+                      <span style={{ color: '#22c55e', fontWeight: 'bold', fontSize: '12px' }}>STPS</span>
+                    </div>
+                    <Hash color="#22c55e" size={14} />
+                  </div>
+
+                  <div style={{ ...styles.statBox, border: '1px solid #60a5fa44', backgroundColor: '#0f172a' }}>
+                    <div style={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold', marginBottom: '5px' }}>TEMPO (/30S)</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
+                      <span style={{ fontSize: '32px', fontWeight: '900', color: '#60a5fa' }}>{currentTempo}</span>
+                    </div>
+                    <Zap fill="#60a5fa" stroke="none" size={14} />
+                  </div>
                 </div>
-                <ResponsiveContainer width="100%" height="90%">
-                  <LineChart data={(history[skipper.name] || []).slice(-viewTime)} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-                    <CartesianGrid stroke="#1e293b" vertical={false} strokeDasharray="3 3" />
-                    <XAxis dataKey="time" hide />
-                    <YAxis yAxisId="left" domain={['dataMin - 10', 'dataMax + 10']} stroke="#ef4444" fontSize={10} tickLine={false} axisLine={false} />
-                    <YAxis yAxisId="right" orientation="right" domain={[0, 120]} stroke="#60a5fa" fontSize={10} tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', fontSize: '12px', color: 'white' }} />
-                    <Line 
-                      yAxisId="left"
-                      type="monotone" 
-                      dataKey="bpm" 
-                      stroke="#ef4444" 
-                      strokeWidth={4} 
-                      dot={false} 
-                      isAnimationActive={false} 
-                    />
-                    <Line 
-                      yAxisId="right"
-                      type="stepAfter" 
-                      dataKey="tempo" 
-                      stroke="#60a5fa" 
-                      strokeWidth={3} 
-                      dot={false} 
-                      isAnimationActive={false} 
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+
+                <div style={{ height: '250px', backgroundColor: '#0f172a', padding: '15px', borderRadius: '12px' }}>
+                  <div style={{ display: 'flex', gap: '20px', marginBottom: '10px', fontSize: '10px', fontWeight: 'bold' }}>
+                    <span style={{ color: '#ef4444' }}>● HARTSLAG</span>
+                    <span style={{ color: '#60a5fa' }}>● TEMPO (/30S)</span>
+                  </div>
+                  <ResponsiveContainer width="100%" height="90%">
+                    <LineChart data={skipperHistory.slice(-viewTime)} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                      <CartesianGrid stroke="#1e293b" vertical={false} strokeDasharray="3 3" />
+                      <XAxis dataKey="time" hide />
+                      <YAxis yAxisId="left" domain={['dataMin - 10', 'dataMax + 10']} stroke="#ef4444" fontSize={10} tickLine={false} axisLine={false} />
+                      <YAxis yAxisId="right" orientation="right" domain={[0, 120]} stroke="#60a5fa" fontSize={10} tickLine={false} axisLine={false} />
+                      <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', fontSize: '12px' }} />
+                      <Line 
+                        yAxisId="left"
+                        type="monotone" 
+                        dataKey="bpm" 
+                        stroke="#ef4444" 
+                        strokeWidth={4} 
+                        dot={false} 
+                        isAnimationActive={false} 
+                      />
+                      <Line 
+                        yAxisId="right"
+                        type="stepAfter" 
+                        dataKey="tempo" 
+                        stroke="#60a5fa" 
+                        strokeWidth={3} 
+                        dot={false} 
+                        isAnimationActive={false} 
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
