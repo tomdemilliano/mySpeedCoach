@@ -128,17 +128,48 @@ export default function HeartRateApp() {
             </div>
           </div>
 
-          <div style={{ ...styles.card, height: '250px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={filteredData}>
-                <CartesianGrid stroke="#334155" vertical={false} />
-                <XAxis dataKey="time" hide />
-                <YAxis domain={['dataMin - 10', 'dataMax + 10']} hide />
-                <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', color: 'white' }} />
-                <Line type="monotone" dataKey="bpm" stroke="#ef4444" strokeWidth={4} dot={false} isAnimationActive={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+<div style={{ ...styles.card, height: '300px' }}>
+  <ResponsiveContainer width="100%" height="100%">
+    <LineChart data={filteredData} margin={{ top: 5, right: 20, left: 0, bottom: 20 }}>
+      <CartesianGrid stroke="#334155" vertical={false} strokeDasharray="3 3" />
+      
+      {/* X-as: Tijd */}
+      <XAxis 
+        dataKey="time" 
+        stroke="#94a3b8" 
+        fontSize={12}
+        tickLine={false}
+        axisLine={false}
+        label={{ value: 'Tijd', position: 'insideBottom', offset: -10, fill: '#94a3b8', fontSize: 12, fontWeight: 'bold' }}
+      />
+      
+      {/* Y-as: Hartslag (BPM) */}
+      <YAxis 
+        stroke="#94a3b8" 
+        fontSize={12}
+        tickLine={false}
+        axisLine={false}
+        domain={['dataMin - 10', 'dataMax + 10']}
+        label={{ value: 'BPM', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 12, fontWeight: 'bold' }}
+      />
+      
+      <Tooltip 
+        contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: 'white' }}
+        itemStyle={{ color: '#ef4444' }}
+      />
+      
+      <Line 
+        type="monotone" 
+        dataKey="bpm" 
+        stroke="#ef4444" 
+        strokeWidth={4} 
+        dot={false} 
+        isAnimationActive={false} 
+        name="Hartslag"
+      />
+    </LineChart>
+  </ResponsiveContainer>
+</div>
         </div>
       </div>
     </div>
