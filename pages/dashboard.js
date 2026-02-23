@@ -1,50 +1,47 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { db } from '../firebaseConfig';
 import { ref, onValue } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, Heart, Users, Hash, TrendingUp, Zap } from 'lucide-react';
+import { Activity, Heart, Users, Hash, Zap } from 'lucide-react';
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState({});
   const [history, setHistory] = useState({});
   const [viewTime, setViewTime] = useState(60);
-  const [stepsBuffer, setStepsBuffer] = useState({}); // Buffer voor stabiele tempo-berekening
+  
+  // Refs gebruiken we voor waarden die we nodig hebben in de berekening zonder re-renders te triggeren
+  const lastStepsRef = useRef({});
+  const currentSessionsRef = useRef({});
 
+  // 1. Luister continu naar de database en update de 'current' ref
   useEffect(() => {
     const sessionsRef = ref(db, 'live_sessions/');
-    
     return onValue(sessionsRef, (snapshot) => {
       const data = snapshot.val() || {};
       setSessions(data);
+      currentSessionsRef.current = data;
+    });
+  }, []);
+
+  // 2. De "Klok": Elke seconde berekenen we het tempo op basis van het verschil
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const data = currentSessionsRef.current;
+      const now = new Date().toLocaleTimeString();
 
       setHistory(prevHistory => {
         const newHistory = { ...prevHistory };
-        const now = new Date().toLocaleTimeString();
 
         Object.keys(data).forEach(name => {
           if (data[name].isRecording) {
             const currentTotalSteps = data[name].steps || 0;
+            const previousTotalSteps = lastStepsRef.current[name] || 0;
             
-            // 1. Haal de buffer op voor deze skipper en voeg nieuwe meting toe
-            const skipperBuffer = stepsBuffer[name] || [];
-            const updatedBuffer = [...skipperBuffer, { t: Date.now(), s: currentTotalSteps }].slice(-4);
-            
-            // 2. Bereken het gemiddelde tempo over de buffer (ca. 3 seconden)
-            let calculatedTempo = 0;
-            if (updatedBuffer.length >= 2) {
-              const first = updatedBuffer[0];
-              const last = updatedBuffer[updatedBuffer.length - 1];
-              
-              const timeDiffSeconds = (last.t - first.t) / 1000;
-              const stepDiff = last.s - first.s;
-              
-              if (timeDiffSeconds > 0) {
-                // (delta stappen / delta tijd) * 30 seconden
-                calculatedTempo = Math.round((stepDiff / timeDiffSeconds) * 30);
-              }
-            }
+            // Berekening: verschil in stappen in de afgelopen seconde * 30
+            // Omdat we exact elke 1000ms draaien, is timeDiff altijd 1s.
+            const stepsThisSecond = Math.max(0, currentTotalSteps - previousTotalSteps);
+            const calculatedTempo = stepsThisSecond * 30;
 
-            // 3. Voeg punt toe aan de grafiek-geschiedenis
             const skipperPoints = newHistory[name] || [];
             newHistory[name] = [...skipperPoints, { 
               time: now, 
@@ -52,14 +49,16 @@ export default function Dashboard() {
               tempo: calculatedTempo 
             }].slice(-300);
 
-            // 4. Werk de buffer bij in de state voor de volgende seconde
-            setStepsBuffer(prev => ({ ...prev, [name]: updatedBuffer }));
+            // Update de referentie voor de volgende seconde
+            lastStepsRef.current[name] = currentTotalSteps;
           }
         });
         return newHistory;
       });
-    });
-  }, [stepsBuffer]); 
+    }, 1000); // Exact elke seconde
+
+    return () => clearInterval(interval);
+  }, []);
 
   const styles = {
     container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '20px' },
@@ -102,7 +101,7 @@ export default function Dashboard() {
         <div style={styles.noData}>
           <Users size={64} style={{ marginBottom: '20px', opacity: 0.2 }} />
           <h2>Wachten op actieve skippers...</h2>
-          <p>Start de opname op Toestel A en begin te tellen op Toestel C.</p>
+          <p>Zodra een skipper "Start Recording" drukt op Toestel A, verschijnt de data hier.</p>
         </div>
       ) : (
         <div style={styles.grid}>
