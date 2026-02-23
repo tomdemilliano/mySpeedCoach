@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { db } from '../firebaseConfig';
 import { ref, onValue } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, Heart, Users, Hash, Zap } from 'lucide-react';
+import { Activity, Heart, Users, Hash, Zap, Timer } from 'lucide-react';
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState({});
@@ -27,7 +27,7 @@ export default function Dashboard() {
   useEffect(() => {
     const interval = setInterval(() => {
       const data = currentSessionsRef.current;
-      const now = new Date().toLocaleTimeString();
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
       setHistory(prevHistory => {
         const newHistory = { ...prevHistory };
@@ -35,147 +35,172 @@ export default function Dashboard() {
         Object.keys(data).forEach(name => {
           if (data[name].isRecording) {
             const currentTotalSteps = data[name].steps || 0;
-            const previousTotalSteps = lastStepsRef.current[name] || 0;
+            const lastSteps = lastStepsRef.current[name] || 0;
+            const stepsThisSecond = currentTotalSteps - lastSteps;
             
-            // Berekening: verschil in stappen in de afgelopen seconde * 30
-            // Omdat we exact elke 1000ms draaien, is timeDiff altijd 1s.
-            const stepsThisSecond = Math.max(0, currentTotalSteps - previousTotalSteps);
-            const calculatedTempo = stepsThisSecond * 30;
+            // Tempo is stappen per minuut (gebaseerd op deze seconde)
+            const tempo = stepsThisSecond * 60; 
 
-            const skipperPoints = newHistory[name] || [];
-            newHistory[name] = [...skipperPoints, { 
-              time: now, 
+            if (!newHistory[name]) newHistory[name] = [];
+            
+            // Voeg nieuw datapunt toe
+            newHistory[name] = [...newHistory[name], {
+              time: now,
               bpm: data[name].bpm || 0,
-              tempo: calculatedTempo 
-            }].slice(-300);
+              steps: currentTotalSteps,
+              tempo: tempo
+            }].slice(-200); // Houd laatste 200 seconden bij
 
             // Update de referentie voor de volgende seconde
             lastStepsRef.current[name] = currentTotalSteps;
           }
         });
+
         return newHistory;
       });
-    }, 1000); // Exact elke seconde
+    }, 1000);
 
     return () => clearInterval(interval);
   }, []);
 
   const styles = {
-    container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '20px' },
-    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: '1200px', margin: '0 auto 30px', borderBottom: '1px solid #334155', paddingBottom: '15px' },
-    grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))', gap: '30px', maxWidth: '1200px', margin: '0 auto' },
-    card: { backgroundColor: '#1e293b', padding: '25px', borderRadius: '20px', boxShadow: '0 10px 25px rgba(0,0,0,0.5)', border: '1px solid #334155' },
-    statBox: { backgroundColor: '#0f172a', padding: '15px', borderRadius: '12px', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', border: '1px solid #1e293b' },
-    noData: { textAlign: 'center', marginTop: '150px', color: '#64748b' }
+    container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', padding: '20px', fontFamily: 'sans-serif' },
+    grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px' },
+    card: { backgroundColor: '#1e293b', borderRadius: '15px', padding: '20px', border: '1px solid #334155', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' },
+    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
+    statsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '10px', marginBottom: '20px' },
+    statBox: { backgroundColor: '#0f172a', padding: '10px', borderRadius: '10px', textAlign: 'center', border: '1px solid #1e293b' },
+    label: { color: '#94a3b8', fontSize: '10px', fontWeight: 'bold', marginBottom: '5px', textTransform: 'uppercase', letterSpacing: '0.05em' },
+    value: { fontSize: '20px', fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }
   };
 
-  const activeSessions = Object.values(sessions).filter(s => s.isRecording);
+  // Helper voor weergave onderdeel
+  const formatSessionType = (type) => {
+    if (!type) return "---";
+    if (type === 30) return "30s";
+    return (type / 60) + "m";
+  };
 
   return (
     <div style={styles.container}>
-      <div style={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <div style={{ backgroundColor: '#ef4444', padding: '8px', borderRadius: '10px' }}>
+      {/* Top Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom: '1px solid #1e293b', paddingBottom: '20px' }}>
+        <h1 style={{ margin: 0, fontSize: '24px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ backgroundColor: '#ef4444', padding: '8px', borderRadius: '8px' }}>
             <Activity color="white" size={24} />
           </div>
-          <h1 style={{ fontSize: '24px', fontWeight: '900', margin: 0, letterSpacing: '-0.5px' }}>LIVE COMPETITION MONITOR</h1>
-        </div>
+          SPEED MONITORING <span style={{ color: '#ef4444', fontWeight: '400' }}>LIVE</span>
+        </h1>
         
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <select 
-            style={{ backgroundColor: '#1e293b', border: '1px solid #334155', color: 'white', padding: '8px 15px', borderRadius: '10px', fontSize: '14px' }}
-            value={viewTime}
-            onChange={(e) => setViewTime(parseInt(e.target.value))}
-          >
-            <option value={30}>30 sec focus</option>
-            <option value={60}>1 minuut overzicht</option>
-            <option value={180}>3 minuten overzicht</option>
-          </select>
-          <div style={{ backgroundColor: '#22c55e22', border: '1px solid #22c55e', color: '#22c55e', padding: '8px 20px', borderRadius: '25px', fontSize: '14px', fontWeight: 'bold' }}>
-             {activeSessions.length} SKIPPERS LIVE
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>ACTIEVE SKIPPERS</div>
+            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#22c55e' }}>
+              {Object.keys(sessions).filter(k => sessions[k].isRecording).length}
+            </div>
           </div>
         </div>
       </div>
 
-      {activeSessions.length === 0 ? (
-        <div style={styles.noData}>
-          <Users size={64} style={{ marginBottom: '20px', opacity: 0.2 }} />
-          <h2>Wachten op actieve skippers...</h2>
-          <p>Zodra een skipper "Start Recording" drukt op Toestel A, verschijnt de data hier.</p>
+      {Object.keys(sessions).length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '100px', color: '#475569', fontSize: '18px' }}>
+          Geen actieve sessies gedetecteerd...
         </div>
       ) : (
         <div style={styles.grid}>
-          {activeSessions.map((skipper) => {
-            const skipperHistory = history[skipper.name] || [];
+          {Object.entries(sessions).map(([name, skipper]) => {
+            const skipperHistory = history[name] || [];
             const currentTempo = skipperHistory.length > 0 ? skipperHistory[skipperHistory.length - 1].tempo : 0;
-
+            
             return (
-              <div key={skipper.name} style={styles.card}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                  <h2 style={{ margin: 0, fontSize: '26px', fontWeight: '900', color: '#f8fafc' }}>{skipper.name}</h2>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#22c55e' }}>
-                    <div style={{ width: '8px', height: '8px', backgroundColor: '#22c55e', borderRadius: '50%' }}></div>
-                    LIVE
+              <div key={name} style={styles.card}>
+                <div style={styles.header}>
+                  <div>
+                    <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold', color: '#f8fafc' }}>{name}</h2>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>ID: {name.toLowerCase().replace(' ', '_')}</div>
+                  </div>
+                  <div style={{ 
+                    backgroundColor: skipper.isRecording ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                    padding: '6px 12px',
+                    borderRadius: '20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    border: `1px solid ${skipper.isRecording ? '#22c55e' : '#ef4444'}`
+                  }}>
+                    <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: skipper.isRecording ? '#22c55e' : '#ef4444', boxShadow: skipper.isRecording ? '0 0 8px #22c55e' : 'none' }}></div>
+                    <span style={{ fontSize: '10px', fontWeight: 'bold', color: skipper.isRecording ? '#22c55e' : '#ef4444' }}>
+                      {skipper.isRecording ? 'RECORDING' : 'IDLE'}
+                    </span>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '10px', marginBottom: '25px' }}>
+                <div style={styles.statsGrid}>
                   <div style={styles.statBox}>
-                    <div style={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold', marginBottom: '5px' }}>HARTSLAG</div>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-                      <span style={{ fontSize: '32px', fontWeight: '900', color: '#ef4444' }}>{skipper.bpm || 0}</span>
-                      <span style={{ color: '#ef4444', fontWeight: 'bold', fontSize: '12px' }}>BPM</span>
+                    <div style={styles.label}>Hartslag</div>
+                    <div style={{ ...styles.value, color: '#ef4444' }}>
+                      <Heart size={16} fill="#ef4444" />
+                      {skipper.bpm || 0}
                     </div>
-                    <Heart fill="#ef4444" stroke="none" size={14} />
+                  </div>
+                  
+                  <div style={styles.statBox}>
+                    <div style={styles.label}>Stappen</div>
+                    <div style={{ ...styles.value, color: '#60a5fa' }}>
+                      <Hash size={16} />
+                      {skipper.steps || 0}
+                    </div>
                   </div>
 
-                  <div style={{ ...styles.statBox, border: '1px solid #22c55e44' }}>
-                    <div style={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold', marginBottom: '5px' }}>TOTAAL</div>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-                      <span style={{ fontSize: '32px', fontWeight: '900', color: '#22c55e' }}>{skipper.steps || 0}</span>
-                      <span style={{ color: '#22c55e', fontWeight: 'bold', fontSize: '12px' }}>STPS</span>
+                  {/* Toegevoegde box voor Onderdeel */}
+                  <div style={styles.statBox}>
+                    <div style={styles.label}>Onderdeel</div>
+                    <div style={{ ...styles.value, color: '#facc15' }}>
+                      <Timer size={16} />
+                      {formatSessionType(skipper.sessionType)}
                     </div>
-                    <Hash color="#22c55e" size={14} />
                   </div>
 
-                  <div style={{ ...styles.statBox, border: '1px solid #60a5fa44', backgroundColor: '#0f172a' }}>
-                    <div style={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold', marginBottom: '5px' }}>TEMPO (/30S)</div>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-                      <span style={{ fontSize: '32px', fontWeight: '900', color: '#60a5fa' }}>{currentTempo}</span>
+                  <div style={styles.statBox}>
+                    <div style={styles.label}>Tempo</div>
+                    <div style={{ ...styles.value, color: '#22c55e' }}>
+                      <Zap size={16} fill="#22c55e" />
+                      {currentTempo}
                     </div>
-                    <Zap fill="#60a5fa" stroke="none" size={14} />
                   </div>
                 </div>
 
-                <div style={{ height: '250px', backgroundColor: '#0f172a', padding: '15px', borderRadius: '12px' }}>
-                  <div style={{ display: 'flex', gap: '20px', marginBottom: '10px', fontSize: '10px', fontWeight: 'bold' }}>
-                    <span style={{ color: '#ef4444' }}>● HARTSLAG</span>
-                    <span style={{ color: '#60a5fa' }}>● TEMPO (/30S)</span>
-                  </div>
-                  <ResponsiveContainer width="100%" height="90%">
-                    <LineChart data={skipperHistory.slice(-viewTime)} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                {/* Grafiek Sectie */}
+                <div style={{ height: '220px', width: '100%', marginTop: '10px', backgroundColor: '#0f172a', padding: '15px', borderRadius: '12px', boxSizing: 'border-box' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={skipperHistory.slice(-60)} margin={{ top: 5, right: 5, left: -30, bottom: 0 }}>
                       <CartesianGrid stroke="#1e293b" vertical={false} strokeDasharray="3 3" />
                       <XAxis dataKey="time" hide />
-                      <YAxis yAxisId="left" domain={['dataMin - 10', 'dataMax + 10']} stroke="#ef4444" fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis yAxisId="right" orientation="right" domain={[0, 120]} stroke="#60a5fa" fontSize={10} tickLine={false} axisLine={false} />
-                      <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', fontSize: '12px' }} />
+                      <YAxis yAxisId="left" domain={['dataMin - 5', 'dataMax + 5']} hide />
+                      <YAxis yAxisId="right" orientation="right" domain={[0, 140]} hide />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '12px' }}
+                        itemStyle={{ padding: '2px 0' }}
+                      />
                       <Line 
                         yAxisId="left"
                         type="monotone" 
                         dataKey="bpm" 
                         stroke="#ef4444" 
-                        strokeWidth={4} 
+                        strokeWidth={3} 
                         dot={false} 
                         isAnimationActive={false} 
+                        name="Hartslag"
                       />
                       <Line 
                         yAxisId="right"
                         type="monotone" 
                         dataKey="tempo" 
                         stroke="#60a5fa" 
-                        strokeWidth={3} 
+                        strokeWidth={2} 
                         dot={false} 
                         isAnimationActive={false} 
+                        name="Tempo"
                       />
                     </LineChart>
                   </ResponsiveContainer>
