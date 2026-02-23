@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebaseConfig';
-import { ref, set, get, update, push } from "firebase/database";
+import { ref, set, get, update, push, onValue } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Heart, Activity, Bluetooth, Play, Square, Save } from 'lucide-react';
 
@@ -23,6 +23,17 @@ export default function HeartRateApp() {
     }
   };
 
+  // NIEUW: Luisteren naar de teller via Firebase (Remote Trigger)
+  useEffect(() => {
+    if (skipperName) {
+      const recordingRef = ref(db, `live_sessions/${skipperName}/isRecording`);
+      return onValue(recordingRef, (snapshot) => {
+        const remoteStatus = snapshot.val();
+        setIsRecording(!!remoteStatus);
+      });
+    }
+  }, [skipperName]);
+
   // 2. Synchronisatie naar Firebase (alleen bij recording)
   useEffect(() => {
     if (isConnected && isRecording && heartRate > 0 && skipperName) {
@@ -31,212 +42,191 @@ export default function HeartRateApp() {
       update(sessionRef, {
         name: skipperName,
         bpm: heartRate,
-        isRecording: isRecording,
+        isRecording: true,
         lastUpdate: Date.now()
       });
-    }
-  }, [heartRate, isRecording, skipperName, isConnected]);
 
-  // 3. Grafiek data lokaal bijhouden
-  useEffect(() => {
-    let interval;
-    if (isConnected && heartRate > 0) {
-      interval = setInterval(() => {
-        setHistory(prev => {
-          const newData = [...prev, { time: new Date().toLocaleTimeString(), bpm: heartRate }];
-          return newData.slice(-300); // Buffer voor 5 minuten
-        });
-      }, 1000);
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setHistory(prev => [...prev, { time: now, bpm: heartRate }].slice(-200));
     }
-    return () => clearInterval(interval);
-  }, [isConnected, heartRate]);
+  }, [heartRate, isConnected, isRecording, skipperName]);
 
-  const connectHRM = async () => {
+  // 3. Bluetooth Logica
+  const parseHeartRate = (value) => {
+    const flags = value.getUint8(0);
+    const is16Bits = flags & 0x1;
+    if (is16Bits) {
+      return value.getUint16(1, true);
+    } else {
+      return value.getUint8(1);
+    }
+  };
+
+  const connectBluetooth = async () => {
     try {
       const device = await navigator.bluetooth.requestDevice({
-        filters: [{ services: ['heart_rate'] }]
+        filters: [{ services: ['heart_rate'] }],
       });
-      setDeviceId(device.id);
-      setDeviceName(device.name || "Garmin Apparaat");
-      await identifySkipper(device.id);
 
       const server = await device.gatt.connect();
       const service = await server.getPrimaryService('heart_rate');
-      const char = await service.getCharacteristic('heart_rate_measurement');
+      const characteristic = await service.getCharacteristic('heart_rate_measurement');
       
+      setDeviceId(device.id);
+      setDeviceName(device.name);
       setIsConnected(true);
-      char.startNotifications();
-      char.addEventListener('characteristicvaluechanged', (e) => {
-        setHeartRate(e.target.value.getUint8(1));
+      
+      identifySkipper(device.id);
+
+      characteristic.startNotifications();
+      characteristic.addEventListener('characteristicvaluechanged', (event) => {
+        const hr = parseHeartRate(event.target.value);
+        setHeartRate(hr);
       });
-    } catch (err) { console.error("Bluetooth Error:", err); }
-  };
 
-  const saveSkipperLink = () => {
-    if (deviceId && skipperName) {
-      set(ref(db, `registered_devices/${deviceId}`), { name: skipperName });
-      alert(`Toestel gekoppeld aan ${skipperName}`);
+    } catch (error) {
+      console.error(error);
+      setIsConnected(false);
     }
   };
 
-const stopRecording = async () => {
-  setIsRecording(false);
-
-  if (history.length > 0) {
-    // 1. Maak een uniek historiek-object
-    const sessionData = {
-      skipper: skipperName,
-      date: new Date().toISOString(),
-      finalSteps: 0, // Dit halen we zo op uit de live-data
-      heartRateHistory: history, // De volledige array van de grafiek
-      averageBPM: Math.round(history.reduce((a, b) => a + b.bpm, 0) / history.length),
-      maxBPM: Math.max(...history.map(o => o.bpm))
-    };
-
-    // 2. Haal de laatste stappenstand op uit de live sessie
-    const liveRef = ref(db, `live_sessions/${skipperName}`);
-    const snapshot = await get(liveRef);
-    if (snapshot.exists()) {
-      sessionData.finalSteps = snapshot.val().steps || 0;
-    }
-
-    // 3. Opslaan in het archief
-    const historyRef = ref(db, 'session_history');
-    await push(historyRef, sessionData);
-
-    // 4. Optioneel: de live sessie opschonen
-    update(liveRef, { isRecording: false, steps: 0 });
+  // 4. Sessie acties
+  const saveSession = async () => {
+    if (history.length === 0) return;
     
-    alert("Sessie opgeslagen in historiek!");
-    setHistory([]); // Reset lokale grafiek voor volgende ronde
-  }
-};
+    const historyRef = ref(db, 'session_history');
+    const finalStepsSnapshot = await get(ref(db, `live_sessions/${skipperName}/steps`));
+    
+    await push(historyRef, {
+      skipper: skipperName,
+      date: Date.now(),
+      data: history,
+      finalSteps: finalStepsSnapshot.val() || 0,
+      averageBPM: Math.round(history.reduce((a, b) => a + b.bpm, 0) / history.length),
+      maxBPM: Math.max(...history.map(h => h.bpm))
+    });
+    
+    update(ref(db, `live_sessions/${skipperName}`), {
+      steps: 0,
+      isRecording: false
+    });
+    
+    setHistory([]);
+    alert("Sessie succesvol opgeslagen!");
+  };
 
-  // --- STYLING (Hetzelfde als de gewenste versie) ---
   const styles = {
-    container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '20px' },
-    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: '1000px', margin: '0 auto 30px', borderBottom: '1px solid #334155', paddingBottom: '15px' },
-    grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '25px', maxWidth: '1000px', margin: '0 auto' },
-    card: { backgroundColor: '#1e293b', padding: '25px', borderRadius: '15px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.3)', position: 'relative', overflow: 'hidden' },
-    input: { width: '100%', backgroundColor: '#0f172a', border: '1px solid #334155', color: 'white', padding: '12px', borderRadius: '8px', marginBottom: '10px', boxSizing: 'border-box' },
-    button: (active, color) => ({
-      width: '100%', padding: '15px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer',
-      backgroundColor: active ? color : '#334155', color: 'white', transition: '0.3s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px'
-    }),
-    hrDisplay: { fontSize: '80px', fontWeight: '900', margin: '10px 0', color: isRecording ? '#ef4444' : 'white' }
+    container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', padding: '20px', fontFamily: 'sans-serif' },
+    card: { backgroundColor: '#1e293b', borderRadius: '20px', padding: '25px', marginBottom: '20px', border: '1px solid #334155' },
+    button: { display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 24px', borderRadius: '12px', border: 'none', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' },
+    input: { backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '10px', padding: '12px', color: 'white', width: '100%', marginTop: '10px', boxSizing: 'border-box' }
   };
 
   return (
     <div style={styles.container}>
-      <div style={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Activity color="#ef4444" size={32} />
-          <span style={{ fontSize: '28px', fontWeight: '900', letterSpacing: '-1px' }}>SKIPPER PRO</span>
+      <h1 style={{ fontSize: '24px', fontWeight: '900', marginBottom: '25px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <Activity color="#ef4444" size={32} /> SKIPPER DASHBOARD
+      </h1>
+
+      {/* Connect Card */}
+      <div style={styles.card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '5px' }}>APPARAAT</div>
+            <div style={{ fontSize: '18px', fontWeight: 'bold' }}>{isConnected ? deviceName : 'Niet verbonden'}</div>
+          </div>
+          <button 
+            onClick={connectBluetooth} 
+            style={{ ...styles.button, backgroundColor: isConnected ? '#065f46' : '#3b82f6', color: 'white' }}
+          >
+            <Bluetooth size={20} /> {isConnected ? 'Verbonden' : 'Verbind Garmin'}
+          </button>
         </div>
-        <div style={{ backgroundColor: '#1e293b', padding: '8px 20px', borderRadius: '25px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid #334155' }}>
-          <Bluetooth size={16} color={isConnected ? "#60a5fa" : "#94a3b8"} />
-          <span style={{ color: isConnected ? "#60a5fa" : "#94a3b8", fontWeight: 'bold' }}>
-            {isConnected ? deviceName : "GEEN VERBINDING"}
-          </span>
+        
+        <input 
+          style={styles.input}
+          placeholder="Naam skipper..."
+          value={skipperName}
+          onChange={(e) => setSkipperName(e.target.value)}
+        />
+      </div>
+
+      {/* Recording Status Card */}
+      <div style={styles.card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '5px' }}>OPNAME STATUS</div>
+            <div style={{ fontSize: '18px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ 
+                width: '10px', 
+                height: '10px', 
+                borderRadius: '50%', 
+                backgroundColor: isRecording ? '#22c55e' : '#ef4444',
+                boxShadow: isRecording ? '0 0 10px #22c55e' : 'none'
+              }}></div>
+              {isRecording ? "LIVE BEZIG" : "WACHTEN OP START"}
+            </div>
+          </div>
+          <button 
+            onClick={saveSession}
+            disabled={!history.length}
+            style={{ ...styles.button, backgroundColor: '#1e293b', color: '#94a3b8', border: '1px solid #334155', opacity: history.length ? 1 : 0.5 }}
+          >
+            <Save size={20} /> Opslaan
+          </button>
         </div>
       </div>
 
-      <div style={styles.grid}>
-        {/* LINKER KOLOM: CONFIGURATIE */}
-        <div style={styles.card}>
-          <label style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>STAP 1: VERBINDEN</label>
-          <button style={styles.button(!isConnected, '#2563eb')} onClick={connectHRM} disabled={isConnected}>
-            <Bluetooth size={18} /> {isConnected ? 'GARMIN VERBONDEN' : 'SCAN GARMIN'}
-          </button>
+      {/* Heart Rate Display */}
+      <div style={{ ...styles.card, textAlign: 'center' }}>
+        <Heart color="#ef4444" size={48} style={{ margin: '0 auto 10px' }} fill="#ef4444" />
+        <div style={{ fontSize: '64px', fontWeight: '900' }}>{heartRate}</div>
+        <div style={{ color: '#94a3b8', letterSpacing: '2px' }}>BPM</div>
+      </div>
 
-          <label style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold', display: 'block', marginTop: '25px', marginBottom: '8px' }}>STAP 2: SKIPPER KOPPELEN</label>
-          <input 
-            style={styles.input}
-            placeholder="Naam van de skipper..."
-            value={skipperName}
-            onChange={(e) => setSkipperName(e.target.value)}
-          />
-          {isConnected && (
-            <button onClick={saveSkipperLink} style={{ width: '100%', background: 'none', border: '1px solid #334155', color: '#94a3b8', padding: '8px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', marginBottom: '20px' }}>
-              <Save size={14} style={{ marginRight: '5px' }} /> Onthoud deze koppeling
-            </button>
-          )}
-
-          <label style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold', display: 'block', marginTop: '10px', marginBottom: '8px' }}>STAP 3: SESSIE</label>
-            <button 
-              style={styles.button(isConnected, isRecording ? '#ef4444' : '#22c55e')} 
-              onClick={() => { 
-                if(!isConnected || !skipperName) return alert("Verbind eerst!");
-                if(isRecording) stopRecording(); 
-                else setIsRecording(true); 
-              }}>
-              {isRecording ? <><Square size={18} fill="white" /> STOP & BEWAAR</> : <><Play size={18} fill="white" /> START OPNAME</>}
-            </button>
+      {/* Graph Area */}
+      <div style={{ ...styles.card, height: '350px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+          <div style={{ fontWeight: 'bold' }}>LIVE MONITOR</div>
+          <select 
+            style={{ backgroundColor: '#0f172a', border: 'none', color: '#64748b' }}
+            onChange={(e) => setViewTime(Number(e.target.value))}
+            value={viewTime}
+          >
+            <option value="60">60 sec</option>
+            <option value="120">2 min</option>
+            <option value="300">5 min</option>
+          </select>
         </div>
-
-        {/* RECHTER KOLOM: LIVE DATA */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
-          <div style={styles.card}>
-            <span style={{ color: '#94a3b8', fontWeight: 'bold', fontSize: '12px' }}>HUIDIGE HARTSLAG</span>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
-              <div style={styles.hrDisplay}>{heartRate}</div>
-              <span style={{ fontSize: '24px', color: '#64748b', fontWeight: 'bold' }}>BPM</span>
-              <Heart 
-                fill={isRecording ? "#ef4444" : "#334155"} 
-                stroke="none" 
-                style={{ marginLeft: 'auto', opacity: heartRate > 0 ? 1 : 0.2 }} 
-                size={50} 
-              />
-            </div>
-            {isRecording && <div style={{ color: '#ef4444', fontSize: '12px', fontWeight: 'bold', animate: 'pulse' }}>● LIVE RECORDING NAAR DASHBOARD</div>}
-          </div>
-
-          <div style={{ ...styles.card, height: '350px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
-              <span style={{ color: '#94a3b8', fontWeight: 'bold', fontSize: '12px' }}>HISTORIEK</span>
-              <select 
-                style={{ backgroundColor: '#0f172a', border: '1px solid #334155', color: 'white', borderRadius: '4px', fontSize: '11px' }}
-                value={viewTime}
-                onChange={(e) => setViewTime(parseInt(e.target.value))}
-              >
-                <option value={30}>30 sec</option>
-                <option value={60}>1 min</option>
-                <option value={180}>3 min</option>
-              </select>
-            </div>
-            
-            <ResponsiveContainer width="100%" height="85%">
-              <LineChart data={history.slice(-viewTime)} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid stroke="#334155" vertical={false} strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="time" 
-                  stroke="#64748b" 
-                  fontSize={10} 
-                  tickLine={false} 
-                  axisLine={false}
-                  label={{ value: 'Tijdstip', position: 'insideBottom', offset: -5, fill: '#64748b', fontSize: 10 }}
-                />
-                <YAxis 
-                  stroke="#64748b" 
-                  fontSize={10} 
-                  tickLine={false} 
-                  axisLine={false} 
-                  domain={['dataMin - 5', 'dataMax + 5']}
-                  label={{ value: 'BPM', angle: -90, position: 'insideLeft', offset: 10, fill: '#64748b', fontSize: 10 }}
-                />
-                <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', color: 'white', borderRadius: '8px' }} />
-                <Line 
-                  type="monotone" 
-                  dataKey="bpm" 
-                  stroke="#ef4444" 
-                  strokeWidth={4} 
-                  dot={false} 
-                  isAnimationActive={false} 
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+        
+        <ResponsiveContainer width="100%" height="80%">
+          <LineChart data={history.slice(-viewTime)} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+            <CartesianGrid stroke="#334155" vertical={false} strokeDasharray="3 3" />
+            <XAxis 
+              dataKey="time" 
+              stroke="#64748b" 
+              fontSize={10} 
+              tickLine={false} 
+              axisLine={false}
+            />
+            <YAxis 
+              stroke="#64748b" 
+              fontSize={10} 
+              tickLine={false} 
+              axisLine={false} 
+              domain={['dataMin - 5', 'dataMax + 5']}
+            />
+            <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', color: 'white', borderRadius: '8px' }} />
+            <Line 
+              type="monotone" 
+              dataKey="bpm" 
+              stroke="#ef4444" 
+              strokeWidth={4} 
+              dot={false} 
+              isAnimationActive={false} 
+            />
+          </LineChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );
