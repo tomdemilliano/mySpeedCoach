@@ -32,6 +32,7 @@ export default function HeartRateApp() {
         name: skipperName,
         bpm: heartRate,
         isRecording: isRecording,
+        startTime: isRecording ? (skipper.startTime || Date.now()) : null,
         lastUpdate: Date.now()
       });
     }
