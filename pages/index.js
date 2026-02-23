@@ -163,12 +163,15 @@ const stopRecording = async () => {
           )}
 
           <label style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold', display: 'block', marginTop: '10px', marginBottom: '8px' }}>STAP 3: SESSIE</label>
-          <button 
-            style={styles.button(isConnected, isRecording ? '#ef4444' : '#22c55e')} 
-            onClick={() => { if(isConnected && skipperName) setIsRecording(!isRecording); else alert("Verbind eerst en vul een naam in!"); }}
-          >
-            {isRecording ? <><Square size={18} fill="white" /> STOP OPNAME</> : <><Play size={18} fill="white" /> START OPNAME</>}
-          </button>
+            <button 
+              style={styles.button(isConnected, isRecording ? '#ef4444' : '#22c55e')} 
+              onClick={() => { 
+                if(!isConnected || !skipperName) return alert("Verbind eerst!");
+                if(isRecording) stopRecording(); 
+                else setIsRecording(true); 
+              }}>
+              {isRecording ? <><Square size={18} fill="white" /> STOP & BEWAAR</> : <><Play size={18} fill="white" /> START OPNAME</>}
+            </button>
         </div>
 
         {/* RECHTER KOLOM: LIVE DATA */}
