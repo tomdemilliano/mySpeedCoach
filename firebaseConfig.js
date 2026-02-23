@@ -4,6 +4,7 @@ import { getDatabase } from "firebase/database";
 const firebaseConfig = {
   apiKey: "AIzaSyBh7YT9hGp4S2GTEzsfsCBkuEUMdK6OdaA",
   authDomain: "myspeedcoach-416ac.firebaseapp.com",
+  databaseURL: "https://myspeedcoach-416ac-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "myspeedcoach-416ac",
   storageBucket: "myspeedcoach-416ac.firebasestorage.app",
   messagingSenderId: "637458200530",
