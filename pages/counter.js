@@ -48,7 +48,7 @@ export default function CounterPage() {
   const styles = {
     container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '20px' },
     card: { backgroundColor: '#1e293b', padding: '20px', borderRadius: '15px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' },
-    tapButton: { width: '100%', aspectRatio: '1/1', borderRadius: '50%', border: 'none', backgroundColor: '#3b82f6', color: 'white', fontSize: '80px', fontWeight: 'bold', boxShadow: '0 10px 25px -5px rgba(59, 130, 246, 0.5)', cursor: 'pointer', transition: 'transform 0.1s', active: { transform: 'scale(0.95)' } },
+    tapButton: { width: '100%', aspectRatio: '1/1', borderRadius: '50%', border: 'none', backgroundColor: '#3b82f6', color: 'white', fontSize: '80px', fontWeight: 'bold', boxShadow: '0 10px 25px -5px rgba(59, 130, 246, 0.5)', cursor: 'pointer', transition: 'transform 0.1s' },
     backButton: { backgroundColor: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '8px 16px', borderRadius: '8px', marginBottom: '20px', cursor: 'pointer' },
     typeSelector: { display: 'flex', gap: '10px', marginBottom: '20px' },
     typeButton: (active) => ({ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', backgroundColor: active ? '#facc15' : '#1e293b', color: active ? '#0f172a' : 'white', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }),
@@ -60,7 +60,7 @@ export default function CounterPage() {
     return (
       <div style={styles.container}>
         <h1 style={{ marginBottom: '30px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Hash color=\"#ef4444\" /> KIES SKIPPER
+          <Hash color="#ef4444" /> KIES SKIPPER
         </h1>
         {Object.keys(activeSkippers).length === 0 ? (
           <p style={{ color: '#64748b' }}>Geen actieve skippers gevonden. Zorg dat Toestel A verbonden is.</p>
@@ -71,7 +71,7 @@ export default function CounterPage() {
                 <div style={{ fontWeight: 'bold', fontSize: '18px' }}>{skipper.name}</div>
                 <div style={{ fontSize: '12px', color: '#60a5fa' }}>Status: {skipper.isRecording ? 'Bezig' : 'Stand-by'}</div>
               </div>
-              <ChevronRight color=\"#334155\" />
+              <ChevronRight color="#334155" />
             </div>
           ))
         )}
@@ -117,7 +117,7 @@ export default function CounterPage() {
       {/* Stop knop: Alleen zichtbaar als er een opname loopt */}
       {currentSkipperData?.isRecording && (
         <button style={styles.stopButton} onClick={stopRecording}>
-          <Square size={18} fill=\"white\" /> STOP OPNAME
+          <Square size={18} fill="white" /> STOP OPNAME
         </button>
       )}
 
