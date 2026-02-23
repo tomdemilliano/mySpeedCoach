@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebaseConfig';
-import { ref, onValue, runTransaction, update } from "firebase/database";
-import { Hash, ChevronRight, Timer, Square } from 'lucide-react';
+import { ref, onValue, runTransaction, update, push, query, orderByChild, equalTo } from "firebase/database";
+import { Hash, ChevronRight, Timer, Square, History } from 'lucide-react';
 
 export default function CounterPage() {
   const [activeSkippers, setActiveSkippers] = useState({});
   const [selectedSkipper, setSelectedSkipper] = useState(null);
   const [sessionType, setSessionType] = useState(30); // Standaard 30 seconden
+  const [localHistory, setLocalHistory] = useState([]);
 
   useEffect(() => {
     const sessionsRef = ref(db, 'live_sessions/');
@@ -16,6 +17,22 @@ export default function CounterPage() {
     });
   }, []);
 
+  // Haal de geschiedenis op voor de geselecteerde skipper
+  useEffect(() => {
+    if (selectedSkipper) {
+      const historyRef = query(
+        ref(db, 'session_history'), 
+        orderByChild('skipper'), 
+        equalTo(selectedSkipper)
+      );
+      return onValue(historyRef, (snapshot) => {
+        const data = snapshot.val() || {};
+        const sortedHistory = Object.values(data).sort((a, b) => b.date - a.date);
+        setLocalHistory(sortedHistory);
+      });
+    }
+  }, [selectedSkipper]);
+
   // Functie om stappen te tellen en opname te starten
   const countStep = () => {
     if (!selectedSkipper) return;
@@ -23,7 +40,6 @@ export default function CounterPage() {
     const liveRef = ref(db, `live_sessions/${selectedSkipper}`);
     const currentData = activeSkippers[selectedSkipper];
 
-    // ALS dit de eerste klik is EN er wordt nog niet opgenomen: START de opname
     if (!currentData?.isRecording && (currentData?.steps || 0) === 0) {
       update(liveRef, { 
         isRecording: true, 
@@ -38,11 +54,18 @@ export default function CounterPage() {
     });
   };
 
-  // Functie om de opname handmatig te stoppen
+  // Functie om de opname handmatig te stoppen en te resetten
   const stopRecording = () => {
     if (!selectedSkipper) return;
+    const currentData = activeSkippers[selectedSkipper];
     const liveRef = ref(db, `live_sessions/${selectedSkipper}`);
-    update(liveRef, { isRecording: false });
+    
+    // De counter wordt hier op 0 gezet, waardoor de onderdeel-kiezer weer verschijnt
+    update(liveRef, { 
+      isRecording: false,
+      steps: 0,
+      startTime: null
+    });
   };
 
   const styles = {
@@ -52,7 +75,9 @@ export default function CounterPage() {
     backButton: { backgroundColor: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '8px 16px', borderRadius: '8px', marginBottom: '20px', cursor: 'pointer' },
     typeSelector: { display: 'flex', gap: '10px', marginBottom: '20px' },
     typeButton: (active) => ({ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', backgroundColor: active ? '#facc15' : '#1e293b', color: active ? '#0f172a' : 'white', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }),
-    stopButton: { marginTop: '20px', width: '100%', padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: '#ef4444', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' }
+    stopButton: { marginTop: '20px', width: '100%', padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: '#ef4444', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' },
+    historySection: { marginTop: '30px', borderTop: '1px solid #334155', paddingTop: '20px' },
+    historyItem: { backgroundColor: '#0f172a', padding: '12px', borderRadius: '10px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', fontSize: '14px', border: '1px solid #1e293b' }
   };
 
   // Scherm 1: Kies Skipper
@@ -89,7 +114,7 @@ export default function CounterPage() {
       <div style={{ textAlign: 'center', marginBottom: '20px' }}>
         <h2 style={{ margin: '0 0 10px 0' }}>{selectedSkipper}</h2>
         
-        {/* Onderdeel Kiezer (alleen zichtbaar als er nog niet geteld is) */}
+        {/* Onderdeel Kiezer: Verschijnt nu opnieuw omdat steps naar 0 gaat bij stop */}
         {(!currentSkipperData?.steps || currentSkipperData.steps === 0) && (
           <div style={styles.typeSelector}>
             <button onClick={() => setSessionType(30)} style={styles.typeButton(sessionType === 30)}>30s</button>
@@ -114,7 +139,6 @@ export default function CounterPage() {
         {currentSkipperData?.steps || 0}
       </button>
 
-      {/* Stop knop: Alleen zichtbaar als er een opname loopt */}
       {currentSkipperData?.isRecording && (
         <button style={styles.stopButton} onClick={stopRecording}>
           <Square size={18} fill="white" /> STOP OPNAME
@@ -124,6 +148,23 @@ export default function CounterPage() {
       <div style={{ marginTop: '20px', textAlign: 'center', color: '#64748b' }}>
         <Timer size={16} style={{ verticalAlign: 'middle', marginRight: '5px' }} />
         Onderdeel: {sessionType === 30 ? '30 Seconden' : (sessionType / 60) + ' Minuten'}
+      </div>
+
+      {/* Historiek Overzicht onder de knop */}
+      <div style={styles.historySection}>
+        <h3 style={{ fontSize: '16px', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <History size={18} /> Vorige sessies
+        </h3>
+        {localHistory.length === 0 ? (
+          <div style={{ color: '#475569', fontSize: '14px', textAlign: 'center' }}>Nog geen opgeslagen sessies.</div>
+        ) : (
+          localHistory.slice(0, 5).map((item, idx) => (
+            <div key={idx} style={styles.historyItem}>
+              <span>{new Date(item.date).toLocaleDateString()} - {new Date(item.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+              <span style={{ fontWeight: 'bold', color: '#22c55e' }}>{item.finalSteps} steps</span>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
