@@ -1,7 +1,7 @@
 import { useState, useEffect, memo } from 'react';
 import { db } from '../firebaseConfig';
 import { ref, onValue, runTransaction, update, push, query, orderByChild, equalTo } from "firebase/database";
-import { Hash, ChevronRight, Timer, Square, History, Play, Clock, Award, Check, X } from 'lucide-react';
+import { Hash, ChevronRight, Timer, Square, History, Play, Clock, Award, Check, X, ArrowRight } from 'lucide-react';
 
 // --- GEÏSOLEERDE TIMER COMPONENT ---
 const LiveTimer = memo(({ startTime, sessionType, isRecording, isFinished }) => {
@@ -45,17 +45,16 @@ const LiveTimer = memo(({ startTime, sessionType, isRecording, isFinished }) => 
 export default function CounterPage() {
   const [activeSkippers, setActiveSkippers] = useState({});
   const [selectedSkipper, setSelectedSkipper] = useState(null);
+  const [isConfiguring, setIsConfiguring] = useState(false); // Nieuw tussenscherm state
   const [sessionType, setSessionType] = useState(30);
   const [localHistory, setLocalHistory] = useState([]);
   const [isFinished, setIsFinished] = useState(false);
   const [sessionCategory, setSessionCategory] = useState('Training');
   
-  // Nieuwe states voor records
   const [showRecordPrompt, setShowRecordPrompt] = useState(false);
   const [currentRecord, setCurrentRecord] = useState(0);
   const [pendingRecordData, setPendingRecordData] = useState(null);
 
-  // 1. Firebase Sync: Luisteren naar actieve sessies
   useEffect(() => {
     const sessionsRef = ref(db, 'live_sessions/');
     return onValue(sessionsRef, (snapshot) => {
@@ -68,7 +67,6 @@ export default function CounterPage() {
     });
   }, [selectedSkipper]);
 
-  // 2. Geschiedenis ophalen
   useEffect(() => {
     if (selectedSkipper) {
       const historyRef = query(
@@ -84,7 +82,6 @@ export default function CounterPage() {
     }
   }, [selectedSkipper]);
 
-  // 3. Huidig record ophalen uit de specifieke stats-tabel
   useEffect(() => {
     if (selectedSkipper) {
       const recordRef = ref(db, `skipper_stats/${selectedSkipper}/records/${sessionType}/${sessionCategory}`);
@@ -94,7 +91,6 @@ export default function CounterPage() {
     }
   }, [selectedSkipper, sessionType, sessionCategory]);
 
-  // 4. Auto-stop Logica
   useEffect(() => {
     const interval = setInterval(() => {
       if (!selectedSkipper) return;
@@ -127,7 +123,7 @@ export default function CounterPage() {
         lastStepTime: now,
         isFinished: false,
         steps: 1,
-        category: sessionCategory // Bewaar categorie in live sessie
+        category: sessionCategory 
       });
     } else {
       update(liveRef, { lastStepTime: now });
@@ -145,7 +141,6 @@ export default function CounterPage() {
 
     const finalScore = currentData.steps || 0;
 
-    // Controleer of het een nieuw record is
     if (finalScore > currentRecord) {
       setPendingRecordData(currentData);
       setShowRecordPrompt(true);
@@ -190,6 +185,7 @@ export default function CounterPage() {
       steps: 0, isRecording: false, isFinished: false, startTime: null, lastStepTime: null
     });
     setIsFinished(false);
+    setIsConfiguring(true); // Terug naar het tussenscherm
   };
 
   const styles = {
@@ -203,15 +199,17 @@ export default function CounterPage() {
     typeSelector: { display: 'flex', gap: '10px', marginBottom: '20px' },
     typeButton: (active) => ({ padding: '10px 20px', borderRadius: '8px', border: 'none', backgroundColor: active ? '#3b82f6' : '#334155', color: 'white', fontWeight: 'bold', cursor: 'pointer' }),
     modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' },
-    modalCard: { backgroundColor: '#1e293b', padding: '30px', borderRadius: '20px', textAlign: 'center', border: '2px solid #facc15', maxWidth: '350px', width: '100%' }
+    modalCard: { backgroundColor: '#1e293b', padding: '30px', borderRadius: '20px', textAlign: 'center', border: '2px solid #facc15', maxWidth: '350px', width: '100%' },
+    configCard: { backgroundColor: '#1e293b', padding: '25px', borderRadius: '20px', width: '100%', maxWidth: '400px', textAlign: 'center', border: '1px solid #334155' }
   };
 
+  // SCHERM 1: Skipper Selectie
   if (!selectedSkipper) {
     return (
       <div style={styles.container}>
         <h1 style={{ marginBottom: '30px', fontSize: '24px' }}>Wie gaat er skippen?</h1>
         {Object.keys(activeSkippers).map(name => (
-          <div key={name} style={styles.skipperCard} onClick={() => setSelectedSkipper(name)}>
+          <div key={name} style={styles.skipperCard} onClick={() => { setSelectedSkipper(name); setIsConfiguring(true); }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
               <div style={{ backgroundColor: '#3b82f6', borderRadius: '10px', width: '40px', height: '40px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                 <Hash size={20} />
@@ -225,11 +223,62 @@ export default function CounterPage() {
     );
   }
 
+  // SCHERM 2: Configuratie Tussenscherm
+  if (isConfiguring) {
+    return (
+      <div style={styles.container}>
+        <button style={styles.backButton} onClick={() => { setSelectedSkipper(null); setIsConfiguring(false); }}>
+          ← Terug naar lijst
+        </button>
+        <div style={styles.configCard}>
+          <h2 style={{ fontSize: '28px', marginBottom: '10px' }}>{selectedSkipper}</h2>
+          <p style={{ color: '#94a3b8', marginBottom: '30px' }}>Kies je onderdeel en tijd</p>
+          
+          <div style={{ marginBottom: '30px' }}>
+            <p style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', marginBottom: '10px' }}>Categorie</p>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
+              {['Training', 'Wedstrijd'].map(cat => (
+                <button 
+                  key={cat} 
+                  onClick={() => setSessionCategory(cat)} 
+                  style={{
+                    ...styles.typeButton(sessionCategory === cat),
+                    backgroundColor: sessionCategory === cat ? (cat === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#334155'
+                  }}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ marginBottom: '40px' }}>
+            <p style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', marginBottom: '10px' }}>Duur</p>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
+              {[30, 120, 180].map(t => (
+                <button key={t} onClick={() => setSessionType(t)} style={styles.typeButton(sessionType === t)}>
+                  {t === 30 ? '30s' : (t / 60) + 'm'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button 
+            style={{ ...styles.stopButton, backgroundColor: '#22c55e', width: '100%', justifyContent: 'center', marginTop: 0 }}
+            onClick={() => setIsConfiguring(false)}
+          >
+            START SESSIE <ArrowRight size={18} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // SCHERM 3: De Teller
   const currentData = activeSkippers[selectedSkipper];
 
   return (
     <div style={styles.container}>
-      {/* RECORD MODAL */}
       {showRecordPrompt && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalCard}>
@@ -254,7 +303,24 @@ export default function CounterPage() {
       </button>
       
       <div style={{ textAlign: 'center', marginBottom: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <h2 style={{ margin: '0 0 10px 0', fontSize: '28px' }}>{selectedSkipper}</h2>
+        <h2 style={{ margin: '0 0 5px 0', fontSize: '28px' }}>{selectedSkipper}</h2>
+        
+        {/* Vaste info sectie zorgt voor stabiele telknop-positie */}
+        <div style={{ marginBottom: '15px' }}>
+          <span style={{ 
+            fontSize: '12px', 
+            fontWeight: 'bold', 
+            padding: '4px 10px', 
+            borderRadius: '20px', 
+            backgroundColor: sessionCategory === 'Wedstrijd' ? '#ef4444' : '#3b82f6',
+            marginRight: '8px'
+          }}>
+            {sessionCategory.toUpperCase()}
+          </span>
+          <span style={{ color: '#94a3b8', fontSize: '14px', fontWeight: 'bold' }}>
+            {sessionType === 30 ? '30 SECONDEN' : (sessionType / 60) + ' MINUTEN'}
+          </span>
+        </div>
         
         <LiveTimer 
           startTime={currentData?.startTime} 
@@ -262,32 +328,6 @@ export default function CounterPage() {
           isRecording={currentData?.isRecording}
           isFinished={isFinished}
         />
-        
-        {!currentData?.isRecording && !isFinished && (
-          <div style={{...styles.typeSelector, marginTop: '10px'}}>
-            {['Training', 'Wedstrijd'].map(cat => (
-              <button 
-                key={cat} 
-                onClick={() => setSessionCategory(cat)} 
-                style={{
-                  ...styles.typeButton(sessionCategory === cat),
-                  backgroundColor: sessionCategory === cat ? (cat === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#334155'}}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        )}
-  
-        {!currentData?.isRecording && !isFinished && (
-          <div style={styles.typeSelector}>
-            {[30, 120, 180].map(t => (
-              <button key={t} onClick={() => setSessionType(t)} style={styles.typeButton(sessionType === t)}>
-                {t === 30 ? '30s' : (t / 60) + 'm'}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       <button 
@@ -309,7 +349,7 @@ export default function CounterPage() {
       ) : (
         <div style={{ marginTop: '20px', textAlign: 'center', color: '#64748b' }}>
           <Timer size={16} style={{ verticalAlign: 'middle', marginRight: '5px' }} />
-          Tik op de knop om {sessionType === 30 ? '30s' : (sessionType / 60) + 'm'} te starten
+          Tik op de knop om te starten
         </div>
       )}
 
