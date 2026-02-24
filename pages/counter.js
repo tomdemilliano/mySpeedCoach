@@ -3,6 +3,7 @@ import { db } from '../firebaseConfig';
 import { ref, onValue, runTransaction, update, push, query, orderByChild, equalTo } from "firebase/database";
 import { Hash, ChevronRight, Timer, Square, History, Play, Clock, Award, Check, X, ArrowRight } from 'lucide-react';
 
+
 // --- GEÏSOLEERDE TIMER COMPONENT ---
 const LiveTimer = memo(({ startTime, sessionType, isRecording, isFinished }) => {
   const [display, setDisplay] = useState("0:00");
