@@ -1,20 +1,33 @@
 import { useState, useEffect, useRef } from 'react';
 import { db } from '../firebaseConfig';
 import { ref, onValue } from "firebase/database";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from 'recharts';
 import { Activity, Heart, Hash, Zap, Timer, Users, CheckCircle2, Trophy, XCircle } from 'lucide-react';
+
+const DEFAULT_ZONES = [
+  { name: 'Warm-up', min: 0, max: 120, color: '#94a3b8' },
+  { name: 'Fat Burn', min: 120, max: 145, color: '#22c55e' },
+  { name: 'Aerobic', min: 145, max: 165, color: '#facc15' },
+  { name: 'Anaerobic', min: 165, max: 185, color: '#f97316' },
+  { name: 'Red Line', min: 185, max: 250, color: '#ef4444' }
+];
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState({});
   const [history, setHistory] = useState({});
   const [selectedSkippers, setSelectedSkippers] = useState([]);
   const [allRecords, setAllRecords] = useState({});
-  const [viewMode, setViewMode] = useState('selection'); // 'selection' of 'monitoring'
+  const [viewMode, setViewMode] = useState('selection');
+  const [zones] = useState(DEFAULT_ZONES);
   
   const lastStepsRef = useRef({});
   const currentSessionsRef = useRef({});
 
-  // 1. Haal alle live sessies en records op
+  const getZoneColor = (bpm) => {
+    const zone = zones.find(z => bpm >= z.min && bpm < z.max);
+    return zone ? zone.color : '#94a3b8';
+  };
+
   useEffect(() => {
     const sessionsRef = ref(db, 'live_sessions/');
     const recordsRef = ref(db, 'skipper_stats/');
@@ -35,7 +48,6 @@ export default function Dashboard() {
     };
   }, []);
 
-  // 2. Historiek en tempo berekening logica
   useEffect(() => {
     const interval = setInterval(() => {
       const data = currentSessionsRef.current;
@@ -134,7 +146,7 @@ export default function Dashboard() {
         <div style={styles.selectionGrid}>
           {Object.keys(sessions).map(name => {
             const isSelected = selectedSkippers.includes(name);
-            const hasHRM = (Date.now() - sessions[name].lastUpdate) < 10000; // HRM actief in laatste 10 sec
+            const hasHRM = (Date.now() - sessions[name].lastUpdate) < 10000;
 
             return (
               <div key={name} style={styles.skipperCard(isSelected)} onClick={() => toggleSkipperSelection(name)}>
@@ -167,6 +179,7 @@ export default function Dashboard() {
           const skipperHistory = history[name] || [];
           const currentTempo = skipperHistory.length > 0 ? skipperHistory[skipperHistory.length - 1].tempo : 0;
           const personalRecord = getPersonalRecord(name, skipper.sessionType, skipper.category);
+          const currentBpm = skipper.bpm || 0;
 
           const getTimerValue = (s) => {
             if (!s.startTime) return "0:00";
@@ -189,6 +202,9 @@ export default function Dashboard() {
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ color: '#60a5fa', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <div style={{ color: getZoneColor(currentBpm), display: 'flex', alignItems: 'center', gap: '4px', marginRight: '10px' }}>
+                       <Heart size={14} fill={getZoneColor(currentBpm)} /> {currentBpm}
+                    </div>
                     <Timer size={16} /> {getTimerValue(skipper)}
                   </div>
                   <div style={{ fontSize: '10px', color: skipper.isRecording ? '#22c55e' : '#ef4444' }}>
@@ -200,7 +216,9 @@ export default function Dashboard() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '15px' }}>
                 <div style={styles.statBox}>
                   <div style={styles.label}>Hartslag</div>
-                  <div style={{ ...styles.value, color: '#ef4444' }}><Heart size={16} fill="#ef4444" /> {skipper.bpm || '--'}</div>
+                  <div style={{ ...styles.value, color: getZoneColor(currentBpm) }}>
+                    <Heart size={16} fill={getZoneColor(currentBpm)} /> {currentBpm || '--'}
+                  </div>
                 </div>
                 <div style={styles.statBox}>
                   <div style={styles.label}>Stappen</div>
@@ -221,7 +239,7 @@ export default function Dashboard() {
                 <div style={{ ...styles.value, color: '#22c55e', fontSize: '32px' }}>{calculateExpectedSteps(skipper)}</div>
               </div>
 
-              <div style={{ height: '200px', width: '100%', backgroundColor: '#0f172a', padding: '10px', borderRadius: '12px' }}>
+              <div style={{ height: '220px', width: '100%', backgroundColor: '#0f172a', padding: '10px', borderRadius: '12px' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={skipperHistory.slice(-60)}>
                     <CartesianGrid stroke="#1e293b" vertical={false} strokeDasharray="3 3" />
@@ -229,7 +247,20 @@ export default function Dashboard() {
                     <YAxis yAxisId="left" domain={[40, 200]} stroke="#ef4444" fontSize={10} />
                     <YAxis yAxisId="right" orientation="right" domain={[0, 140]} stroke="#60a5fa" fontSize={10} />
                     <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', fontSize: '12px' }} />
-                    <Line yAxisId="left" type="monotone" dataKey="bpm" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    
+                    {/* Hartslagzones Achtergrond */}
+                    {zones.map(zone => (
+                      <ReferenceArea 
+                        key={zone.name} 
+                        yAxisId="left"
+                        y1={zone.min} 
+                        y2={zone.max} 
+                        fill={zone.color} 
+                        fillOpacity={0.05} 
+                      />
+                    ))}
+
+                    <Line yAxisId="left" type="monotone" dataKey="bpm" stroke={getZoneColor(currentBpm)} strokeWidth={3} dot={false} isAnimationActive={false} />
                     <Line yAxisId="right" type="monotone" dataKey="tempo" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>
