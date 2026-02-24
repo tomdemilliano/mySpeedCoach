@@ -110,12 +110,14 @@ export default function Dashboard() {
           const skipperHistory = history[name] || [];
           const currentTempo = skipperHistory.length > 0 ? skipperHistory[skipperHistory.length - 1].tempo : 0;
 
+          // AANGEPASTE TIMER LOGICA: stopt als recording false is
           const getTimerValue = (skipper) => {
             if (!skipper.startTime) return "0:00";
             
-            // Als sessie klaar is, gebruiken we de tijd tot de laatste update (of stop)
-            // Voor eenvoud gebruiken we hier de huidige tijd als hij nog loopt
-            const endTime = skipper.isRecording ? Date.now() : (skipper.lastUpdate || Date.now());
+            // Als de sessie nog loopt, gebruik de huidige tijd.
+            // Als de sessie gestopt is, gebruik de lastStepTime (het moment van de laatste klik/stop).
+            const endTime = skipper.isRecording ? Date.now() : (skipper.lastStepTime || skipper.lastUpdate || Date.now());
+            
             const elapsed = Math.floor((endTime - skipper.startTime) / 1000);
             const remaining = (skipper.sessionType || 30) - elapsed;
             
