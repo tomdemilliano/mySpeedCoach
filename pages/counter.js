@@ -41,37 +41,54 @@ export default function CounterPage() {
   }, [selectedSkipper]);
 
   // 3. Timer & Auto-stop Logica
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!selectedSkipper) return;
-      const data = activeSkippers[selectedSkipper];
+useEffect(() => {
+  const interval = setInterval(() => {
+    if (!selectedSkipper) return;
+    
+    // We halen de data direct uit de state
+    const data = activeSkippers[selectedSkipper];
+    
+    if (data?.isRecording && data?.startTime) {
+      const now = Date.now();
       
-      if (data?.isRecording && data?.startTime) {
-        const now = Date.now();
-        const elapsed = Math.floor((now - data.startTime) / 1000);
-        const remaining = data.sessionType - elapsed;
+      // Bereken de tijd onafhankelijk van de render-cyclus
+      const elapsed = Math.floor((now - data.startTime) / 1000);
+      const totalSeconds = data.sessionType || 30;
+      const remaining = totalSeconds - elapsed;
 
-        // Update Timer Display
-        if (remaining >= 0) {
-          const mins = Math.floor(remaining / 60);
-          const secs = remaining % 60;
-          setDisplayTime(`${mins}:${secs.toString().padStart(2, '0')}`);
-        } else {
-          const overtime = Math.abs(remaining);
-          const mins = Math.floor(overtime / 60);
-          const secs = overtime % 60;
-          setDisplayTime(`+${mins}:${secs.toString().padStart(2, '0')}`);
-        }
-
-        // AUTO-STOP check: 15 seconden geen step gedetecteerd
-        const lastActivity = data.lastStepTime || data.startTime;
-        if (now - lastActivity > 15000) {
-          stopRecording();
-        }
+      // Update de weergave
+      let timeString = "";
+      if (remaining >= 0) {
+        const mins = Math.floor(remaining / 60);
+        const secs = remaining % 60;
+        timeString = `${mins}:${secs.toString().padStart(2, '0')}`;
+      } else {
+        const overtime = Math.abs(remaining);
+        const mins = Math.floor(overtime / 60);
+        const secs = overtime % 60;
+        timeString = `+${mins}:${secs.toString().padStart(2, '0')}`;
       }
-    }, 500);
-    return () => clearInterval(interval);
-  }, [activeSkippers, selectedSkipper]);
+      
+      // Alleen state updaten als de tekst echt veranderd is (bespaart renders)
+      if (displayTime !== timeString) {
+        setDisplayTime(timeString);
+      }
+
+      // AUTO-STOP check
+      const lastActivity = data.lastStepTime || data.startTime;
+      if (now - lastActivity > 15000) {
+        stopRecording();
+      }
+    } else if (isFinished) {
+      // Als we klaar zijn, houden we de laatst berekende tijd vast
+      // (Geen actie nodig, displayTime blijft staan)
+    } else {
+      setDisplayTime("0:00");
+    }
+  }, 100); // Verhoog de frequentie naar 100ms voor een vlottere reactie
+
+  return () => clearInterval(interval);
+}, [activeSkippers, selectedSkipper, isFinished, displayTime]);
 
   const countStep = () => {
     if (!selectedSkipper || isFinished) return;
