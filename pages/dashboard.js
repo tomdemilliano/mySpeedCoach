@@ -109,6 +109,27 @@ export default function Dashboard() {
         {Object.entries(sessions).map(([name, skipper]) => {
           const skipperHistory = history[name] || [];
           const currentTempo = skipperHistory.length > 0 ? skipperHistory[skipperHistory.length - 1].tempo : 0;
+
+          const getTimerValue = (skipper) => {
+            if (!skipper.startTime) return "0:00";
+            
+            // Als sessie klaar is, gebruiken we de tijd tot de laatste update (of stop)
+            // Voor eenvoud gebruiken we hier de huidige tijd als hij nog loopt
+            const endTime = skipper.isRecording ? Date.now() : (skipper.lastUpdate || Date.now());
+            const elapsed = Math.floor((endTime - skipper.startTime) / 1000);
+            const remaining = (skipper.sessionType || 30) - elapsed;
+            
+            if (remaining >= 0) {
+              const mins = Math.floor(remaining / 60);
+              const secs = remaining % 60;
+              return `${mins}:${secs.toString().padStart(2, '0')}`;
+            } else {
+              const overtime = Math.abs(remaining);
+              const mins = Math.floor(overtime / 60);
+              const secs = overtime % 60;
+              return `+${mins}:${secs.toString().padStart(2, '0')}`;
+            }
+          };
           
           return (
             <div key={name} style={styles.card}>
@@ -120,8 +141,11 @@ export default function Dashboard() {
                 <div style={{ color: skipper.isRecording ? '#22c55e' : (skipper.isFinished ? '#facc15' : '#ef4444'), fontSize: '10px', fontWeight: 'bold' }}>
                   {skipper.isRecording ? '● LIVE' : (skipper.isFinished ? '✓ FINISHED' : '○ IDLE')}
                 </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#60a5fa', fontWeight: 'bold' }}>
+                  <Timer size={14} />
+                  {getTimerValue(skipper)}
+                </div>
               </div>
-
               <div style={styles.statsGrid}>
                 <div style={styles.statBox}>
                   <div style={styles.label}>Hartslag</div>
