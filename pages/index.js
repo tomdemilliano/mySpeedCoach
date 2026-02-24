@@ -28,6 +28,7 @@ export default function SkipperDashboard() {
   const [historyData, setHistoryData] = useState([]);
   const [sessionHistory, setSessionHistory] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
+  const [manualRecords, setManualRecords] = useState({});
   const lastSentBpm = useRef(0);
   const prevIsRecording = useRef(false);
 
@@ -37,24 +38,53 @@ export default function SkipperDashboard() {
   };
 
   // Record Berekening
-  const getPersonalRecords = () => {
-    const records = {
-      30: { Training: null, Wedstrijd: null },
-      120: { Training: null, Wedstrijd: null },
-      180: { Training: null, Wedstrijd: null }
-    };
+  // const getPersonalRecords = () => {
+  //   const records = {
+  //     30: { Training: null, Wedstrijd: null },
+  //     120: { Training: null, Wedstrijd: null },
+  //     180: { Training: null, Wedstrijd: null }
+  //   };
 
-    sessionHistory.forEach(session => {
-      const type = session.sessionType;
-      const cat = session.category || 'Training';
-      if (records[type]) {
-        if (!records[type][cat] || session.finalSteps > records[type][cat].finalSteps) {
-          records[type][cat] = session;
-        }
-      }
+  //   sessionHistory.forEach(session => {
+  //     const type = session.sessionType;
+  //     const cat = session.category || 'Training';
+  //     if (records[type]) {
+  //       if (!records[type][cat] || session.finalSteps > records[type][cat].finalSteps) {
+  //         records[type][cat] = session;
+  //       }
+  //     }
+  //   });
+  //   return records;
+  // };
+
+  useEffect(() => {
+  if (skipperName) {
+    const recordsRef = ref(db, `skipper_stats/${skipperName}/records`);
+    return onValue(recordsRef, (snapshot) => {
+      setManualRecords(snapshot.val() || {});
     });
-    return records;
-  };
+  }
+}, [skipperName]);
+
+// In de render tabel (bij de Trophy modal):
+{[30, 120, 180].map(time => (
+  <tr key={time}>
+    <td style={styles.td}>{time === 30 ? '30 sec' : (time/60) + ' min'}</td>
+    {['Training', 'Wedstrijd'].map(cat => {
+      const rec = manualRecords[time]?.[cat];
+      return (
+        <td key={cat} style={styles.td}>
+          {rec ? (
+            <div>
+              <div style={{ fontWeight: 'bold', color: '#facc15' }}>{rec.score}</div>
+              <div style={{ fontSize: '10px', color: '#64748b' }}>{new Date(rec.date).toLocaleDateString()}</div>
+            </div>
+          ) : '---'}
+        </td>
+      );
+    })}
+  </tr>
+))}
 
   const connectBluetooth = async () => {
     try {
