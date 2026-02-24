@@ -2,25 +2,40 @@ import { useState, useEffect, useRef } from 'react';
 import { db } from '../firebaseConfig';
 import { ref, onValue } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, Heart, Users, Hash, Zap, Timer } from 'lucide-react';
+import { Activity, Heart, Hash, Zap, Timer, Users, CheckCircle2, Trophy, XCircle } from 'lucide-react';
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState({});
   const [history, setHistory] = useState({});
-  const [viewTime, setViewTime] = useState(60);
+  const [selectedSkippers, setSelectedSkippers] = useState([]);
+  const [allRecords, setAllRecords] = useState({});
+  const [viewMode, setViewMode] = useState('selection'); // 'selection' of 'monitoring'
   
   const lastStepsRef = useRef({});
   const currentSessionsRef = useRef({});
 
+  // 1. Haal alle live sessies en records op
   useEffect(() => {
     const sessionsRef = ref(db, 'live_sessions/');
-    return onValue(sessionsRef, (snapshot) => {
+    const recordsRef = ref(db, 'skipper_stats/');
+
+    const unsubSessions = onValue(sessionsRef, (snapshot) => {
       const data = snapshot.val() || {};
       setSessions(data);
       currentSessionsRef.current = data;
     });
+
+    const unsubRecords = onValue(recordsRef, (snapshot) => {
+      setAllRecords(snapshot.val() || {});
+    });
+
+    return () => {
+      unsubSessions();
+      unsubRecords();
+    };
   }, []);
 
+  // 2. Historiek en tempo berekening logica
   useEffect(() => {
     const interval = setInterval(() => {
       const data = currentSessionsRef.current;
@@ -28,7 +43,6 @@ export default function Dashboard() {
 
       setHistory(prevHistory => {
         const newHistory = { ...prevHistory };
-
         Object.keys(data).forEach(name => {
           if (data[name].isRecording) {
             const currentTotalSteps = data[name].steps || 0;
@@ -37,7 +51,6 @@ export default function Dashboard() {
             const tempo = stepsThisSecond * 60; 
 
             if (!newHistory[name]) newHistory[name] = [];
-            
             newHistory[name] = [...newHistory[name], {
               time: now,
               bpm: data[name].bpm || 0,
@@ -48,7 +61,6 @@ export default function Dashboard() {
             lastStepsRef.current[name] = currentTotalSteps;
           }
         });
-
         return newHistory;
       });
     }, 1000);
@@ -56,10 +68,20 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Logica voor de prognose (Verwachte stappen)
+  const toggleSkipperSelection = (name) => {
+    if (selectedSkippers.includes(name)) {
+      setSelectedSkippers(prev => prev.filter(s => s !== name));
+    } else {
+      if (selectedSkippers.length < 4) {
+        setSelectedSkippers(prev => [...prev, name]);
+      } else {
+        alert("Je kunt maximaal 4 skippers tegelijk monitoren.");
+      }
+    }
+  };
+
   const calculateExpectedSteps = (skipper) => {
     if (skipper.isFinished) return skipper.steps || 0;
-    
     if (!skipper.isRecording || !skipper.startTime || !skipper.sessionType) return 0;
     
     const elapsedSeconds = (Date.now() - skipper.startTime) / 1000;
@@ -73,85 +95,112 @@ export default function Dashboard() {
     return Math.round(currentSteps + (remainingSeconds * stepsPerSecond));
   };
 
-  const styles = {
-    container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', padding: '20px', fontFamily: 'sans-serif' },
-    grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px' },
-    card: { backgroundColor: '#1e293b', borderRadius: '15px', padding: '20px', border: '1px solid #334155', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' },
-    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
-    statsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '10px' },
-    statBox: { backgroundColor: '#0f172a', padding: '10px', borderRadius: '10px', textAlign: 'center', border: '1px solid #1e293b' },
-    label: { color: '#94a3b8', fontSize: '10px', fontWeight: 'bold', marginBottom: '5px', textTransform: 'uppercase', letterSpacing: '0.05em' },
-    value: { fontSize: '20px', fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' },
-    badge: { backgroundColor: 'rgba(250, 204, 21, 0.2)', color: '#facc15', padding: '2px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginLeft: '10px', border: '1px solid #facc15' }
+  const getPersonalRecord = (name, type, cat) => {
+    const sessionType = type || 30;
+    const sessionCat = cat || 'Training';
+    return allRecords[name]?.records?.[sessionType]?.[sessionCat]?.score || '---';
   };
 
-  const formatSessionType = (type) => {
-    if (!type) return "---";
-    if (type === 30) return "30s";
-    return (type / 60) + "m";
+  const styles = {
+    container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', padding: '20px', fontFamily: 'sans-serif' },
+    selectionGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '15px', marginTop: '20px' },
+    skipperCard: (isSelected) => ({
+      backgroundColor: isSelected ? '#1e293b' : '#0f172a',
+      borderRadius: '12px', padding: '15px', cursor: 'pointer', border: `2px solid ${isSelected ? '#3b82f6' : '#1e293b'}`,
+      transition: 'all 0.2s', position: 'relative'
+    }),
+    monitoringGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '20px' },
+    card: { backgroundColor: '#1e293b', borderRadius: '15px', padding: '20px', border: '1px solid #334155' },
+    statBox: { backgroundColor: '#0f172a', padding: '10px', borderRadius: '10px', textAlign: 'center', border: '1px solid #1e293b' },
+    label: { color: '#94a3b8', fontSize: '10px', fontWeight: 'bold', marginBottom: '5px', textTransform: 'uppercase' },
+    value: { fontSize: '20px', fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' },
+    btn: { padding: '10px 20px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer' }
   };
+
+  if (viewMode === 'selection') {
+    return (
+      <div style={styles.container}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 style={{ fontSize: '24px', fontWeight: '800' }}>SELECTEER SKIPPERS ({selectedSkippers.length}/4)</h1>
+          <button 
+            disabled={selectedSkippers.length === 0}
+            onClick={() => setViewMode('monitoring')}
+            style={{ ...styles.btn, backgroundColor: '#22c55e', color: 'white', opacity: selectedSkippers.length === 0 ? 0.5 : 1 }}
+          >
+            START MONITORING
+          </button>
+        </div>
+
+        <div style={styles.selectionGrid}>
+          {Object.keys(sessions).map(name => {
+            const isSelected = selectedSkippers.includes(name);
+            const hasHRM = (Date.now() - sessions[name].lastUpdate) < 10000; // HRM actief in laatste 10 sec
+
+            return (
+              <div key={name} style={styles.skipperCard(isSelected)} onClick={() => toggleSkipperSelection(name)}>
+                {isSelected && <CheckCircle2 style={{ position: 'absolute', top: 10, right: 10, color: '#3b82f6' }} size={20} />}
+                <h3 style={{ margin: '0 0 10px 0' }}>{name}</h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: hasHRM ? '#22c55e' : '#64748b' }}>
+                  <Heart size={14} fill={hasHRM ? '#22c55e' : 'none'} />
+                  {hasHRM ? 'HRM Gekoppeld' : 'Geen HRM'}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.container}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom: '1px solid #1e293b', paddingBottom: '20px' }}>
-        <h1 style={{ margin: 0, fontSize: '24px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ backgroundColor: '#ef4444', padding: '8px', borderRadius: '8px' }}>
-            <Activity color="white" size={24} />
-          </div>
-          SPEED MONITORING <span style={{ color: '#ef4444', fontWeight: '400' }}>LIVE</span>
-        </h1>
-        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#22c55e' }}>
-          {Object.keys(sessions).filter(k => sessions[k].isRecording).length} SKIPPERS LIVE
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+        <h1 style={{ margin: 0, fontSize: '24px', fontWeight: '800' }}>SPEED MONITORING LIVE</h1>
+        <button onClick={() => setViewMode('selection')} style={{ ...styles.btn, backgroundColor: '#475569', color: 'white' }}>
+          <Users size={18} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> WIJZIG SELECTIE
+        </button>
       </div>
 
-      <div style={styles.grid}>
-        {Object.entries(sessions).map(([name, skipper]) => {
+      <div style={styles.monitoringGrid}>
+        {selectedSkippers.map(name => {
+          const skipper = sessions[name] || { name };
           const skipperHistory = history[name] || [];
           const currentTempo = skipperHistory.length > 0 ? skipperHistory[skipperHistory.length - 1].tempo : 0;
+          const personalRecord = getPersonalRecord(name, skipper.sessionType, skipper.category);
 
-          // AANGEPASTE TIMER LOGICA: stopt als recording false is
-          const getTimerValue = (skipper) => {
-            if (!skipper.startTime) return "0:00";
-            
-            // Als de sessie nog loopt, gebruik de huidige tijd.
-            // Als de sessie gestopt is, gebruik de lastStepTime (het moment van de laatste klik/stop).
-            const endTime = skipper.isRecording ? Date.now() : (skipper.lastStepTime || skipper.lastUpdate || Date.now());
-            
-            const elapsed = Math.floor((endTime - skipper.startTime) / 1000);
-            const remaining = (skipper.sessionType || 30) - elapsed;
-            
-            if (remaining >= 0) {
-              const mins = Math.floor(remaining / 60);
-              const secs = remaining % 60;
-              return `${mins}:${secs.toString().padStart(2, '0')}`;
-            } else {
-              const overtime = Math.abs(remaining);
-              const mins = Math.floor(overtime / 60);
-              const secs = overtime % 60;
-              return `+${mins}:${secs.toString().padStart(2, '0')}`;
-            }
+          const getTimerValue = (s) => {
+            if (!s.startTime) return "0:00";
+            const endTime = s.isRecording ? Date.now() : (s.lastStepTime || s.lastUpdate || Date.now());
+            const elapsed = Math.floor((endTime - s.startTime) / 1000);
+            const remaining = (s.sessionType || 30) - elapsed;
+            const mins = Math.floor(Math.abs(remaining) / 60);
+            const secs = Math.abs(remaining) % 60;
+            return `${remaining < 0 ? '+' : ''}${mins}:${secs.toString().padStart(2, '0')}`;
           };
-          
+
           return (
             <div key={name} style={styles.card}>
-              <div style={styles.header}>
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold', color: '#f8fafc' }}>{name}</h2>
-                  <span style={styles.badge}>{formatSessionType(skipper.sessionType)}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '22px' }}>{name}</h2>
+                  <span style={{ fontSize: '12px', color: '#facc15', fontWeight: 'bold' }}>
+                    {skipper.sessionType === 30 ? '30s' : (skipper.sessionType / 60) + 'm'} | {skipper.category || 'Training'}
+                  </span>
                 </div>
-                <div style={{ color: skipper.isRecording ? '#22c55e' : (skipper.isFinished ? '#facc15' : '#ef4444'), fontSize: '10px', fontWeight: 'bold' }}>
-                  {skipper.isRecording ? '● LIVE' : (skipper.isFinished ? '✓ FINISHED' : '○ IDLE')}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#60a5fa', fontWeight: 'bold' }}>
-                  <Timer size={14} />
-                  {getTimerValue(skipper)}
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ color: '#60a5fa', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <Timer size={16} /> {getTimerValue(skipper)}
+                  </div>
+                  <div style={{ fontSize: '10px', color: skipper.isRecording ? '#22c55e' : '#ef4444' }}>
+                    {skipper.isRecording ? '● RECORDING' : '○ IDLE'}
+                  </div>
                 </div>
               </div>
-              <div style={styles.statsGrid}>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '15px' }}>
                 <div style={styles.statBox}>
                   <div style={styles.label}>Hartslag</div>
-                  <div style={{ ...styles.value, color: '#ef4444' }}><Heart size={16} fill="#ef4444" /> {skipper.bpm || 0}</div>
+                  <div style={{ ...styles.value, color: '#ef4444' }}><Heart size={16} fill="#ef4444" /> {skipper.bpm || '--'}</div>
                 </div>
                 <div style={styles.statBox}>
                   <div style={styles.label}>Stappen</div>
@@ -161,42 +210,27 @@ export default function Dashboard() {
                   <div style={styles.label}>Tempo</div>
                   <div style={{ ...styles.value, color: '#22c55e' }}><Zap size={16} fill="#22c55e" /> {currentTempo}</div>
                 </div>
+                <div style={styles.statBox}>
+                  <div style={styles.label}>Record</div>
+                  <div style={{ ...styles.value, color: '#facc15' }}><Trophy size={16} /> {personalRecord}</div>
+                </div>
               </div>
 
-              {/* Prognose box over volledige breedte */}
               <div style={{ ...styles.statBox, marginBottom: '20px', backgroundColor: 'rgba(34, 197, 94, 0.05)', borderColor: '#22c55e' }}>
-                <div style={{ ...styles.label, color: '#22c55e' }}>Verwachte Eindscore (Prognose)</div>
-                <div style={{ ...styles.value, color: '#22c55e', fontSize: '28px' }}>{calculateExpectedSteps(skipper)}</div>
+                <div style={{ ...styles.label, color: '#22c55e' }}>Verwachte Eindscore</div>
+                <div style={{ ...styles.value, color: '#22c55e', fontSize: '32px' }}>{calculateExpectedSteps(skipper)}</div>
               </div>
 
-              <div style={{ height: '220px', width: '100%', backgroundColor: '#0f172a', padding: '15px', borderRadius: '12px', boxSizing: 'border-box' }}>
+              <div style={{ height: '200px', width: '100%', backgroundColor: '#0f172a', padding: '10px', borderRadius: '12px' }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={skipperHistory.slice(-60)} margin={{ top: 5, right: 35, left: -20, bottom: 20 }}>
+                  <LineChart data={skipperHistory.slice(-60)}>
                     <CartesianGrid stroke="#1e293b" vertical={false} strokeDasharray="3 3" />
-                    <XAxis 
-                      dataKey="time" 
-                      stroke="#64748b" 
-                      fontSize={10} 
-                      label={{ value: 'Tijd', position: 'insideBottom', offset: -10, fill: '#64748b' }}
-                    />
-                    <YAxis 
-                      yAxisId="left" 
-                      domain={['dataMin - 5', 'dataMax + 5']} 
-                      stroke="#ef4444" 
-                      fontSize={10}
-                      label={{ value: 'BPM', angle: -90, position: 'insideLeft', fill: '#ef4444', offset: 10 }}
-                    />
-                    <YAxis 
-                      yAxisId="right" 
-                      orientation="right" 
-                      domain={[0, 140]} 
-                      stroke="#60a5fa" 
-                      fontSize={10}
-                      label={{ value: 'Tempo', angle: 90, position: 'insideRight', fill: '#60a5fa', offset: 10 }}
-                    />
-                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '12px' }} />
-                    <Line yAxisId="left" type="monotone" dataKey="bpm" stroke="#ef4444" strokeWidth={3} dot={false} isAnimationActive={false} name="Hartslag" />
-                    <Line yAxisId="right" type="monotone" dataKey="tempo" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} name="Tempo" />
+                    <XAxis dataKey="time" stroke="#64748b" fontSize={10} hide={true} />
+                    <YAxis yAxisId="left" domain={[40, 200]} stroke="#ef4444" fontSize={10} />
+                    <YAxis yAxisId="right" orientation="right" domain={[0, 140]} stroke="#60a5fa" fontSize={10} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', fontSize: '12px' }} />
+                    <Line yAxisId="left" type="monotone" dataKey="bpm" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    <Line yAxisId="right" type="monotone" dataKey="tempo" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
