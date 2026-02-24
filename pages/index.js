@@ -128,7 +128,7 @@ export default function SkipperDashboard() {
 
         // Check of sessie zojuist is beëindigd
         if (prevIsRecording.current === true && currentlyRecording === false && data?.isFinished) {
-          const currentRecords = getPersonalRecords();
+      //    const currentRecords = getPersonalRecords();
           const sessionType = data.sessionType || 30;
           const category = data.category || 'Training';
           const currentBest = currentRecords[sessionType][category]?.finalSteps || 0;
@@ -178,7 +178,7 @@ export default function SkipperDashboard() {
     modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }
   };
 
-  const records = getPersonalRecords();
+ // const records = getPersonalRecords();
 
   return (
     <div style={styles.container}>
@@ -219,49 +219,50 @@ export default function SkipperDashboard() {
         </div>
       )}
 
-      {/* RECORDS MODAL */}
       {showRecords && (
-        <div style={styles.modalOverlay}>
-          <div style={{ ...styles.card, width: '100%', maxWidth: '500px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}><Trophy color="#facc15"/> Persoonlijke Records</h3>
-              <X cursor="pointer" onClick={() => setShowRecords(false)} />
-            </div>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Onderdeel</th>
-                  <th style={styles.th}>Training</th>
-                  <th style={styles.th}>Wedstrijd</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[30, 120, 180].map(time => (
-                  <tr key={time}>
-                  <td style={styles.td}>{time === 30 ? '30 sec' : (time/60) + ' min'}</td>
-                    {['Training', 'Wedstrijd'].map(cat => {
-                    // We halen het record op uit de nieuwe state
-                      const rec = manualRecords[time]?.[cat];
-                      return (
-                        <td key={cat} style={styles.td}>
-                        {rec ? (
-                          <div>
-                            <div style={{ fontWeight: 'bold', color: '#facc15' }}>{rec.score} steps</div>
-                            <div style={{ fontSize: '10px', color: '#64748b' }}>{new Date(rec.date).toLocaleDateString()}</div>
-                          </div>
-                        ) : (
-                          <span style={{ color: '#475569' }}>---</span>
-                        )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+  <div style={styles.modalOverlay}>
+    <div style={{ ...styles.card, width: '100%', maxWidth: '500px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Trophy color="#facc15"/> Persoonlijke Records
+        </h3>
+        <X cursor="pointer" onClick={() => setShowRecords(false)} />
+      </div>
+      <table style={styles.table}>
+        <thead>
+          <tr>
+            <th style={styles.th}>Onderdeel</th>
+            <th style={styles.th}>Training</th>
+            <th style={styles.th}>Wedstrijd</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[30, 120, 180].map(time => (
+            <tr key={time}>
+              <td style={styles.td}>{time === 30 ? '30 sec' : (time/60) + ' min'}</td>
+              {['Training', 'Wedstrijd'].map(cat => {
+                // Haal record op uit de state die we uit Firebase laden
+                const rec = manualRecords[time]?.[cat];
+                return (
+                  <td key={cat} style={styles.td}>
+                    {rec ? (
+                      <div>
+                        <div style={{ fontWeight: 'bold', color: '#3b82f6' }}>{rec.score} steps</div>
+                        <div style={{ fontSize: '10px', color: '#64748b' }}>{new Date(rec.date).toLocaleDateString()}</div>
+                      </div>
+                    ) : (
+                      <span style={{ color: '#475569' }}>---</span>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+)}
 
       {/* Instellingen Panel */}
       {showSettings && (
