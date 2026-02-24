@@ -58,33 +58,15 @@ export default function SkipperDashboard() {
   // };
 
   useEffect(() => {
-  if (skipperName) {
-    const recordsRef = ref(db, `skipper_stats/${skipperName}/records`);
-    return onValue(recordsRef, (snapshot) => {
-      setManualRecords(snapshot.val() || {});
-    });
-  }
-}, [skipperName]);
+    if (skipperName) {
+      const recordsRef = ref(db, `skipper_stats/${skipperName}/records`);
+      return onValue(recordsRef, (snapshot) => {
+        setManualRecords(snapshot.val() || {});
+      });
+    }
+  }, [skipperName]);
 
-// In de render tabel (bij de Trophy modal):
-{[30, 120, 180].map(time => (
-  <tr key={time}>
-    <td style={styles.td}>{time === 30 ? '30 sec' : (time/60) + ' min'}</td>
-    {['Training', 'Wedstrijd'].map(cat => {
-      const rec = manualRecords[time]?.[cat];
-      return (
-        <td key={cat} style={styles.td}>
-          {rec ? (
-            <div>
-              <div style={{ fontWeight: 'bold', color: '#facc15' }}>{rec.score}</div>
-              <div style={{ fontSize: '10px', color: '#64748b' }}>{new Date(rec.date).toLocaleDateString()}</div>
-            </div>
-          ) : '---'}
-        </td>
-      );
-    })}
-  </tr>
-))}
+
 
   const connectBluetooth = async () => {
     try {
@@ -256,17 +238,23 @@ export default function SkipperDashboard() {
               <tbody>
                 {[30, 120, 180].map(time => (
                   <tr key={time}>
-                    <td style={styles.td}>{time === 30 ? '30 sec' : (time/60) + ' min'}</td>
-                    {[ 'Training', 'Wedstrijd' ].map(cat => (
-                      <td key={cat} style={styles.td}>
-                        {records[time][cat] ? (
+                  <td style={styles.td}>{time === 30 ? '30 sec' : (time/60) + ' min'}</td>
+                    {['Training', 'Wedstrijd'].map(cat => {
+                    // We halen het record op uit de nieuwe state
+                      const rec = manualRecords[time]?.[cat];
+                      return (
+                        <td key={cat} style={styles.td}>
+                        {rec ? (
                           <div>
-                            <div style={{ fontWeight: 'bold', color: '#3b82f6' }}>{records[time][cat].finalSteps}</div>
-                            <div style={{ fontSize: '10px', color: '#64748b' }}>{new Date(records[time][cat].date).toLocaleDateString()}</div>
+                            <div style={{ fontWeight: 'bold', color: '#facc15' }}>{rec.score} steps</div>
+                            <div style={{ fontSize: '10px', color: '#64748b' }}>{new Date(rec.date).toLocaleDateString()}</div>
                           </div>
-                        ) : '---'}
-                      </td>
-                    ))}
+                        ) : (
+                          <span style={{ color: '#475569' }}>---</span>
+                        )}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
