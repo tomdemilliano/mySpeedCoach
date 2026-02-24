@@ -49,6 +49,7 @@ export default function CounterPage() {
   const [sessionType, setSessionType] = useState(30);
   const [localHistory, setLocalHistory] = useState([]);
   const [isFinished, setIsFinished] = useState(false);
+  const [sessionCategory, setSessionCategory] = useState('Training');
 
   // 1. Firebase Sync: Luisteren naar actieve sessies
   useEffect(() => {
@@ -136,6 +137,7 @@ export default function CounterPage() {
       date: Date.now(),
       finalSteps: currentData.steps || 0,
       sessionType: currentData.sessionType || sessionType,
+      category: sessionCategory,
       averageBPM: currentData.bpm || 0
     });
 
@@ -200,7 +202,23 @@ export default function CounterPage() {
           isRecording={currentData?.isRecording}
           isFinished={isFinished}
         />
-
+        
+        {!currentData?.isRecording && !isFinished && (
+          <div style={{...styles.typeSelector, marginTop: '10px'}}>
+            {['Training', 'Wedstrijd'].map(cat => (
+              <button 
+                key={cat} 
+                onClick={() => setSessionCategory(cat)} 
+                style={{
+                  ...styles.typeButton(sessionCategory === cat),
+                  backgroundColor: sessionCategory === cat ? (cat === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#334155'}}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        )}
+  
         {!currentData?.isRecording && !isFinished && (
           <div style={styles.typeSelector}>
             {[30, 120, 180].map(t => (
