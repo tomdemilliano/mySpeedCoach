@@ -1,10 +1,9 @@
 import { useState, useEffect, memo } from 'react';
 import { db } from '../firebaseConfig';
 import { ref, onValue, runTransaction, update, push, query, orderByChild, equalTo } from "firebase/database";
-import { Hash, ChevronRight, Timer, Square, History, Play, Clock } from 'lucide-react';
+import { Hash, ChevronRight, Timer, Square, History, Play, Clock, Award, Check, X } from 'lucide-react';
 
 // --- GEÏSOLEERDE TIMER COMPONENT ---
-// Deze component voorkomt dat de timer bevriest wanneer de hoofd-app re-rendert door het klikken.
 const LiveTimer = memo(({ startTime, sessionType, isRecording, isFinished }) => {
   const [display, setDisplay] = useState("0:00");
 
@@ -31,7 +30,7 @@ const LiveTimer = memo(({ startTime, sessionType, isRecording, isFinished }) => 
           setDisplay(`+${mins}:${secs.toString().padStart(2, '0')}`);
         }
       }
-    }, 100); // Hoge frequentie voor vloeiende weergave
+    }, 100);
 
     return () => clearInterval(interval);
   }, [startTime, sessionType, isRecording, isFinished]);
@@ -50,6 +49,11 @@ export default function CounterPage() {
   const [localHistory, setLocalHistory] = useState([]);
   const [isFinished, setIsFinished] = useState(false);
   const [sessionCategory, setSessionCategory] = useState('Training');
+  
+  // Nieuwe states voor records
+  const [showRecordPrompt, setShowRecordPrompt] = useState(false);
+  const [currentRecord, setCurrentRecord] = useState(0);
+  const [pendingRecordData, setPendingRecordData] = useState(null);
 
   // 1. Firebase Sync: Luisteren naar actieve sessies
   useEffect(() => {
@@ -80,7 +84,17 @@ export default function CounterPage() {
     }
   }, [selectedSkipper]);
 
-  // 3. Auto-stop Logica (gebaseerd op inactiviteit)
+  // 3. Huidig record ophalen uit de specifieke stats-tabel
+  useEffect(() => {
+    if (selectedSkipper) {
+      const recordRef = ref(db, `skipper_stats/${selectedSkipper}/records/${sessionType}/${sessionCategory}`);
+      return onValue(recordRef, (snapshot) => {
+        setCurrentRecord(snapshot.val()?.score || 0);
+      });
+    }
+  }, [selectedSkipper, sessionType, sessionCategory]);
+
+  // 4. Auto-stop Logica
   useEffect(() => {
     const interval = setInterval(() => {
       if (!selectedSkipper) return;
@@ -90,7 +104,6 @@ export default function CounterPage() {
         const now = Date.now();
         const lastActivity = data.lastStepTime || data.startTime;
         
-        // AUTO-STOP check: 15 seconden geen step gedetecteerd
         if (now - lastActivity > 15000) {
           stopRecording();
         }
@@ -100,7 +113,7 @@ export default function CounterPage() {
   }, [activeSkippers, selectedSkipper]);
 
   const countStep = () => {
-    if (!selectedSkipper || isFinished) return;
+    if (!selectedSkipper || isFinished || showRecordPrompt) return;
     
     const liveRef = ref(db, `live_sessions/${selectedSkipper}`);
     const currentData = activeSkippers[selectedSkipper];
@@ -113,7 +126,8 @@ export default function CounterPage() {
         startTime: now,
         lastStepTime: now,
         isFinished: false,
-        steps: 1 
+        steps: 1,
+        category: sessionCategory // Bewaar categorie in live sessie
       });
     } else {
       update(liveRef, { lastStepTime: now });
@@ -129,19 +143,44 @@ export default function CounterPage() {
     const currentData = activeSkippers[selectedSkipper];
     if (!currentData || !currentData.isRecording) return;
 
+    const finalScore = currentData.steps || 0;
+
+    // Controleer of het een nieuw record is
+    if (finalScore > currentRecord) {
+      setPendingRecordData(currentData);
+      setShowRecordPrompt(true);
+    } else {
+      finalizeSession(currentData);
+    }
+  };
+
+  const finalizeSession = (data) => {
     const liveRef = ref(db, `live_sessions/${selectedSkipper}`);
     update(liveRef, { isRecording: false, isFinished: true });
 
     push(ref(db, 'session_history'), {
       skipper: selectedSkipper,
       date: Date.now(),
-      finalSteps: currentData.steps || 0,
-      sessionType: currentData.sessionType || sessionType,
+      finalSteps: data.steps || 0,
+      sessionType: data.sessionType || sessionType,
       category: sessionCategory,
-      averageBPM: currentData.bpm || 0
+      averageBPM: data.bpm || 0
     });
 
     setIsFinished(true);
+  };
+
+  const handleRecordChoice = (confirm) => {
+    if (confirm && pendingRecordData) {
+      update(ref(db, `skipper_stats/${selectedSkipper}/records/${sessionType}/${sessionCategory}`), {
+        score: pendingRecordData.steps,
+        date: Date.now()
+      });
+    }
+    
+    finalizeSession(pendingRecordData);
+    setShowRecordPrompt(false);
+    setPendingRecordData(null);
   };
 
   const startNewSession = () => {
@@ -162,7 +201,9 @@ export default function CounterPage() {
     historySection: { marginTop: '40px', width: '100%', maxWidth: '400px' },
     historyItem: { backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px', marginBottom: '8px', fontSize: '14px', display: 'flex', justifyContent: 'space-between', borderLeft: '4px solid #3b82f6' },
     typeSelector: { display: 'flex', gap: '10px', marginBottom: '20px' },
-    typeButton: (active) => ({ padding: '10px 20px', borderRadius: '8px', border: 'none', backgroundColor: active ? '#3b82f6' : '#334155', color: 'white', fontWeight: 'bold', cursor: 'pointer' })
+    typeButton: (active) => ({ padding: '10px 20px', borderRadius: '8px', border: 'none', backgroundColor: active ? '#3b82f6' : '#334155', color: 'white', fontWeight: 'bold', cursor: 'pointer' }),
+    modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' },
+    modalCard: { backgroundColor: '#1e293b', padding: '30px', borderRadius: '20px', textAlign: 'center', border: '2px solid #facc15', maxWidth: '350px', width: '100%' }
   };
 
   if (!selectedSkipper) {
@@ -188,6 +229,26 @@ export default function CounterPage() {
 
   return (
     <div style={styles.container}>
+      {/* RECORD MODAL */}
+      {showRecordPrompt && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modalCard}>
+            <Award size={60} color="#facc15" style={{ marginBottom: '15px', marginLeft: 'auto', marginRight: 'auto' }} />
+            <h2 style={{ color: '#facc15', fontSize: '24px', margin: '0' }}>NIEUW RECORD!</h2>
+            <p style={{ fontSize: '24px', fontWeight: 'bold', margin: '15px 0' }}>{pendingRecordData?.steps} steps</p>
+            <p style={{ color: '#94a3b8', marginBottom: '25px' }}>Wil je dit record opslaan bij je prestaties?</p>
+            <div style={{ display: 'flex', gap: '15px' }}>
+              <button onClick={() => handleRecordChoice(true)} style={{ flex: 1, padding: '15px', backgroundColor: '#22c55e', border: 'none', borderRadius: '10px', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
+                <Check size={20} /> JA
+              </button>
+              <button onClick={() => handleRecordChoice(false)} style={{ flex: 1, padding: '15px', backgroundColor: '#ef4444', border: 'none', borderRadius: '10px', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
+                <X size={20} /> NEE
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <button style={styles.backButton} onClick={() => { setSelectedSkipper(null); setIsFinished(false); }}>
         ← Andere skipper
       </button>
@@ -195,7 +256,6 @@ export default function CounterPage() {
       <div style={{ textAlign: 'center', marginBottom: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <h2 style={{ margin: '0 0 10px 0', fontSize: '28px' }}>{selectedSkipper}</h2>
         
-        {/* De LiveTimer component zorgt voor een soepele timer die niet blokkeert */}
         <LiveTimer 
           startTime={currentData?.startTime} 
           sessionType={currentData?.sessionType || sessionType}
@@ -232,7 +292,7 @@ export default function CounterPage() {
 
       <button 
         style={{ ...styles.tapButton, backgroundColor: isFinished ? '#22c55e' : '#3b82f6' }} 
-        onPointerDown={(e) => { if(!isFinished) { e.currentTarget.style.transform = 'scale(0.95)'; countStep(); } }}
+        onPointerDown={(e) => { if(!isFinished && !showRecordPrompt) { e.currentTarget.style.transform = 'scale(0.95)'; countStep(); } }}
         onPointerUp={(e) => { if(!isFinished) e.currentTarget.style.transform = 'scale(1)'; }}
       >
         {currentData?.steps || 0}
