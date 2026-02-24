@@ -16,21 +16,27 @@ export default function Dashboard() {
   const [sessions, setSessions] = useState({});
   const [history, setHistory] = useState({});
   const [selectedSkippers, setSelectedSkippers] = useState([]);
-  const [allRecords, setAllRecords] = useState({});
+  const [allStats, setAllStats] = useState({}); // Bevat nu records én zones
   const [viewMode, setViewMode] = useState('selection');
-  const [zones] = useState(DEFAULT_ZONES);
   
   const lastStepsRef = useRef({});
   const currentSessionsRef = useRef({});
 
-  const getZoneColor = (bpm) => {
+  // Functie om de juiste zones voor een specifieke skipper te bepalen
+  const getSkipperZones = (name) => {
+    return allStats[name]?.zones || DEFAULT_ZONES;
+  };
+
+  // Functie om kleur te bepalen op basis van persoonlijke zones
+  const getZoneColor = (bpm, name) => {
+    const zones = getSkipperZones(name);
     const zone = zones.find(z => bpm >= z.min && bpm < z.max);
     return zone ? zone.color : '#94a3b8';
   };
 
   useEffect(() => {
     const sessionsRef = ref(db, 'live_sessions/');
-    const recordsRef = ref(db, 'skipper_stats/');
+    const statsRef = ref(db, 'skipper_stats/');
 
     const unsubSessions = onValue(sessionsRef, (snapshot) => {
       const data = snapshot.val() || {};
@@ -38,13 +44,13 @@ export default function Dashboard() {
       currentSessionsRef.current = data;
     });
 
-    const unsubRecords = onValue(recordsRef, (snapshot) => {
-      setAllRecords(snapshot.val() || {});
+    const unsubStats = onValue(statsRef, (snapshot) => {
+      setAllStats(snapshot.val() || {});
     });
 
     return () => {
       unsubSessions();
-      unsubRecords();
+      unsubStats();
     };
   }, []);
 
@@ -110,7 +116,7 @@ export default function Dashboard() {
   const getPersonalRecord = (name, type, cat) => {
     const sessionType = type || 30;
     const sessionCat = cat || 'Training';
-    return allRecords[name]?.records?.[sessionType]?.[sessionCat]?.score || '---';
+    return allStats[name]?.records?.[sessionType]?.[sessionCat]?.score || '---';
   };
 
   const styles = {
@@ -180,6 +186,10 @@ export default function Dashboard() {
           const currentTempo = skipperHistory.length > 0 ? skipperHistory[skipperHistory.length - 1].tempo : 0;
           const personalRecord = getPersonalRecord(name, skipper.sessionType, skipper.category);
           const currentBpm = skipper.bpm || 0;
+          
+          // Haal persoonlijke zones voor deze skipper op
+          const currentZones = getSkipperZones(name);
+          const currentHrColor = getZoneColor(currentBpm, name);
 
           const getTimerValue = (s) => {
             if (!s.startTime) return "0:00";
@@ -202,8 +212,8 @@ export default function Dashboard() {
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ color: '#60a5fa', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <div style={{ color: getZoneColor(currentBpm), display: 'flex', alignItems: 'center', gap: '4px', marginRight: '10px' }}>
-                       <Heart size={14} fill={getZoneColor(currentBpm)} /> {currentBpm}
+                    <div style={{ color: currentHrColor, display: 'flex', alignItems: 'center', gap: '4px', marginRight: '10px' }}>
+                       <Heart size={14} fill={currentHrColor} /> {currentBpm}
                     </div>
                     <Timer size={16} /> {getTimerValue(skipper)}
                   </div>
@@ -216,8 +226,8 @@ export default function Dashboard() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '15px' }}>
                 <div style={styles.statBox}>
                   <div style={styles.label}>Hartslag</div>
-                  <div style={{ ...styles.value, color: getZoneColor(currentBpm) }}>
-                    <Heart size={16} fill={getZoneColor(currentBpm)} /> {currentBpm || '--'}
+                  <div style={{ ...styles.value, color: currentHrColor }}>
+                    <Heart size={16} fill={currentHrColor} /> {currentBpm || '--'}
                   </div>
                 </div>
                 <div style={styles.statBox}>
@@ -248,8 +258,8 @@ export default function Dashboard() {
                     <YAxis yAxisId="right" orientation="right" domain={[0, 140]} stroke="#60a5fa" fontSize={10} />
                     <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', fontSize: '12px' }} />
                     
-                    {/* Hartslagzones Achtergrond */}
-                    {zones.map(zone => (
+                    {/* Persoonlijke Hartslagzones op de achtergrond */}
+                    {currentZones.map(zone => (
                       <ReferenceArea 
                         key={zone.name} 
                         yAxisId="left"
@@ -260,7 +270,7 @@ export default function Dashboard() {
                       />
                     ))}
 
-                    <Line yAxisId="left" type="monotone" dataKey="bpm" stroke={getZoneColor(currentBpm)} strokeWidth={3} dot={false} isAnimationActive={false} />
+                    <Line yAxisId="left" type="monotone" dataKey="bpm" stroke={currentHrColor} strokeWidth={3} dot={false} isAnimationActive={false} />
                     <Line yAxisId="right" type="monotone" dataKey="tempo" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>
