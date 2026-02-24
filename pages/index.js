@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebaseConfig';
 import { ref, onValue, update, query, orderByChild, equalTo } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from 'recharts';
-import { Bluetooth, Heart, User, Settings, History, Save, Trophy, X, Check, Award } from 'lucide-react';
+import { Bluetooth, Heart, User, Settings, History, Save, Trophy, X, Check, Award, Edit2 } from 'lucide-react';
 
 const DEFAULT_ZONES = [
   { name: 'Warm-up', min: 0, max: 120, color: '#94a3b8' },
@@ -29,6 +29,8 @@ export default function SkipperDashboard() {
   const [sessionHistory, setSessionHistory] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [manualRecords, setManualRecords] = useState({});
+  const [editingRecord, setEditingRecord] = useState(null); // { time, cat, value }
+  
   const lastSentBpm = useRef(0);
   const prevIsRecording = useRef(false);
 
@@ -37,26 +39,7 @@ export default function SkipperDashboard() {
     return zone ? zone.color : '#94a3b8';
   };
 
-  // Record Berekening
-  // const getPersonalRecords = () => {
-  //   const records = {
-  //     30: { Training: null, Wedstrijd: null },
-  //     120: { Training: null, Wedstrijd: null },
-  //     180: { Training: null, Wedstrijd: null }
-  //   };
-
-  //   sessionHistory.forEach(session => {
-  //     const type = session.sessionType;
-  //     const cat = session.category || 'Training';
-  //     if (records[type]) {
-  //       if (!records[type][cat] || session.finalSteps > records[type][cat].finalSteps) {
-  //         records[type][cat] = session;
-  //       }
-  //     }
-  //   });
-  //   return records;
-  // };
-
+  // Records inladen uit Firebase
   useEffect(() => {
     if (skipperName) {
       const recordsRef = ref(db, `skipper_stats/${skipperName}/records`);
@@ -65,8 +48,6 @@ export default function SkipperDashboard() {
       });
     }
   }, [skipperName]);
-
-
 
   const connectBluetooth = async () => {
     try {
@@ -102,13 +83,23 @@ export default function SkipperDashboard() {
     setIsConfirmingName(false);
   };
 
+  const saveManualRecord = () => {
+    if (!editingRecord || isNaN(editingRecord.value)) return;
+    
+    update(ref(db, `skipper_stats/${skipperName}/records/${editingRecord.time}/${editingRecord.cat}`), {
+      score: parseInt(editingRecord.value),
+      date: Date.now()
+    });
+    setEditingRecord(null);
+  };
+
   useEffect(() => {
     setIsClient(true);
     const savedZones = localStorage.getItem('hr_zones');
     if (savedZones) setZones(JSON.parse(savedZones));
   }, []);
   
-  // Firebase Sync & Record Check
+  // Firebase Sync & Live Updates
   useEffect(() => {
     if (isConnected && skipperName && heartRate > 0) {
       if (heartRate !== lastSentBpm.current) {
@@ -128,10 +119,9 @@ export default function SkipperDashboard() {
 
         // Check of sessie zojuist is beëindigd
         if (prevIsRecording.current === true && currentlyRecording === false && data?.isFinished) {
-      //    const currentRecords = getPersonalRecords();
           const sessionType = data.sessionType || 30;
           const category = data.category || 'Training';
-          const currentBest = currentRecords[sessionType][category]?.finalSteps || 0;
+          const currentBest = manualRecords[sessionType]?.[category]?.score || 0;
 
           if (data.steps > currentBest) {
             setNewRecordAlert(data);
@@ -141,7 +131,7 @@ export default function SkipperDashboard() {
         setIsRecording(currentlyRecording);
       });
     }
-  }, [heartRate, isConnected, skipperName, sessionHistory]);
+  }, [heartRate, isConnected, skipperName, sessionHistory, manualRecords]);
 
   useEffect(() => {
     if (skipperName) {
@@ -171,14 +161,13 @@ export default function SkipperDashboard() {
     bpmText: { fontSize: '72px', fontWeight: '900', color: getZoneColor(heartRate), margin: '10px 0', textAlign: 'center' },
     btn: { backgroundColor: '#3b82f6', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' },
     input: { backgroundColor: '#0f172a', border: '1px solid #334155', color: 'white', padding: '8px', borderRadius: '5px', width: '60px' },
+    editInput: { backgroundColor: '#0f172a', border: '1px solid #334155', color: 'white', padding: '5px', borderRadius: '5px', width: '50px', textAlign: 'center' },
     nameDisplay: { fontSize: '18px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' },
     table: { width: '100%', borderCollapse: 'collapse', marginTop: '10px' },
     th: { textAlign: 'left', padding: '10px', color: '#94a3b8', borderBottom: '1px solid #334155' },
     td: { padding: '10px', borderBottom: '1px solid #334155' },
     modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }
   };
-
- // const records = getPersonalRecords();
 
   return (
     <div style={styles.container}>
@@ -219,50 +208,67 @@ export default function SkipperDashboard() {
         </div>
       )}
 
+      {/* RECORDS MODAL MET HANDMATIGE AANPASSING */}
       {showRecords && (
-  <div style={styles.modalOverlay}>
-    <div style={{ ...styles.card, width: '100%', maxWidth: '500px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Trophy color="#facc15"/> Persoonlijke Records
-        </h3>
-        <X cursor="pointer" onClick={() => setShowRecords(false)} />
-      </div>
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            <th style={styles.th}>Onderdeel</th>
-            <th style={styles.th}>Training</th>
-            <th style={styles.th}>Wedstrijd</th>
-          </tr>
-        </thead>
-        <tbody>
-          {[30, 120, 180].map(time => (
-            <tr key={time}>
-              <td style={styles.td}>{time === 30 ? '30 sec' : (time/60) + ' min'}</td>
-              {['Training', 'Wedstrijd'].map(cat => {
-                // Haal record op uit de state die we uit Firebase laden
-                const rec = manualRecords[time]?.[cat];
-                return (
-                  <td key={cat} style={styles.td}>
-                    {rec ? (
-                      <div>
-                        <div style={{ fontWeight: 'bold', color: '#3b82f6' }}>{rec.score} steps</div>
-                        <div style={{ fontSize: '10px', color: '#64748b' }}>{new Date(rec.date).toLocaleDateString()}</div>
-                      </div>
-                    ) : (
-                      <span style={{ color: '#475569' }}>---</span>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </div>
-)}
+        <div style={styles.modalOverlay}>
+          <div style={{ ...styles.card, width: '100%', maxWidth: '500px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Trophy color="#facc15"/> Persoonlijke Records
+              </h3>
+              <X cursor="pointer" onClick={() => setShowRecords(false)} />
+            </div>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={styles.th}>Onderdeel</th>
+                  <th style={styles.th}>Training</th>
+                  <th style={styles.th}>Wedstrijd</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[30, 120, 180].map(time => (
+                  <tr key={time}>
+                    <td style={styles.td}>{time === 30 ? '30 sec' : (time/60) + ' min'}</td>
+                    {['Training', 'Wedstrijd'].map(cat => {
+                      const rec = manualRecords[time]?.[cat];
+                      const isEditing = editingRecord?.time === time && editingRecord?.cat === cat;
+                      return (
+                        <td key={cat} style={styles.td}>
+                          {isEditing ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                              <input 
+                                autoFocus
+                                style={styles.editInput}
+                                value={editingRecord.value}
+                                onChange={(e) => setEditingRecord({...editingRecord, value: e.target.value})}
+                              />
+                              <button onClick={saveManualRecord} style={{ background: 'none', border: 'none', color: '#22c55e', cursor: 'pointer' }}>
+                                <Check size={16}/>
+                              </button>
+                            </div>
+                          ) : (
+                            <div 
+                              onClick={() => setEditingRecord({ time, cat, value: rec?.score || 0 })}
+                              style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
+                            >
+                              <div style={{ fontWeight: 'bold', color: rec ? '#3b82f6' : '#475569', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                {rec ? `${rec.score} steps` : '---'}
+                                <Edit2 size={10} style={{ opacity: 0.5 }} />
+                              </div>
+                              {rec && <div style={{ fontSize: '10px', color: '#64748b' }}>{new Date(rec.date).toLocaleDateString()}</div>}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Instellingen Panel */}
       {showSettings && (
