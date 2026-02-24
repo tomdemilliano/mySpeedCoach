@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db } from './firebaseConfig';
+import { db } from '../firebaseConfig';
 import { ref, onValue, update, query, orderByChild, equalTo } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from 'recharts';
 import { Bluetooth, Heart, User, Settings, History, Check, X } from 'lucide-react';
