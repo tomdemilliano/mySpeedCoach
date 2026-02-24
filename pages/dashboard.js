@@ -58,6 +58,8 @@ export default function Dashboard() {
 
   // Logica voor de prognose (Verwachte stappen)
   const calculateExpectedSteps = (skipper) => {
+    if (skipper.isFinished) return skipper.steps || 0;
+    
     if (!skipper.isRecording || !skipper.startTime || !skipper.sessionType) return 0;
     
     const elapsedSeconds = (Date.now() - skipper.startTime) / 1000;
@@ -115,8 +117,8 @@ export default function Dashboard() {
                   <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold', color: '#f8fafc' }}>{name}</h2>
                   <span style={styles.badge}>{formatSessionType(skipper.sessionType)}</span>
                 </div>
-                <div style={{ color: skipper.isRecording ? '#22c55e' : '#ef4444', fontSize: '10px', fontWeight: 'bold' }}>
-                  {skipper.isRecording ? '● RECORDING' : '○ IDLE'}
+                <div style={{ color: skipper.isRecording ? '#22c55e' : (skipper.isFinished ? '#facc15' : '#ef4444'), fontSize: '10px', fontWeight: 'bold' }}>
+                  {skipper.isRecording ? '● LIVE' : (skipper.isFinished ? '✓ FINISHED' : '○ IDLE')}
                 </div>
               </div>
 
