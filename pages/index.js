@@ -21,11 +21,8 @@ export default function SkipperDashboard() {
   const [isConfirmingName, setIsConfirmingName] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   
-  // Zones state (laden uit localStorage of defaults)
-  const [zones, setZones] = useState(() => {
-    const saved = localStorage.getItem('hr_zones');
-    return saved ? JSON.parse(saved) : DEFAULT_ZONES;
-  });
+  const [zones, setZones] = useState(DEFAULT_ZONES);
+  const [isClient, setIsClient] = useState(false);
 
   const [historyData, setHistoryData] = useState([]);
   const [sessionHistory, setSessionHistory] = useState([]);
@@ -72,6 +69,20 @@ export default function SkipperDashboard() {
     setIsConfirmingName(false);
   };
 
+  // Gebruik een useEffect om data uit localStorage te laden bij de start
+  useEffect(() => {
+    setIsClient(true);
+  
+    // Laad zones
+    const savedZones = localStorage.getItem('hr_zones');
+    if (savedZones) {
+      setZones(JSON.parse(savedZones));
+    }
+
+    // Als er al een verbonden device was, probeer de naam te herstellen
+    // (Optioneel: je kan hier ook checken op deviceName als die nog in state staat)
+  }, []);
+  
   // 2. Firebase Sync & Monitoring
   useEffect(() => {
     if (isConnected && skipperName && heartRate > 0) {
@@ -111,6 +122,8 @@ export default function SkipperDashboard() {
   };
 
   const saveSettings = () => {
+    if (typeof window === 'undefined') return;
+    
     // Validatie: Sluiten ze op elkaar aan? Geen overlap?
     for (let i = 0; i < zones.length; i++) {
       if (zones[i].min >= zones[i].max) {
