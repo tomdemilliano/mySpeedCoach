@@ -2,9 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebaseConfig';
 import { ref, onValue, update, query, orderByChild, equalTo } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from 'recharts';
-import { Bluetooth, Heart, User, Settings, History, Check, X, Save, AlertCircle } from 'lucide-react';
+import { Bluetooth, Heart, User, Settings, History, Save, Trophy, X, Check, Award } from 'lucide-react';
 
-// Default hartslagzones
 const DEFAULT_ZONES = [
   { name: 'Warm-up', min: 0, max: 120, color: '#94a3b8' },
   { name: 'Fat Burn', min: 120, max: 145, color: '#22c55e' },
@@ -20,6 +19,8 @@ export default function SkipperDashboard() {
   const [deviceName, setDeviceName] = useState('');
   const [isConfirmingName, setIsConfirmingName] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showRecords, setShowRecords] = useState(false);
+  const [newRecordAlert, setNewRecordAlert] = useState(null);
   
   const [zones, setZones] = useState(DEFAULT_ZONES);
   const [isClient, setIsClient] = useState(false);
@@ -28,13 +29,33 @@ export default function SkipperDashboard() {
   const [sessionHistory, setSessionHistory] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const lastSentBpm = useRef(0);
+  const prevIsRecording = useRef(false);
 
   const getZoneColor = (bpm) => {
     const zone = zones.find(z => bpm >= z.min && bpm < z.max);
     return zone ? zone.color : '#94a3b8';
   };
 
-  // 1. Bluetooth & Pairing Logica
+  // Record Berekening
+  const getPersonalRecords = () => {
+    const records = {
+      30: { Training: null, Wedstrijd: null },
+      120: { Training: null, Wedstrijd: null },
+      180: { Training: null, Wedstrijd: null }
+    };
+
+    sessionHistory.forEach(session => {
+      const type = session.sessionType;
+      const cat = session.category || 'Training';
+      if (records[type]) {
+        if (!records[type][cat] || session.finalSteps > records[type][cat].finalSteps) {
+          records[type][cat] = session;
+        }
+      }
+    });
+    return records;
+  };
+
   const connectBluetooth = async () => {
     try {
       const device = await navigator.bluetooth.requestDevice({
@@ -69,21 +90,13 @@ export default function SkipperDashboard() {
     setIsConfirmingName(false);
   };
 
-  // Gebruik een useEffect om data uit localStorage te laden bij de start
   useEffect(() => {
     setIsClient(true);
-  
-    // Laad zones
     const savedZones = localStorage.getItem('hr_zones');
-    if (savedZones) {
-      setZones(JSON.parse(savedZones));
-    }
-
-    // Als er al een verbonden device was, probeer de naam te herstellen
-    // (Optioneel: je kan hier ook checken op deviceName als die nog in state staat)
+    if (savedZones) setZones(JSON.parse(savedZones));
   }, []);
   
-  // 2. Firebase Sync & Monitoring
+  // Firebase Sync & Record Check
   useEffect(() => {
     if (isConnected && skipperName && heartRate > 0) {
       if (heartRate !== lastSentBpm.current) {
@@ -98,12 +111,26 @@ export default function SkipperDashboard() {
       setHistoryData(prev => [...prev, { time: now, bpm: heartRate }].slice(-100));
 
       return onValue(ref(db, `live_sessions/${skipperName}`), (snapshot) => {
-        setIsRecording(snapshot.val()?.isRecording || false);
+        const data = snapshot.val();
+        const currentlyRecording = data?.isRecording || false;
+
+        // Check of sessie zojuist is beëindigd
+        if (prevIsRecording.current === true && currentlyRecording === false && data?.isFinished) {
+          const currentRecords = getPersonalRecords();
+          const sessionType = data.sessionType || 30;
+          const category = data.category || 'Training';
+          const currentBest = currentRecords[sessionType][category]?.finalSteps || 0;
+
+          if (data.steps > currentBest) {
+            setNewRecordAlert(data);
+          }
+        }
+        prevIsRecording.current = currentlyRecording;
+        setIsRecording(currentlyRecording);
       });
     }
-  }, [heartRate, isConnected, skipperName]);
+  }, [heartRate, isConnected, skipperName, sessionHistory]);
 
-  // 3. Historiek ophalen
   useEffect(() => {
     if (skipperName) {
       const hRef = query(ref(db, 'session_history'), orderByChild('skipper'), equalTo(skipperName));
@@ -114,7 +141,6 @@ export default function SkipperDashboard() {
     }
   }, [skipperName]);
 
-  // 4. Instellingen Validatie & Opslaan
   const handleZoneChange = (index, field, value) => {
     const newZones = [...zones];
     newZones[index][field] = parseInt(value) || 0;
@@ -122,21 +148,7 @@ export default function SkipperDashboard() {
   };
 
   const saveSettings = () => {
-    if (typeof window === 'undefined') return;
-    
-    // Validatie: Sluiten ze op elkaar aan? Geen overlap?
-    for (let i = 0; i < zones.length; i++) {
-      if (zones[i].min >= zones[i].max) {
-        alert(`Fout in ${zones[i].name}: Minimum moet lager zijn dan maximum.`);
-        return;
-      }
-      if (i > 0 && zones[i].min !== zones[i-1].max) {
-        alert(`Zones moeten op elkaar aansluiten. ${zones[i].name} moet starten op ${zones[i-1].max}.`);
-        return;
-      }
-    }
     localStorage.setItem('hr_zones', JSON.stringify(zones));
-    localStorage.setItem(`hrm_${deviceName}`, skipperName);
     setShowSettings(false);
     alert("Instellingen opgeslagen!");
   };
@@ -147,8 +159,14 @@ export default function SkipperDashboard() {
     bpmText: { fontSize: '72px', fontWeight: '900', color: getZoneColor(heartRate), margin: '10px 0', textAlign: 'center' },
     btn: { backgroundColor: '#3b82f6', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' },
     input: { backgroundColor: '#0f172a', border: '1px solid #334155', color: 'white', padding: '8px', borderRadius: '5px', width: '60px' },
-    nameDisplay: { fontSize: '18px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }
+    nameDisplay: { fontSize: '18px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' },
+    table: { width: '100%', borderCollapse: 'collapse', marginTop: '10px' },
+    th: { textAlign: 'left', padding: '10px', color: '#94a3b8', borderBottom: '1px solid #334155' },
+    td: { padding: '10px', borderBottom: '1px solid #334155' },
+    modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }
   };
+
+  const records = getPersonalRecords();
 
   return (
     <div style={styles.container}>
@@ -160,28 +178,81 @@ export default function SkipperDashboard() {
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
           {isConnected && (
-            <button onClick={() => setShowSettings(!showSettings)} style={{ ...styles.btn, backgroundColor: '#475569' }}>
-              <Settings size={20} />
-            </button>
+            <>
+              <button onClick={() => setShowRecords(true)} style={{ ...styles.btn, backgroundColor: '#facc15', color: '#000' }}>
+                <Trophy size={20} />
+              </button>
+              <button onClick={() => setShowSettings(!showSettings)} style={{ ...styles.btn, backgroundColor: '#475569' }}>
+                <Settings size={20} />
+              </button>
+            </>
           )}
           {!isConnected && <button onClick={connectBluetooth} style={styles.btn}><Bluetooth size={20} /> Koppel HRM</button>}
         </div>
       </div>
 
+      {/* NEW RECORD ALERT MODAL */}
+      {newRecordAlert && (
+        <div style={styles.modalOverlay}>
+          <div style={{ ...styles.card, maxWidth: '400px', textAlign: 'center', borderColor: '#facc15', borderWidth: '2px' }}>
+            <Award size={64} color="#facc15" style={{ marginBottom: '15px' }} />
+            <h2 style={{ color: '#facc15', margin: '0 0 10px 0' }}>NIEUW RECORD!</h2>
+            <p>Je hebt <strong>{newRecordAlert.steps} steps</strong> gehaald op de {newRecordAlert.sessionType}s {newRecordAlert.category}!</p>
+            <p style={{ fontSize: '14px', color: '#94a3b8' }}>Klopt dit aantal stappen?</p>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+              <button onClick={() => setNewRecordAlert(null)} style={{ ...styles.btn, flex: 1, backgroundColor: '#22c55e' }}><Check size={18}/> Ja, bewaar!</button>
+              <button onClick={() => setNewRecordAlert(null)} style={{ ...styles.btn, flex: 1, backgroundColor: '#ef4444' }}><X size={18}/> Nee</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECORDS MODAL */}
+      {showRecords && (
+        <div style={styles.modalOverlay}>
+          <div style={{ ...styles.card, width: '100%', maxWidth: '500px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}><Trophy color="#facc15"/> Persoonlijke Records</h3>
+              <X cursor="pointer" onClick={() => setShowRecords(false)} />
+            </div>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={styles.th}>Onderdeel</th>
+                  <th style={styles.th}>Training</th>
+                  <th style={styles.th}>Wedstrijd</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[30, 120, 180].map(time => (
+                  <tr key={time}>
+                    <td style={styles.td}>{time === 30 ? '30 sec' : (time/60) + ' min'}</td>
+                    {[ 'Training', 'Wedstrijd' ].map(cat => (
+                      <td key={cat} style={styles.td}>
+                        {records[time][cat] ? (
+                          <div>
+                            <div style={{ fontWeight: 'bold', color: '#3b82f6' }}>{records[time][cat].finalSteps}</div>
+                            <div style={{ fontSize: '10px', color: '#64748b' }}>{new Date(records[time][cat].date).toLocaleDateString()}</div>
+                          </div>
+                        ) : '---'}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Instellingen Panel */}
       {showSettings && (
         <div style={{ ...styles.card, borderColor: '#3b82f6' }}>
           <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: '10px' }}><Settings size={20}/> Beheer Instellingen</h3>
-          
           <div style={{ marginBottom: '20px' }}>
             <label style={{ display: 'block', marginBottom: '8px', color: '#94a3b8' }}>Naam aanpassen:</label>
-            <input 
-              style={{ ...styles.input, width: '200px' }} 
-              value={skipperName} 
-              onChange={(e) => setSkipperName(e.target.value)} 
-            />
+            <input style={{ ...styles.input, width: '200px' }} value={skipperName} onChange={(e) => setSkipperName(e.target.value)} />
           </div>
-
           <label style={{ display: 'block', marginBottom: '10px', color: '#94a3b8' }}>Hartslagzones (BPM):</label>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {zones.map((zone, idx) => (
@@ -194,25 +265,13 @@ export default function SkipperDashboard() {
               </div>
             ))}
           </div>
-
           <button onClick={saveSettings} style={{ ...styles.btn, marginTop: '20px', width: '100%', justifyContent: 'center' }}>
             <Save size={18} /> Instellingen Opslaan
           </button>
         </div>
       )}
 
-      {/* Naam Bevestiging (Quick actions) */}
-      {isConfirmingName && !showSettings && (
-        <div style={{ backgroundColor: '#3b82f6', padding: '15px', borderRadius: '10px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>Ben jij <strong>{skipperName}</strong>?</span>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button onClick={() => setIsConfirmingName(false)} style={{ backgroundColor: '#22c55e', border: 'none', color: 'white', padding: '5px 15px', borderRadius: '5px', cursor: 'pointer' }}>Ja</button>
-            <button onClick={() => setShowSettings(true)} style={{ backgroundColor: '#ef4444', border: 'none', color: 'white', padding: '5px 15px', borderRadius: '5px', cursor: 'pointer' }}>Nee, aanpassen</button>
-          </div>
-        </div>
-      )}
-
-      {/* Main Dashboard UI (Bestaande layout behouden) */}
+      {/* Main Dashboard UI */}
       <div style={styles.card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ color: '#94a3b8', fontWeight: 'bold' }}>LIVE HARTSLAG</span>
