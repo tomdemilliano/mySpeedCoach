@@ -1,23 +1,30 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebaseConfig';
 import { ref, onValue, runTransaction, update, push, query, orderByChild, equalTo } from "firebase/database";
-import { Hash, ChevronRight, Timer, Square, History } from 'lucide-react';
+import { Hash, ChevronRight, Timer, Square, History, Play } from 'lucide-react';
 
 export default function CounterPage() {
   const [activeSkippers, setActiveSkippers] = useState({});
   const [selectedSkipper, setSelectedSkipper] = useState(null);
-  const [sessionType, setSessionType] = useState(30); // Standaard 30 seconden
+  const [sessionType, setSessionType] = useState(30);
   const [localHistory, setLocalHistory] = useState([]);
+  const [isFinished, setIsFinished] = useState(false); // Nieuwe staat voor resultaat-scherm
 
+  // Sync met Firebase
   useEffect(() => {
     const sessionsRef = ref(db, 'live_sessions/');
     return onValue(sessionsRef, (snapshot) => {
       const data = snapshot.val() || {};
       setActiveSkippers(data);
+      
+      // Sync de lokale isFinished status met de DB
+      if (selectedSkipper && data[selectedSkipper]) {
+        setIsFinished(data[selectedSkipper].isFinished || false);
+      }
     });
-  }, []);
+  }, [selectedSkipper]);
 
-  // Haal de geschiedenis op voor de geselecteerde skipper
+  // Haal de geschiedenis op
   useEffect(() => {
     if (selectedSkipper) {
       const historyRef = query(
@@ -33,70 +40,98 @@ export default function CounterPage() {
     }
   }, [selectedSkipper]);
 
-  // Functie om stappen te tellen en opname te starten
   const countStep = () => {
-    if (!selectedSkipper) return;
+    if (!selectedSkipper || isFinished) return;
     
     const liveRef = ref(db, `live_sessions/${selectedSkipper}`);
     const currentData = activeSkippers[selectedSkipper];
 
-    if (!currentData?.isRecording && (currentData?.steps || 0) === 0) {
+    // Start opname bij de allereerste klik als er nog niet opgenomen wordt
+    if (!currentData?.isRecording && !isFinished) {
       update(liveRef, { 
         isRecording: true, 
         sessionType: sessionType,
-        startTime: Date.now() 
+        startTime: Date.now(),
+        isFinished: false,
+        steps: 1 // Start direct op 1 bij de eerste tik
+      });
+    } else {
+      // Normale teller transactie
+      const stepRef = ref(db, `live_sessions/${selectedSkipper}/steps`);
+      runTransaction(stepRef, (currentSteps) => {
+        return (currentSteps || 0) + 1;
       });
     }
-
-    const stepRef = ref(db, `live_sessions/${selectedSkipper}/steps`);
-    runTransaction(stepRef, (currentSteps) => {
-      return (currentSteps || 0) + 1;
-    });
   };
 
-  // Functie om de opname handmatig te stoppen en te resetten
   const stopRecording = () => {
     if (!selectedSkipper) return;
     const currentData = activeSkippers[selectedSkipper];
     const liveRef = ref(db, `live_sessions/${selectedSkipper}`);
     
-    // De counter wordt hier op 0 gezet, waardoor de onderdeel-kiezer weer verschijnt
+    // 1. Zet opname stop in DB maar behoud stappen
     update(liveRef, { 
       isRecording: false,
+      isFinished: true 
+    });
+
+    // 2. Sla op in geschiedenis (bestaande functionaliteit)
+    const historyRef = ref(db, 'session_history');
+    push(historyRef, {
+      skipper: selectedSkipper,
+      date: Date.now(),
+      finalSteps: currentData?.steps || 0,
+      sessionType: sessionType,
+      averageBPM: currentData?.bpm || 0
+    });
+
+    setIsFinished(true);
+  };
+
+  const startNewSession = () => {
+    if (!selectedSkipper) return;
+    const liveRef = ref(db, `live_sessions/${selectedSkipper}`);
+    
+    // Reset alles voor een schone start
+    update(liveRef, { 
       steps: 0,
+      isRecording: false,
+      isFinished: false,
       startTime: null
     });
+    setIsFinished(false);
   };
 
+  // STYLES (Identiek aan origineel)
   const styles = {
-    container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '20px' },
-    card: { backgroundColor: '#1e293b', padding: '20px', borderRadius: '15px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' },
-    tapButton: { width: '100%', aspectRatio: '1/1', borderRadius: '50%', border: 'none', backgroundColor: '#3b82f6', color: 'white', fontSize: '80px', fontWeight: 'bold', boxShadow: '0 10px 25px -5px rgba(59, 130, 246, 0.5)', cursor: 'pointer', transition: 'transform 0.1s' },
-    backButton: { backgroundColor: 'transparent', border: '1px solid #334155', color: '#94a3b8', padding: '8px 16px', borderRadius: '8px', marginBottom: '20px', cursor: 'pointer' },
+    container: { padding: '20px', backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', alignItems: 'center' },
+    backButton: { alignSelf: 'flex-start', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '5px' },
+    skipperCard: { backgroundColor: '#1e293b', padding: '20px', borderRadius: '15px', width: '100%', maxWidth: '400px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', border: '1px solid #334155' },
+    tapButton: { width: '250px', height: '250px', borderRadius: '50%', border: 'none', color: 'white', fontSize: '80px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer', boxShadow: '0 0 50px rgba(59, 130, 246, 0.3)', transition: 'transform 0.1s', userSelect: 'none', touchAction: 'manipulation' },
+    stopButton: { marginTop: '30px', backgroundColor: '#ef4444', color: 'white', border: 'none', padding: '15px 30px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' },
+    historySection: { marginTop: '40px', width: '100%', maxWidth: '400px' },
+    historyItem: { backgroundColor: '#1e293b', padding: '12px', borderRadius: '8px', marginBottom: '8px', fontSize: '14px', display: 'flex', justifyContent: 'space-between', borderLeft: '4px solid #3b82f6' },
     typeSelector: { display: 'flex', gap: '10px', marginBottom: '20px' },
-    typeButton: (active) => ({ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', backgroundColor: active ? '#facc15' : '#1e293b', color: active ? '#0f172a' : 'white', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }),
-    stopButton: { marginTop: '20px', width: '100%', padding: '15px', borderRadius: '10px', border: 'none', backgroundColor: '#ef4444', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' },
-    historySection: { marginTop: '30px', borderTop: '1px solid #334155', paddingTop: '20px' },
-    historyItem: { backgroundColor: '#0f172a', padding: '12px', borderRadius: '10px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', fontSize: '14px', border: '1px solid #1e293b' }
+    typeButton: (active) => ({ padding: '10px 20px', borderRadius: '8px', border: 'none', backgroundColor: active ? '#3b82f6' : '#334155', color: 'white', fontWeight: 'bold', cursor: 'pointer' })
   };
 
-  // Scherm 1: Kies Skipper
+  // SCHERM 1: Skipper Kiezen
   if (!selectedSkipper) {
     return (
       <div style={styles.container}>
-        <h1 style={{ marginBottom: '30px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Hash color="#ef4444" /> KIES SKIPPER
-        </h1>
+        <h1 style={{ marginBottom: '30px', fontSize: '24px' }}>Wie gaat er skippen?</h1>
         {Object.keys(activeSkippers).length === 0 ? (
-          <p style={{ color: '#64748b' }}>Geen actieve skippers gevonden. Zorg dat Toestel A verbonden is.</p>
+          <p style={{ color: '#94a3b8' }}>Geen actieve skippers gevonden. Koppel eerst een hartslagmeter.</p>
         ) : (
-          Object.values(activeSkippers).map((skipper) => (
-            <div key={skipper.name} style={styles.card} onClick={() => setSelectedSkipper(skipper.name)}>
-              <div>
-                <div style={{ fontWeight: 'bold', fontSize: '18px' }}>{skipper.name}</div>
-                <div style={{ fontSize: '12px', color: '#60a5fa' }}>Status: {skipper.isRecording ? 'Bezig' : 'Stand-by'}</div>
+          Object.keys(activeSkippers).map(name => (
+            <div key={name} style={styles.skipperCard} onClick={() => setSelectedSkipper(name)}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <div style={{ backgroundColor: '#3b82f6', p: '10px', borderRadius: '10px', width: '40px', height: '40px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                  <Hash size={20} />
+                </div>
+                <span style={{ fontWeight: 'bold', fontSize: '18px' }}>{name}</span>
               </div>
-              <ChevronRight color="#334155" />
+              <ChevronRight color="#64748b" />
             </div>
           ))
         )}
@@ -105,52 +140,71 @@ export default function CounterPage() {
   }
 
   const currentSkipperData = activeSkippers[selectedSkipper];
+  const isRecording = currentSkipperData?.isRecording || false;
 
-  // Scherm 2: De teller
+  // SCHERM 2, 3 & 4: Selectie, Teller en Resultaat
   return (
     <div style={styles.container}>
-      <button style={styles.backButton} onClick={() => setSelectedSkipper(null)}>← Andere skipper</button>
+      <button style={styles.backButton} onClick={() => { setSelectedSkipper(null); setIsFinished(false); }}>
+        ← Andere skipper
+      </button>
       
       <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-        <h2 style={{ margin: '0 0 10px 0' }}>{selectedSkipper}</h2>
+        <h2 style={{ margin: '0 0 10px 0', fontSize: '28px' }}>{selectedSkipper}</h2>
         
-        {/* Onderdeel Kiezer: Verschijnt nu opnieuw omdat steps naar 0 gaat bij stop */}
-        {(!currentSkipperData?.steps || currentSkipperData.steps === 0) && (
+        {/* Stap 2: Onderdeel Kiezer (Alleen tonen als sessie nog niet gestart is) */}
+        {!isRecording && !isFinished && (
           <div style={styles.typeSelector}>
-            <button onClick={() => setSessionType(30)} style={styles.typeButton(sessionType === 30)}>30s</button>
-            <button onClick={() => setSessionType(120)} style={styles.typeButton(sessionType === 120)}>2m</button>
-            <button onClick={() => setSessionType(180)} style={styles.typeButton(sessionType === 180)}>3m</button>
+            {[30, 120, 180].map(t => (
+              <button 
+                key={t} 
+                onClick={() => setSessionType(t)} 
+                style={styles.typeButton(sessionType === t)}
+              >
+                {t === 30 ? '30s' : (t / 60) + 'm'}
+              </button>
+            ))}
           </div>
         )}
-
-        <div style={{ fontSize: '14px', color: '#94a3b8' }}>
-          {currentSkipperData?.isRecording ? 'Opname loopt...' : 'Tik om te starten'}
-        </div>
       </div>
 
+      {/* Stap 3 & 4: De Grote Knop */}
       <button 
-        style={styles.tapButton} 
+        style={{
+          ...styles.tapButton, 
+          backgroundColor: isFinished ? '#22c55e' : '#3b82f6',
+          transform: isFinished ? 'scale(1.05)' : 'none'
+        }} 
         onPointerDown={(e) => {
-          e.currentTarget.style.transform = 'scale(0.95)';
-          countStep();
+          if(!isFinished) {
+            e.currentTarget.style.transform = 'scale(0.95)';
+            countStep();
+          }
         }}
-        onPointerUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+        onPointerUp={(e) => {
+          if(!isFinished) e.currentTarget.style.transform = 'scale(1)';
+        }}
       >
         {currentSkipperData?.steps || 0}
       </button>
 
-      {currentSkipperData?.isRecording && (
+      {/* Dynamische Actieknop onderaan */}
+      {isRecording ? (
         <button style={styles.stopButton} onClick={stopRecording}>
           <Square size={18} fill="white" /> STOP OPNAME
         </button>
+      ) : isFinished ? (
+        <button style={{...styles.stopButton, backgroundColor: '#3b82f6'}} onClick={startNewSession}>
+          <Play size={18} fill="white" /> NIEUWE SESSIE
+        </button>
+      ) : (
+        <div style={{ marginTop: '20px', textAlign: 'center', color: '#64748b' }}>
+          <Timer size={16} style={{ verticalAlign: 'middle', marginRight: '5px' }} />
+          Tik op de blauwe knop om de {sessionType === 30 ? '30s' : (sessionType / 60) + 'm'} te starten
+        </div>
       )}
 
-      <div style={{ marginTop: '20px', textAlign: 'center', color: '#64748b' }}>
-        <Timer size={16} style={{ verticalAlign: 'middle', marginRight: '5px' }} />
-        Onderdeel: {sessionType === 30 ? '30 Seconden' : (sessionType / 60) + ' Minuten'}
-      </div>
-
-      {/* Historiek Overzicht onder de knop */}
+      {/* Historiek Overzicht (Bestaand) */}
       <div style={styles.historySection}>
         <h3 style={{ fontSize: '16px', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <History size={18} /> Vorige sessies
@@ -160,8 +214,9 @@ export default function CounterPage() {
         ) : (
           localHistory.slice(0, 5).map((item, idx) => (
             <div key={idx} style={styles.historyItem}>
-              <span>{new Date(item.date).toLocaleDateString()} - {new Date(item.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-              <span style={{ fontWeight: 'bold', color: '#22c55e' }}>{item.finalSteps} steps</span>
+              <span>{item.sessionType === 30 ? '30s' : (item.sessionType / 60) + 'm'}</span>
+              <span style={{ fontWeight: 'bold' }}>{item.finalSteps} steps</span>
+              <span style={{ color: '#64748b' }}>{new Date(item.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
             </div>
           ))
         )}
