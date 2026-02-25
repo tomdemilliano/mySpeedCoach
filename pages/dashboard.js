@@ -163,6 +163,7 @@ export default function Dashboard() {
               >
                 <Settings size={18} /> Skipper Beheer
             </button>
+          </div>
         </div>
 
         <div style={styles.selectionGrid}>
