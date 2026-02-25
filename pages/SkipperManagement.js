@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebaseConfig';
+import { db } from '../firebaseConfig';
 import { ref, onValue, set, remove, update } from "firebase/database";
 import { UserPlus, Trash2, Edit3, X, Save, History as HistoryIcon } from 'lucide-react';
 
