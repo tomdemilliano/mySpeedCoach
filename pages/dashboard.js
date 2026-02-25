@@ -3,6 +3,7 @@ import { db } from '../firebaseConfig';
 import { ref, onValue } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from 'recharts';
 import { Activity, Heart, Hash, Zap, Timer, Users, CheckCircle2, Trophy, XCircle } from 'lucide-react';
+import SkipperManagement from './SkipperManagement';
 
 const DEFAULT_ZONES = [
   { name: 'Warm-up', min: 0, max: 120, color: '#94a3b8' },
@@ -147,6 +148,22 @@ export default function Dashboard() {
           >
             START MONITORING
           </button>
+          <button 
+            onClick={() => setShowManagement(true)}
+              style={{ 
+                backgroundColor: '#475569', 
+                color: 'white', 
+                padding: '8px 16px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '8px',
+                border: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              <Settings size={18} /> Skipper Beheer
+            </button>
         </div>
 
         <div style={styles.selectionGrid}>
