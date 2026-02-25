@@ -142,28 +142,26 @@ export default function Dashboard() {
       <div style={styles.container}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h1 style={{ fontSize: '24px', fontWeight: '800' }}>SELECTEER SKIPPERS ({selectedSkippers.length}/4)</h1>
-          <button 
-            disabled={selectedSkippers.length === 0}
-            onClick={() => setViewMode('monitoring')}
-            style={{ ...styles.btn, backgroundColor: '#22c55e', color: 'white', opacity: selectedSkippers.length === 0 ? 0.5 : 1 }}
-          >
-            START MONITORING
-          </button>
-          <button 
-            onClick={() => setShowManagement(true)}
-              style={{ 
-                backgroundColor: '#475569', 
-                color: 'white', 
-                padding: '8px 16px', 
-                borderRadius: '8px', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '8px',
-                border: 'none',
-                cursor: 'pointer'
-              }}
-            >
-              <Settings size={18} /> Skipper Beheer
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button 
+                disabled={selectedSkippers.length === 0}
+                onClick={() => setViewMode('monitoring')}
+                style={{ ...styles.btn, backgroundColor: '#22c55e', color: 'white', opacity: selectedSkippers.length === 0 ? 0.5 : 1 }}
+              >
+                START MONITORING
+              </button>
+              <button 
+                onClick={() => setShowManagement(true)}
+                style={{ 
+                  ...styles.btn, 
+                  backgroundColor: '#475569', 
+                  color: 'white', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '8px' 
+                }}
+              >
+                <Settings size={18} /> Skipper Beheer
             </button>
         </div>
 
@@ -184,6 +182,9 @@ export default function Dashboard() {
             );
           })}
         </div>
+          {showManagement && (
+            <SkipperManagement onClose={() => setShowManagement(false)} />
+          )}
       </div>
     );
   }
