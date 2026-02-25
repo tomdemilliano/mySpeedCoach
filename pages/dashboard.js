@@ -19,6 +19,7 @@ export default function Dashboard() {
   const [selectedSkippers, setSelectedSkippers] = useState([]);
   const [allStats, setAllStats] = useState({}); // Bevat nu records én zones
   const [viewMode, setViewMode] = useState('selection');
+  const [showManagement, setShowManagement] = useState(false);
   
   const lastStepsRef = useRef({});
   const currentSessionsRef = useRef({});
@@ -296,6 +297,9 @@ export default function Dashboard() {
           );
         })}
       </div>
+      {showManagement && (
+        <SkipperManagement onClose={() => setShowManagement(false)} />
+      )}
     </div>
   );
 }
