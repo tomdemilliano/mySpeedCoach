@@ -104,22 +104,102 @@ export default function SuperAdmin() {
           </div>
         )}
 
+{/* CLUBS & GROUPS TAB */}
         {activeTab === 'clubs' && (
           <div style={styles.dualGrid}>
+            
+            {/* KOLOM 1: CLUBS AANMAKEN */}
             <div style={styles.subCard}>
-              <h2 style={styles.sectionTitle}>Club Toevoegen</h2>
-              <input style={styles.input} placeholder="Naam van de club" />
-              <button style={styles.primaryBtn}>Club Opslaan</button>
+              <h2 style={styles.sectionTitle}><Building2 size={18} /> Club Beheer</h2>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Club Naam</label>
+                <input 
+                  style={styles.input} 
+                  value={clubForm.name} 
+                  onChange={e => setClubForm({...clubForm, name: e.target.value})}
+                  placeholder="bijv. Speeders Gent"
+                />
+                <label style={styles.label}>Logo URL (optioneel)</label>
+                <input 
+                  style={styles.input} 
+                  value={clubForm.logoUrl} 
+                  onChange={e => setClubForm({...clubForm, logoUrl: e.target.value})}
+                  placeholder="https://..."
+                />
+                <button 
+                  onClick={async () => {
+                    if(!clubForm.name) return notify("Naam is verplicht!");
+                    try {
+                      const ref = doc(collection(db, "clubs"));
+                      await setDoc(ref, { 
+                        name: clubForm.name, 
+                        logoUrl: clubForm.logoUrl, 
+                        startDate: serverTimestamp() 
+                      });
+                      notify("Club opgeslagen!");
+                      setClubForm({ name: '', logoUrl: '' });
+                      // Trigger refresh van clubs lijst
+                      setActiveTab('users'); setActiveTab('clubs'); 
+                    } catch(e) { console.error(e); notify("Fout bij opslaan club"); }
+                  }} 
+                  style={styles.primaryBtn}
+                >
+                  Club Opslaan
+                </button>
+              </div>
             </div>
+
+            {/* KOLOM 2: GROEPEN AANMAKEN */}
             <div style={styles.subCard}>
-              <h2 style={styles.sectionTitle}>Groep Toevoegen</h2>
-              <select style={styles.input}>
-                <option>Kies een club...</option>
-                {availableClubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <input style={styles.input} placeholder="Naam van de groep" />
-              <button style={styles.primaryBtn}>Groep Opslaan</button>
+              <h2 style={styles.sectionTitle}><Users size={18} /> Groep Beheer</h2>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Selecteer Club</label>
+                <select 
+                  style={styles.input} 
+                  value={groupForm.clubId} 
+                  onChange={e => setGroupForm({...groupForm, clubId: e.target.value})}
+                >
+                  <option value="">-- Kies een club --</option>
+                  {availableClubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+
+                <label style={styles.label}>Groepsnaam</label>
+                <input 
+                  style={styles.input} 
+                  value={groupForm.name} 
+                  onChange={e => setGroupForm({...groupForm, name: e.target.value})}
+                  placeholder="bijv. Recreanten A"
+                />
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
+                   <input 
+                    type="checkbox" 
+                    checked={groupForm.useHRM} 
+                    onChange={e => setGroupForm({...groupForm, useHRM: e.target.checked})}
+                   />
+                   <span style={{ fontSize: '13px', color: '#94a3b8' }}>Hartslagmeters gebruiken voor deze groep</span>
+                </div>
+
+                <button 
+                  onClick={async () => {
+                    if(!groupForm.clubId || !groupForm.name) return notify("Vul alle velden in!");
+                    try {
+                      const ref = doc(collection(db, "groups"));
+                      await setDoc(ref, { 
+                        ...groupForm, 
+                        startDate: serverTimestamp() 
+                      });
+                      notify("Groep aangemaakt!");
+                      setGroupForm({ name: '', clubId: '', useHRM: true });
+                    } catch(e) { console.error(e); notify("Fout bij opslaan groep"); }
+                  }} 
+                  style={styles.primaryBtn}
+                >
+                  Groep Opslaan
+                </button>
+              </div>
             </div>
+
           </div>
         )}
 
