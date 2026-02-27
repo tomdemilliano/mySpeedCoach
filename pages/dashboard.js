@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { db } from '../firebaseConfig';
+import { rtdb as db } from '../firebaseConfig';
 import { ref, onValue } from "firebase/database";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from 'recharts';
 import { Activity, Heart, Hash, Zap, Timer, Users, CheckCircle2, Trophy, XCircle, Settings } from 'lucide-react';
