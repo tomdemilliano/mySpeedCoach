@@ -25,6 +25,16 @@ const mySpeedCoachSchema = {
       }
     },
 
+    // Clubleden
+    clubMembers: {
+      "$clubId": {
+        "$uid": {
+          joinedAt: "timestamp",
+          membershipStatus: "active | inactive"
+        }
+      }
+    }
+    
     // Groepen binnen een club
     groups: {
       "$groupId": {
