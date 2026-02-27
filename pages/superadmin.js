@@ -7,7 +7,7 @@ import {
   ClubFactory, 
   GroupFactory, 
   LiveSessionFactory 
-} from '../src/contents/dbSchema'; 
+} from '../src/constants/dbSchema'; 
 
 import { 
   ShieldAlert, UserPlus, Building2, Users, 
