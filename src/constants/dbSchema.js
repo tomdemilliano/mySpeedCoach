@@ -1,4 +1,4 @@
-import { db, rtdb } from './firebaseConfig';
+import { db, rtdb } from '../firebaseConfig';
 import { 
   collection, doc, setDoc, getDoc, getDocs, 
   deleteDoc, serverTimestamp, updateDoc, query, where 
