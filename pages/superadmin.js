@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { db, rtdb } from '../firebaseConfig';
+import { db } from '../firebaseConfig';
+import { doc, deleteDoc } from "firebase/firestore";
+// Importeer de factories uit je dbSchema bestand
 import { 
-  collection, doc, setDoc, getDocs, 
-  serverTimestamp, deleteDoc 
-} from "firebase/firestore";
-import { ref, remove } from "firebase/database";
+  UserFactory, 
+  ClubFactory, 
+  GroupFactory, 
+  LiveSessionFactory 
+} from '../src/contents/dbSchema'; 
+
 import { 
   ShieldAlert, UserPlus, Building2, Users, 
-  Trash2, Database, PlusCircle, UserCheck, X, Search, Image as ImageIcon
+  Trash2, Database, PlusCircle, UserCheck, X, Search 
 } from 'lucide-react';
 
 export default function SuperAdmin() {
@@ -26,7 +30,7 @@ export default function SuperAdmin() {
   const [currentMembers, setCurrentMembers] = useState([]);
   const [clubMembersForSelectedGroup, setClubMembersForSelectedGroup] = useState([]);
 
-  // Form states (Hersteld met alle velden uit schema)
+  // Form states
   const [userForm, setUserForm] = useState({ firstName: '', lastName: '', email: '', role: 'user' });
   const [clubForm, setClubForm] = useState({ name: '', logoUrl: '' });
   const [groupForm, setGroupForm] = useState({ name: '', clubId: '', useHRM: true });
@@ -38,79 +42,85 @@ export default function SuperAdmin() {
 
   const refreshData = async () => {
     try {
-      const uSnap = await getDocs(collection(db, "users"));
-      setAvailableUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // Gebruik Factories voor ophalen data
+      const users = await UserFactory.getAll();
+      setAvailableUsers(users);
 
-      const cSnap = await getDocs(collection(db, "clubs"));
-      setAvailableClubs(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const clubs = await ClubFactory.getAll(); // Voeg getAll toe aan ClubFactory indien nodig, of gebruik getDocs
+      setAvailableClubs(clubs);
 
-      const gSnap = await getDocs(collection(db, "groups"));
-      const groupsData = gSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setAvailableGroups(groupsData);
+      const groups = await GroupFactory.getAll(); 
+      setAvailableGroups(groups);
 
       const counts = {};
-      for (const group of groupsData) {
-        const mSnap = await getDocs(collection(db, `groups/${group.id}/members`));
-        counts[group.id] = mSnap.size;
+      for (const group of groups) {
+        const members = await GroupFactory.getMembers(group.id);
+        counts[group.id] = members.length;
       }
       setGroupMemberCounts(counts);
-    } catch (e) { console.error(e); }
+    } catch (e) { 
+      console.error("Refresh error:", e); 
+    }
   };
 
   useEffect(() => { refreshData(); }, [activeTab]);
 
-  // --- MODAL LOGICA MET FILTERING ---
+  // --- MODAL LOGICA VIA FACTORIES ---
   const openModal = async (type, target) => {
     setSearchTerm('');
-    const path = type === 'club' ? `clubs/${target.id}/members` : `groups/${target.id}/members`;
-    const mSnap = await getDocs(collection(db, path));
-    setCurrentMembers(mSnap.docs.map(d => d.id));
-
-    if (type === 'group') {
-      // Haal specifiek de leden van de club op waar deze groep bij hoort
-      const clubMembersSnap = await getDocs(collection(db, `clubs/${target.clubId}/members`));
-      setClubMembersForSelectedGroup(clubMembersSnap.docs.map(d => d.id));
+    try {
+      if (type === 'club') {
+        const members = await ClubFactory.getMembers(target.id);
+        setCurrentMembers(members);
+      } else {
+        const members = await GroupFactory.getMembers(target.id);
+        setCurrentMembers(members.map(m => m.id));
+        
+        // Filter: Alleen clubleden mogen in de groep
+        const clubMembers = await ClubFactory.getMembers(target.clubId);
+        setClubMembersForSelectedGroup(clubMembers);
+      }
+      setMemberModal({ show: true, type, target });
+    } catch (e) {
+      notify("Kon leden niet laden", true);
     }
-
-    setMemberModal({ show: true, type, target });
   };
 
   const toggleMembership = async (userId) => {
     const { type, target } = memberModal;
-    const path = type === 'club' ? `clubs/${target.id}/members` : `groups/${target.id}/members`;
-    const mRef = doc(db, path, userId);
-
     try {
       if (currentMembers.includes(userId)) {
-        await deleteDoc(mRef);
+        type === 'club' 
+          ? await ClubFactory.removeMember(target.id, userId)
+          : await GroupFactory.removeMember(target.id, userId);
         setCurrentMembers(prev => prev.filter(id => id !== userId));
       } else {
-        await setDoc(mRef, { joinedAt: serverTimestamp() });
+        type === 'club'
+          ? await ClubFactory.addMember(target.id, userId)
+          : await GroupFactory.addMember(target.id, userId);
         setCurrentMembers(prev => [...prev, userId]);
       }
       refreshData();
-    } catch (e) { notify("Fout bij bijwerken", true); }
+    } catch (e) { 
+      notify("Fout bij bijwerken lidmaatschap", true); 
+    }
   };
 
   const getFilteredUsers = () => {
     let list = availableUsers;
-    
-    // Cruciaal: Als we in een GROEP modal zitten, toon enkel de CLUB leden
     if (memberModal.type === 'group') {
       list = availableUsers.filter(u => clubMembersForSelectedGroup.includes(u.id));
     }
-
     return list.filter(u => 
       `${u.firstName} ${u.lastName}`.toLowerCase().includes(searchTerm.toLowerCase())
     );
   };
 
-  // --- STRICTE HANDLERS ---
+  // --- FORM HANDLERS VIA FACTORIES ---
   const handleCreateUser = async (e) => {
     e.preventDefault();
-    if (!userForm.firstName || !userForm.lastName || !userForm.email) return notify("Vul alle verplichte velden in", true);
     try {
-      await setDoc(doc(collection(db, "users")), { ...userForm, createdAt: serverTimestamp() });
+      await UserFactory.create(userForm);
       setUserForm({ firstName: '', lastName: '', email: '', role: 'user' });
       refreshData();
       notify("Gebruiker succesvol aangemaakt");
@@ -118,9 +128,8 @@ export default function SuperAdmin() {
   };
 
   const handleCreateClub = async () => {
-    if (!clubForm.name) return notify("Clubnaam is verplicht!", true);
     try {
-      await setDoc(doc(collection(db, "clubs")), { ...clubForm, startDate: serverTimestamp() });
+      await ClubFactory.create(clubForm);
       setClubForm({ name: '', logoUrl: '' });
       refreshData();
       notify("Club succesvol toegevoegd");
@@ -128,21 +137,21 @@ export default function SuperAdmin() {
   };
 
   const handleCreateGroup = async () => {
-    if (!groupForm.clubId || !groupForm.name) return notify("Selecteer een club en geef een naam op", true);
     try {
-      await setDoc(doc(collection(db, "groups")), { ...groupForm, startDate: serverTimestamp() });
+      await GroupFactory.create(groupForm);
       setGroupForm({ name: '', clubId: '', useHRM: true });
       refreshData();
       notify("Groep succesvol toegevoegd");
     } catch (e) { notify(e.message, true); }
   };
 
+  // --- RENDER SECTIE (Onveranderd qua layout) ---
   return (
     <div style={styles.page}>
       <header style={styles.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <ShieldAlert size={28} color="#ef4444" />
-          <h1 style={styles.title}>SuperAdmin <span style={{fontWeight: '300', color: '#64748b'}}>| DB Control</span></h1>
+          <h1 style={styles.title}>SuperAdmin <span style={{fontWeight: '300', color: '#64748b'}}>| Factory Engine</span></h1>
         </div>
       </header>
 
@@ -181,7 +190,7 @@ export default function SuperAdmin() {
               {availableUsers.map(u => (
                 <div key={u.id} style={styles.listItem}>
                   <span>{u.firstName} {u.lastName} <span style={styles.roleTag}>{u.role}</span></span>
-                  <button onClick={() => deleteDoc(doc(db, "users", u.id)).then(refreshData)} style={styles.iconBtn}><Trash2 size={14} color="#ef4444"/></button>
+                  <button onClick={() => UserFactory.delete(u.id).then(refreshData)} style={styles.iconBtn}><Trash2 size={14} color="#ef4444"/></button>
                 </div>
               ))}
             </div>
@@ -206,7 +215,7 @@ export default function SuperAdmin() {
                     </div>
                     <div style={{display:'flex', gap:'10px'}}>
                       <button title="Clubleden beheren" onClick={() => openModal('club', c)} style={{color:'#3b82f6', background:'none', border:'none', cursor:'pointer'}}><Users size={16}/></button>
-                      <button onClick={() => deleteDoc(doc(db, "clubs", c.id)).then(refreshData)} style={styles.iconBtn}><Trash2 size={14} color="#ef4444"/></button>
+                      <button onClick={() => ClubFactory.delete(c.id).then(refreshData)} style={styles.iconBtn}><Trash2 size={14} color="#ef4444"/></button>
                     </div>
                   </div>
                 ))}
@@ -233,7 +242,7 @@ export default function SuperAdmin() {
                     <div style={{display:'flex', gap:'10px'}}>
                       <span style={{fontSize:11, color:'#3b82f6', alignSelf:'center'}}>{groupMemberCounts[g.id] || 0} p.</span>
                       <button title="Groepsleden beheren" onClick={() => openModal('group', g)} style={{color:'#3b82f6', background:'none', border:'none', cursor:'pointer'}}><UserCheck size={16}/></button>
-                      <button onClick={() => deleteDoc(doc(db, "groups", g.id)).then(refreshData)} style={styles.iconBtn}><Trash2 size={14} color="#ef4444"/></button>
+                      <button onClick={() => GroupFactory.delete(g.id).then(refreshData)} style={styles.iconBtn}><Trash2 size={14} color="#ef4444"/></button>
                     </div>
                   </div>
                 ))}
@@ -245,14 +254,14 @@ export default function SuperAdmin() {
         {activeTab === 'system' && (
            <div style={styles.subCard}>
              <h2 style={styles.sectionTitle}><Database size={18}/> Database Maintenance</h2>
-             <button onClick={() => remove(ref(rtdb, 'live_sessions')).then(() => notify("Live sessies gereset"))} style={styles.dangerBtn}>
+             <button onClick={() => LiveSessionFactory.resetAll().then(() => notify("Live sessies gereset"))} style={styles.dangerBtn}>
                <Trash2 size={16}/> Clear Realtime Database Sessions
              </button>
            </div>
         )}
       </div>
 
-      {/* MULTI-PURPOSE MODAL */}
+      {/* MODAL (Onveranderd) */}
       {memberModal.show && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalCard}>
@@ -294,7 +303,7 @@ export default function SuperAdmin() {
   );
 }
 
-// --- STYLES ---
+// --- STYLES (Hetzelfde als voorheen) ---
 const tabButtonStyle = (isActive) => ({
   padding: '12px 20px', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: '600', fontSize: '14px',
   backgroundColor: isActive ? '#3b82f6' : 'transparent', color: isActive ? 'white' : '#94a3b8',
