@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { db } from '../firebaseConfig'; // Jouw firebase setup
+import { rtdb as db } from '../firebaseConfig'; // Jouw firebase setup
 import { ref, set } from "firebase/database";
 
 export default function HeartRateMonitor() {
