@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { db } from '../firebaseConfig';
+import { rtdb as db } from '../firebaseConfig';
 import { ref, onValue } from "firebase/database";
 
 export default function HistoryPage() {
