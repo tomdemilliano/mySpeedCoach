@@ -1,5 +1,5 @@
 import { useState, useEffect, memo } from 'react';
-import { db } from '../firebaseConfig';
+import { rtdb as db } from '../firebaseConfig';
 import { ref, onValue, runTransaction, update, push, query, orderByChild, equalTo } from "firebase/database";
 import { Hash, ChevronRight, Timer, Square, History, Play, Clock, Award, Check, X, ArrowRight } from 'lucide-react';
 
