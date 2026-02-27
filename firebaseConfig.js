@@ -1,5 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getDatabase } from "firebase/database";
+import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBh7YT9hGp4S2GTEzsfsCBkuEUMdK6OdaA",
@@ -13,4 +15,12 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = getDatabase(app);
+
+// De Realtime Database voor live-data
+export const rtdb = getDatabase(app);
+
+// FirestoreDB voor vaste gegevens
+export const db = getFirestore(app);
+
+// logins & user IDs
+export const auth = getAuth(app);
