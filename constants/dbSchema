@@ -1,3 +1,10 @@
+import { db, rtdb } from '../firebaseConfig';
+import { 
+  collection, doc, setDoc, getDoc, getDocs, updateDoc, 
+  deleteDoc, query, where, serverTimestamp, addDoc, onSnapshot 
+} from "firebase/firestore";
+import { ref, set, update, remove } from "firebase/database";
+
 export const SCHEMA = {
   firestore: {
     // 1. Gebruikers & hun eigenschappen
@@ -100,13 +107,6 @@ export const SCHEMA = {
     }
   }
 };
-
-import { db, rtdb } from '../firebaseConfig';
-import { 
-  collection, doc, setDoc, getDoc, getDocs, updateDoc, 
-  deleteDoc, query, where, serverTimestamp, addDoc, onSnapShot 
-} from "firebase/firestore";
-import { ref, set, update, remove } from "firebase/database";
 
 // ==========================================
 // 1. USER & PERSONAL DATA FACTORIES
