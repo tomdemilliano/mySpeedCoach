@@ -21,7 +21,7 @@ export const SCHEMA = {
 	    sessionType: "string", 
 		discipline: "string", 
 		score: "number", 
-		achievedAt: "timestamp"  
+		achievedAt: "timestamp", 
 		
 		// Bij het behalen van een record wordt de telmetry van de recordsessie hier bijgehouden
 		telemetry: 
@@ -46,7 +46,7 @@ export const SCHEMA = {
 		avgBpm: "number",
 		maxBpm: "number",
 		
-		// hou hier de telemetry bij van de sessie
+	// hou hier de telemetry bij van de sessie
 		telemetry: 
 		[{
 		   time: "number",  //aantal 100sten seconden sinds begin sessie
