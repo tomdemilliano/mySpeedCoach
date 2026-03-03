@@ -33,6 +33,7 @@ export default function SuperAdmin() {
   const [clubForm, setClubForm] = useState({ name: '', logoUrl: '' });
   const [groupForm, setGroupForm] = useState({ name: '', useHRM: true });
   const [memberEditForm, setMemberEditForm] = useState({});
+  const [showOnlyActive, setShowOnlyActive] = useState(true);
 
   // Real-time data sync
   useEffect(() => {
@@ -225,10 +226,32 @@ export default function SuperAdmin() {
                 <div style={styles.memberListPanel}>
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
                     <h2>Groepsleden ({members.length})</h2>
+                      {/* Filter voor actieve leden */}
+                    <div style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px', padding: '10px', backgroundColor: '#1e293b', borderRadius: '8px'}}>
+                      <label style={{ fontSize: '14px', color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input type="checkbox" checked={showOnlyActive} onChange={(e) => setShowOnlyActive(e.target.checked)} style={{ width: '16px', height: '16px' }}/>
+                        Toon alleen actieve leden
+                      </label>
+                    </div>
                   </div>
 
                   <div style={styles.memberGridDisplay}>
-                    {members.map(m => {
+                    {members
+                     .filter(m => {
+                      if (!showOnlyActive) return true; // Toon alles als filter uit staat
+                      
+                      const nu = new Date();
+                      // Helper om Firestore timestamp of Date om te zetten naar JS Date
+                      const start = m.startMembership?.toDate ? m.startMembership.toDate() : new Date(m.startMembership);
+                      const eind = m.endMembership?.toDate ? m.endMembership.toDate() : (m.endMembership ? new Date(m.endMembership) : null);
+                      
+                      const isGestart = start <= nu;
+                      const isNietBeëindigd = !eind || eind > nu;
+                      
+                      return isGestart && isNietBeëindigd;
+                      })           
+                     
+                     .map(m => {
                       const user = users.find(u => u.id === m.id);
                       const isEditing = editingMemberUid === m.id;
                       
