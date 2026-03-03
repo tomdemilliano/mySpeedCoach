@@ -198,8 +198,18 @@ export const GroupFactory = {
     addDoc(collection(db, `clubs/${clubId}/groups`), { ...groupData, isActive: true }),
   update: (clubId, groupId, data) => 
     updateDoc(doc(db, `clubs/${clubId}/groups`, groupId), data),
-  delete: (clubId, groupId) => 
-    deleteDoc(doc(db, `clubs/${clubId}/groups`, groupId)),
+  delete: async (clubId, groupId) => {
+    // 1. Haal eerst alle leden op uit de subcollectie
+    const membersSnap = await getDocs(collection(db, `clubs/${clubId}/groups/${groupId}/members`));
+    
+    // 2. Verwijder elk lidmaatschap document
+    for (const memberDoc of membersSnap.docs) {
+      await deleteDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, memberDoc.id));
+    }
+    
+    // 3. Verwijder de groep zelf
+    return deleteDoc(doc(db, `clubs/${clubId}/groups`, groupId));
+  },
 
   // Ledenbeheer: clubs/{clubId}/groups/{groupId}/members/{uid}
   addMember: (clubId, groupId, uid, memberData) => 
