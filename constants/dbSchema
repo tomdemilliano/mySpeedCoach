@@ -1,4 +1,108 @@
-import { db, rtdb } from '../firebaseConfig';
+export const SCHEMA = {
+  firestore: {
+    // 1. Gebruikers & hun eigenschappen
+    users: { 
+      firstName: "string", 
+      lastName: "string", 
+      email: "string", 
+      role: "superadmin|clubadmin|user",
+     
+   // bluetooth device	 
+      assignedDevice: {
+        deviceId: "string",   // Het Bluetooth ID
+        deviceName: "string", // Bijv. "Garmin HRM-Dual"
+        lastConnection: "timestamp"
+      },
+	  heartrateZones: {
+	    [{ name: "string", min: "number", max: "number", color: "string" }]
+	  },
+	  
+	// persoonlijke records  
+	  records: {
+	    sessionType: "string", 
+		discipline: "string", 
+		score: "number", 
+		achievedAt: "timestamp"  
+		
+		// Bij het behalen van een record wordt de telmetry van de recordsessie hier bijgehouden
+		telemetry: 
+		[{
+		   time: "number",  //aantal 100sten seconden sinds begin sessie
+		   steps: "number", //totaal aantal steps
+		   heartRate: "number"
+		}]	
+	  },
+	  
+	// persoonlijke doelen
+	  goals: {
+		discipline: "string", targetScore: "number", targetDate: "timestamp", achievedAt: "timestamp|null"
+	  }
+
+	// historiek van opgenomen sessies
+	  sessionHistory: {
+		discipline: "string",
+		sessionStart: "timstamp",
+		sessionEnd: "timestamp",
+		score: "number",
+		avgBpm: "number",
+		maxBpm: "number",
+		
+		// hou hier de telemetry bij van de sessie
+		telemetry: 
+		[{
+		   time: "number",  //aantal 100sten seconden sinds begin sessie
+		   steps: "number", //totaal aantal steps
+		   heartRate: "number"
+		}]
+	  }
+	  
+    },
+
+    // 2. Clubs & Hiërarchie (Jouw voorstel voor nesting)
+    clubs: { 
+      name: "string", 
+      logoUrl: "string",
+      
+	  // De groepen zijn nu een subcollectie: clubs/{clubId}/groups/{groupId}
+      groups: {
+        name: "string",
+        useHRM: "boolean",
+		isActive: "boolean", 
+        
+		// De leden van de groep: clubs/{clubId}/groups/{groupId}/members/{uid}
+        members: {
+          uid: "string", // link naar het user-object
+		  isSkipper: "boolean",
+          isCoach: "boolean",
+          startMembership: "timestamp", //startdatum waarop user is toegevoegd aan de groep
+		  endMembership: "timestamp" //datum waarop de user verwijderd is uit de groep
+        }
+      }
+    }
+  },
+
+  rtdb: {
+    live_sessions: {
+      "$uid": {
+        // ASPECT 1: Continu (altijd aanwezig bij verbinding)
+        bpm: "number",
+        lastHeartbeat: "timestamp",
+        connectionStatus: "online|offline",
+
+        // ASPECT 2: Sessie-gebonden (alleen gevuld tijdens tellen)
+        session: {
+          isActive: "boolean",     // Is de counter gestart?
+          startTime: "timestamp",  // Wanneer is de 'Start' knop ingedrukt?
+          steps: "number",         // De huidige tellerstand
+          discipline: "30s|2m|3m",     // Wat zijn we aan het tellen?
+		  sessionType: "training|wedstrijd" // type van de sessie
+        }
+      }
+    }
+  }
+};
+
+iimport { db, rtdb } from '../firebaseConfig';
 import { 
   collection, doc, setDoc, getDoc, getDocs, updateDoc, 
   deleteDoc, query, where, serverTimestamp, addDoc 
