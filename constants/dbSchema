@@ -104,7 +104,7 @@ export const SCHEMA = {
 import { db, rtdb } from '../firebaseConfig';
 import { 
   collection, doc, setDoc, getDoc, getDocs, updateDoc, 
-  deleteDoc, query, where, serverTimestamp, addDoc 
+  deleteDoc, query, where, serverTimestamp, addDoc, onSnapShot 
 } from "firebase/firestore";
 import { ref, set, update, remove } from "firebase/database";
 
