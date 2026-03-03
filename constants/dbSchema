@@ -246,10 +246,9 @@ export const GroupFactory = {
   updateMember: (clubId, groupId, uid, data) =>
     updateDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, uid), data),
 
-  removeMember: (clubId, groupId, uid) => 
-    updateDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, uid), {
-      endMembership: serverTimestamp()
-    }),
+  removeMember: (clubId, groupId, uid) => {
+    return deleteDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, uid));
+  },
 
   // Haal alle groepen van een specifieke club op
   getGroupsByClub: (clubId, callback) => {
