@@ -239,8 +239,12 @@ export const GroupFactory = {
       uid,
       isSkipper: memberData.isSkipper ?? true,
       isCoach: memberData.isCoach ?? false,
-      startMembership: serverTimestamp()
+      startMembership: memberData.startMembership || serverTimestamp(),
+      endMembership: memberData.endMembership || null
     }),
+
+  updateMember: (clubId, groupId, uid, data) =>
+    updateDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, uid), data),
 
   removeMember: (clubId, groupId, uid) => 
     updateDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, uid), {
