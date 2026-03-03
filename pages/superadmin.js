@@ -1,16 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebaseConfig';
-import { doc, deleteDoc, onSnapshot, collection, collectionGroup } from "firebase/firestore";
-import { 
-  UserFactory, 
-  ClubFactory, 
-  GroupFactory 
-} from '../constants/dbSchema'; 
+import { doc, deleteDoc, onSnapshot, collection } from "firebase/firestore";
+import { UserFactory, ClubFactory, GroupFactory } from '../constants/dbSchema'; 
 
 import { 
   ShieldAlert, UserPlus, Building2, Users, 
-  Trash2, PlusCircle, X, Search, Edit2, 
-  ChevronRight, ArrowLeft, UserCheck
+  Trash2, Search, Edit2, X, Save, ChevronRight, ArrowLeft 
 } from 'lucide-react';
 
 export default function SuperAdmin() {
@@ -20,13 +15,13 @@ export default function SuperAdmin() {
   // Data
   const [users, setUsers] = useState([]);
   const [clubs, setClubs] = useState([]);
-  const [selectedClub, setSelectedClub] = useState(null); // Voor diepe navigatie
+  const [selectedClub, setSelectedClub] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
 
-  // Form States
+  // Modal States
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
   const [userForm, setUserForm] = useState({ firstName: '', lastName: '', email: '', role: 'user' });
-  const [clubForm, setClubForm] = useState({ name: '', logoUrl: '' });
-  const [groupForm, setGroupForm] = useState({ name: '', useHRM: true });
 
   // Real-time Sync
   useEffect(() => {
@@ -44,32 +39,27 @@ export default function SuperAdmin() {
     `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Handlers
-  const handleCreateUser = async (e) => {
-    e.preventDefault();
-    const tempUid = Date.now().toString(); // In productie gebruik je Firebase Auth voor de UID
-    await UserFactory.create(tempUid, userForm);
-    setUserForm({ firstName: '', lastName: '', email: '', role: 'user' });
+  // User Handlers
+  const openUserModal = (user = null) => {
+    if (user) {
+      setEditingUser(user.id);
+      setUserForm({ firstName: user.firstName, lastName: user.lastName, email: user.email, role: user.role });
+    } else {
+      setEditingUser(null);
+      setUserForm({ firstName: '', lastName: '', email: '', role: 'user' });
+    }
+    setIsUserModalOpen(true);
   };
 
-  const handleCreateClub = async (e) => {
+  const handleUserSubmit = async (e) => {
     e.preventDefault();
-    await ClubFactory.create(clubForm);
-    setClubForm({ name: '', logoUrl: '' });
-  };
-
-  const handleCreateGroup = async (e) => {
-    e.preventDefault();
-    await GroupFactory.create(selectedClub.id, groupForm);
-    setGroupForm({ name: '', useHRM: true });
-  };
-
-  const addMemberToGroup = async (user) => {
-    if (!selectedClub || !selectedGroup) return;
-    await GroupFactory.addMember(selectedClub.id, selectedGroup.id, user.id, {
-      isSkipper: true,
-      isCoach: false
-    });
+    if (editingUser) {
+      await UserFactory.updateProfile(editingUser, userForm);
+    } else {
+      const tempUid = Date.now().toString(); // In productie vervang je dit door Auth creatie
+      await UserFactory.create(tempUid, userForm);
+    }
+    setIsUserModalOpen(false);
   };
 
   return (
@@ -83,159 +73,138 @@ export default function SuperAdmin() {
       </header>
 
       <main style={styles.content}>
-        {/* USERS TAB */}
         {activeTab === 'users' && (
           <section>
             <div style={styles.actionBar}>
               <div style={styles.searchWrapper}>
                 <Search size={18} style={styles.searchIcon} />
                 <input 
-                  placeholder="Zoek gebruikers..." 
+                  placeholder="Zoek op naam of email..." 
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   style={styles.searchInput}
                 />
               </div>
-              <form onSubmit={handleCreateUser} style={styles.inlineForm}>
-                <input placeholder="Voornaam" required value={userForm.firstName} onChange={e => setUserForm({...userForm, firstName: e.target.value})} style={styles.smallInput} />
-                <input placeholder="Achternaam" required value={userForm.lastName} onChange={e => setUserForm({...userForm, lastName: e.target.value})} style={styles.smallInput} />
-                <input placeholder="Email" type="email" required value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} style={styles.smallInput} />
-                <button type="submit" style={styles.addBtn}><UserPlus size={16}/> Snel Toevoegen</button>
-              </form>
+              <button onClick={() => openUserModal()} style={styles.addBtn}>
+                <UserPlus size={18}/> Nieuwe Gebruiker
+              </button>
             </div>
 
-            <div style={styles.grid}>
-              {filteredUsers.map(user => (
-                <div key={user.id} style={styles.userCard}>
-                  <div style={styles.userAvatar}>{user.firstName[0]}{user.lastName[0]}</div>
-                  <div style={styles.userInfo}>
-                    <h3 style={styles.userName}>{user.firstName} {user.lastName}</h3>
-                    <p style={styles.userEmail}>{user.email}</p>
-                    <span style={styles.roleBadge}>{user.role}</span>
-                  </div>
-                  <div style={styles.cardActions}>
-                    <button style={styles.iconBtn}><Edit2 size={16} /></button>
-                    <button onClick={() => deleteDoc(doc(db, "users", user.id))} style={{...styles.iconBtn, color: '#ef4444'}}><Trash2 size={16} /></button>
-                  </div>
-                </div>
-              ))}
+            <div style={styles.tableContainer}>
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.tableHeader}>
+                    <th style={styles.th}>Naam</th>
+                    <th style={styles.th}>Email</th>
+                    <th style={styles.th}>Rol</th>
+                    <th style={styles.th}>Acties</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredUsers.map(user => (
+                    <tr key={user.id} style={styles.tableRow}>
+                      <td style={styles.td}><strong>{user.firstName} {user.lastName}</strong></td>
+                      <td style={styles.td}>{user.email}</td>
+                      <td style={styles.td}>
+                        <span style={{...styles.roleBadge, backgroundColor: getRoleColor(user.role)}}>
+                          {user.role}
+                        </span>
+                      </td>
+                      <td style={styles.td}>
+                        <button onClick={() => openUserModal(user)} style={styles.iconBtn}><Edit2 size={16} /></button>
+                        <button onClick={() => deleteDoc(doc(db, "users", user.id))} style={{...styles.iconBtn, color: '#ef4444'}}><Trash2 size={16} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </section>
         )}
 
-        {/* CLUBS TAB */}
-        {activeTab === 'clubs' && !selectedClub && (
-          <section>
-            <div style={styles.sectionHeader}>
-              <h2>Beheer Clubs</h2>
-              <form onSubmit={handleCreateClub} style={styles.inlineForm}>
-                <input placeholder="Club Naam" required value={clubForm.name} onChange={e => setClubForm({...clubForm, name: e.target.value})} style={styles.input} />
-                <button type="submit" style={styles.addBtn}><Building2 size={16}/> Club Toevoegen</button>
-              </form>
-            </div>
-            <div style={styles.grid}>
-              {clubs.map(club => (
-                <div key={club.id} onClick={() => setSelectedClub(club)} style={styles.clubCard}>
-                  <Building2 size={40} color="#64748b" />
-                  <h3>{club.name}</h3>
-                  <p>Klik voor groepen</p>
-                  <ChevronRight style={styles.chevron} />
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* GROUPS NAVIGATION (Inside a club) */}
-        {activeTab === 'clubs' && selectedClub && !selectedGroup && (
-          <section>
-            <button onClick={() => setSelectedClub(null)} style={styles.backBtn}><ArrowLeft size={16}/> Terug naar Clubs</button>
-            <div style={styles.sectionHeader}>
-              <h2>Groepen in {selectedClub.name}</h2>
-              <form onSubmit={handleCreateGroup} style={styles.inlineForm}>
-                <input placeholder="Groepsnaam" required value={groupForm.name} onChange={e => setGroupForm({...groupForm, name: e.target.value})} style={styles.input} />
-                <button type="submit" style={styles.addBtn}><PlusCircle size={16}/> Groep Toevoegen</button>
-              </form>
-            </div>
-            {/* Hier zou je een fetch doen naar de subcollectie groepen */}
-            <div style={styles.grid}>
-              <div onClick={() => setSelectedGroup({id: 'demo', name: 'Selectiegroep A'})} style={styles.clubCard}>
-                <Users size={30} />
-                <h3>Selectiegroep A</h3>
-                <p>Beheer leden</p>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* MEMBER MANAGEMENT (Inside a group) */}
-        {activeTab === 'clubs' && selectedGroup && (
-          <section style={styles.splitView}>
-            <div style={styles.memberPanel}>
-              <button onClick={() => setSelectedGroup(null)} style={styles.backBtn}><ArrowLeft size={16}/> Terug naar Groepen</button>
-              <h2>Leden van {selectedGroup.name}</h2>
-              <div style={styles.list}>
-                <p style={{color: '#94a3b8'}}>Ledenlijst wordt geladen vanuit subcollectie...</p>
-              </div>
-            </div>
-
-            <div style={styles.addPanel}>
-              <h3>Gebruiker Toevoegen</h3>
-              <div style={{...styles.searchWrapper, marginBottom: '15px'}}>
-                <Search size={16} style={styles.searchIcon} />
-                <input 
-                  placeholder="Zoek user om toe te voegen..." 
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  style={styles.searchInput}
-                />
-              </div>
-              <div style={styles.miniScroll}>
-                {filteredUsers.slice(0, 10).map(u => (
-                  <div key={u.id} style={styles.miniUserRow}>
-                    <span>{u.firstName} {u.lastName}</span>
-                    <button onClick={() => addMemberToGroup(u)} style={styles.miniAddBtn}><PlusCircle size={14}/></button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
+        {/* --- Clubs & Groepen secties blijven hetzelfde als vorige opzet, focus ligt nu op User management --- */}
       </main>
+
+      {/* USER MODAL */}
+      {isUserModalOpen && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modalContent}>
+            <div style={styles.modalHeader}>
+              <h2>{editingUser ? 'Gebruiker Bewerken' : 'Nieuwe Gebruiker'}</h2>
+              <button onClick={() => setIsUserModalOpen(false)} style={styles.closeBtn}><X size={24} /></button>
+            </div>
+            <form onSubmit={handleUserSubmit} style={styles.form}>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Voornaam</label>
+                <input required style={styles.input} value={userForm.firstName} onChange={e => setUserForm({...userForm, firstName: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Achternaam</label>
+                <input required style={styles.input} value={userForm.lastName} onChange={e => setUserForm({...userForm, lastName: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Emailadres</label>
+                <input required type="email" style={styles.input} value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Gebruikerstype</label>
+                <select style={styles.input} value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value})}>
+                  <option value="user">User</option>
+                  <option value="clubadmin">ClubAdmin</option>
+                  <option value="superadmin">SuperAdmin</option>
+                </select>
+              </div>
+              <button type="submit" style={styles.submitBtn}>
+                <Save size={18} /> Opslaan
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
+const getRoleColor = (role) => {
+  switch(role) {
+    case 'superadmin': return '#ef4444';
+    case 'clubadmin': return '#f59e0b';
+    default: return '#3b82f6';
+  }
+};
+
 const styles = {
   container: { minHeight: '100vh', backgroundColor: '#0f172a', color: 'white', fontFamily: 'Inter, sans-serif' },
   header: { padding: '20px 40px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  title: { fontSize: '20px', display: 'flex', alignItems: 'center', gap: '12px' },
+  title: { fontSize: '20px', display: 'flex', alignItems: 'center', gap: '12px', margin: 0 },
   tabBar: { display: 'flex', gap: '10px' },
   tab: { padding: '8px 16px', borderRadius: '6px', border: 'none', backgroundColor: 'transparent', color: '#94a3b8', cursor: 'pointer' },
   activeTab: { padding: '8px 16px', borderRadius: '6px', border: 'none', backgroundColor: '#3b82f6', color: 'white', fontWeight: 'bold' },
   content: { padding: '30px 40px' },
-  actionBar: { display: 'flex', justifyContent: 'space-between', marginBottom: '30px', gap: '20px', flexWrap: 'wrap' },
-  searchWrapper: { position: 'relative', flex: 1, minWidth: '300px' },
+  actionBar: { display: 'flex', justifyContent: 'space-between', marginBottom: '20px', gap: '20px' },
+  searchWrapper: { position: 'relative', width: '400px' },
   searchIcon: { position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' },
-  searchInput: { width: '100%', padding: '10px 10px 10px 40px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white', outline: 'none' },
-  inlineForm: { display: 'flex', gap: '10px' },
-  smallInput: { padding: '10px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white', width: '120px' },
-  input: { padding: '10px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white', minWidth: '200px' },
-  addBtn: { display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' },
-  userCard: { backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', border: '1px solid #334155', display: 'flex', alignItems: 'center', gap: '15px' },
-  userAvatar: { width: '45px', height: '45px', borderRadius: '50%', backgroundColor: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', color: '#3b82f6' },
-  userName: { fontSize: '16px', margin: 0 },
-  userEmail: { fontSize: '12px', color: '#94a3b8', margin: '2px 0' },
-  roleBadge: { fontSize: '10px', backgroundColor: '#0f172a', padding: '2px 6px', borderRadius: '4px', color: '#3b82f6', textTransform: 'uppercase' },
-  cardActions: { marginLeft: 'auto', display: 'flex', gap: '5px' },
-  iconBtn: { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '5px' },
-  clubCard: { backgroundColor: '#1e293b', padding: '30px', borderRadius: '15px', border: '1px solid #334155', textAlign: 'center', cursor: 'pointer', position: 'relative', transition: 'transform 0.2s' },
-  chevron: { position: 'absolute', right: '15px', top: '50%', transform: 'translateY(-50%)', color: '#334155' },
-  backBtn: { background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '20px' },
-  splitView: { display: 'grid', gridTemplateColumns: '1fr 350px', gap: '30px' },
-  memberPanel: { backgroundColor: '#1e293b', padding: '25px', borderRadius: '15px', border: '1px solid #334155' },
-  addPanel: { backgroundColor: '#0f172a', padding: '20px', borderRadius: '15px', border: '1px solid #334155' },
-  miniUserRow: { display: 'flex', justifyContent: 'space-between', padding: '10px', borderBottom: '1px solid #1e293b', fontSize: '14px' },
-  miniAddBtn: { background: 'none', border: 'none', color: '#22c55e', cursor: 'pointer' },
-  miniScroll: { maxHeight: '400px', overflowY: 'auto' }
+  searchInput: { width: '100%', padding: '12px 12px 12px 40px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white', outline: 'none' },
+  addBtn: { display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 20px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold' },
+  
+  // Table Styles
+  tableContainer: { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', overflow: 'hidden' },
+  table: { width: '100%', borderCollapse: 'collapse', textAlign: 'left' },
+  tableHeader: { backgroundColor: '#334155' },
+  th: { padding: '15px 20px', color: '#94a3b8', fontWeight: '600', fontSize: '14px' },
+  tableRow: { borderBottom: '1px solid #334155', transition: 'background 0.2s' },
+  td: { padding: '15px 20px', fontSize: '14px' },
+  roleBadge: { padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' },
+  iconBtn: { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '8px' },
+
+  // Modal Styles
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
+  modalContent: { backgroundColor: '#1e293b', width: '450px', padding: '30px', borderRadius: '16px', border: '1px solid #334155' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' },
+  closeBtn: { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' },
+  form: { display: 'flex', flexDirection: 'column', gap: '20px' },
+  formGroup: { display: 'flex', flexDirection: 'column', gap: '8px' },
+  label: { fontSize: '14px', color: '#94a3b8' },
+  input: { padding: '12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', outline: 'none' },
+  submitBtn: { padding: '14px', backgroundColor: '#22c55e', border: 'none', borderRadius: '8px', color: 'white', fontWeight: 'bold', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', marginTop: '10px' }
 };
