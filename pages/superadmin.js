@@ -191,7 +191,7 @@ export default function SuperAdmin() {
                          <div style={styles.badgeRow}>
                            <span style={styles.countBadge}>{memberCounts[group.id] || 0} Leden</span>
                            <span style={{...styles.hrmBadge, backgroundColor: group.useHRM ? '#065f46' : '#334155'}}>
-                             {group.useHRM ? <Heart size={10} fill="white"/> : <HeartOff size={10}/>} {group.useHRM ? 'HRM AAN' : 'HRM UIT'}
+                             {group.useHRM ? <Heart size={10} fill="white"/> : <HeartOff size={10}/>} {group.useHRM ? 'GEBRUIKT HRM' : 'GEEN HRM'}
                            </span>
                          </div>
                       </div>
@@ -283,8 +283,8 @@ export default function SuperAdmin() {
             
             <label style={{color: '#94a3b8', fontSize: '13px', marginBottom: '-10px'}}>Gebruik Hartslagmeters (HRM)?</label>
             <div style={styles.switchContainer} onClick={() => setGroupForm({...groupForm, useHRM: !groupForm.useHRM})}>
-              <div style={{...styles.switchHalf, backgroundColor: groupForm.useHRM ? '#059669' : '#334155', color: groupForm.useHRM ? 'white' : '#94a3b8'}}>JA (AAN)</div>
-              <div style={{...styles.switchHalf, backgroundColor: !groupForm.useHRM ? '#ef4444' : '#334155', color: !groupForm.useHRM ? 'white' : '#94a3b8'}}>NEE (UIT)</div>
+              <div style={{...styles.switchHalf, backgroundColor: groupForm.useHRM ? '#059669' : '#334155', color: groupForm.useHRM ? 'white' : '#94a3b8'}}>JA</div>
+              <div style={{...styles.switchHalf, backgroundColor: !groupForm.useHRM ? '#ef4444' : '#334155', color: !groupForm.useHRM ? 'white' : '#94a3b8'}}>NEE</div>
             </div>
             
             <button type="submit" style={styles.submitBtn}><Save size={18}/> Groep Opslaan</button>
