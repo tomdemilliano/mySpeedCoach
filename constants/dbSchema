@@ -35,7 +35,7 @@ export const SCHEMA = {
 	// persoonlijke doelen
 	  goals: {
 		discipline: "string", targetScore: "number", targetDate: "timestamp", achievedAt: "timestamp|null"
-	  }
+	  },
 
 	// historiek van opgenomen sessies
 	  sessionHistory: {
