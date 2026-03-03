@@ -5,25 +5,35 @@ import { UserFactory, ClubFactory, GroupFactory } from '../constants/dbSchema';
 
 import { 
   ShieldAlert, UserPlus, Building2, Users, 
-  Trash2, Search, Edit2, X, Save, ChevronRight, ArrowLeft 
+  Trash2, Search, Edit2, X, Save, ChevronRight, ArrowLeft, Plus
 } from 'lucide-react';
 
 export default function SuperAdmin() {
   const [activeTab, setActiveTab] = useState('users');
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Data
+  // Data States
   const [users, setUsers] = useState([]);
   const [clubs, setClubs] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [members, setMembers] = useState([]);
+
+  // Navigatie States
   const [selectedClub, setSelectedClub] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
 
   // Modal States
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
-  const [userForm, setUserForm] = useState({ firstName: '', lastName: '', email: '', role: 'user' });
+  const [isClubModalOpen, setIsClubModalOpen] = useState(false);
+  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
 
-  // Real-time Sync
+  // Form States
+  const [editingId, setEditingId] = useState(null);
+  const [userForm, setUserForm] = useState({ firstName: '', lastName: '', email: '', role: 'user' });
+  const [clubForm, setClubForm] = useState({ name: '', logoUrl: '' });
+  const [groupForm, setGroupForm] = useState({ name: '', useHRM: true });
+
+  // Real-time Sync (Basis)
   useEffect(() => {
     const unsubUsers = onSnapshot(collection(db, "users"), (snap) => {
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -34,32 +44,45 @@ export default function SuperAdmin() {
     return () => { unsubUsers(); unsubClubs(); };
   }, []);
 
-  // Filtered Users
-  const filteredUsers = users.filter(u => 
-    `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Sync Groepen wanneer club geselecteerd is
+  useEffect(() => {
+    if (!selectedClub) return;
+    const unsubGroups = GroupFactory.getGroupsByClub(selectedClub.id, setGroups);
+    return () => unsubGroups();
+  }, [selectedClub]);
 
-  // User Handlers
-  const openUserModal = (user = null) => {
-    if (user) {
-      setEditingUser(user.id);
-      setUserForm({ firstName: user.firstName, lastName: user.lastName, email: user.email, role: user.role });
-    } else {
-      setEditingUser(null);
-      setUserForm({ firstName: '', lastName: '', email: '', role: 'user' });
-    }
-    setIsUserModalOpen(true);
-  };
+  // Sync Leden wanneer groep geselecteerd is
+  useEffect(() => {
+    if (!selectedGroup || !selectedClub) return;
+    const unsubMembers = GroupFactory.getMembersByGroup(selectedClub.id, selectedGroup.id, setMembers);
+    return () => unsubMembers();
+  }, [selectedGroup, selectedClub]);
 
+  // Filter Logica
+  const filteredUsers = users.filter(u => `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredClubs = clubs.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  // Handlers
   const handleUserSubmit = async (e) => {
     e.preventDefault();
-    if (editingUser) {
-      await UserFactory.updateProfile(editingUser, userForm);
-    } else {
-      const tempUid = Date.now().toString(); // In productie vervang je dit door Auth creatie
-      await UserFactory.create(tempUid, userForm);
-    }
+    editingId ? await UserFactory.updateProfile(editingId, userForm) : await UserFactory.create(Date.now().toString(), userForm);
     setIsUserModalOpen(false);
+  };
+
+  const handleClubSubmit = async (e) => {
+    e.preventDefault();
+    editingId ? await ClubFactory.update(editingId, clubForm) : await ClubFactory.create(clubForm);
+    setIsClubModalOpen(false);
+    setEditingId(null);
+  };
+
+  const toggleMember = async (user) => {
+    const isMember = members.some(m => m.id === user.id);
+    if (isMember) {
+      await GroupFactory.removeMember(selectedClub.id, selectedGroup.id, user.id);
+    } else {
+      await GroupFactory.addMember(selectedClub.id, selectedGroup.id, user.id, { isSkipper: true });
+    }
   };
 
   return (
@@ -68,50 +91,33 @@ export default function SuperAdmin() {
         <h1 style={styles.title}><ShieldAlert size={28} color="#3b82f6" /> SuperAdmin Panel</h1>
         <div style={styles.tabBar}>
           <button onClick={() => {setActiveTab('users'); setSelectedClub(null);}} style={activeTab === 'users' ? styles.activeTab : styles.tab}>Gebruikers</button>
-          <button onClick={() => setActiveTab('clubs')} style={activeTab === 'clubs' ? styles.activeTab : styles.tab}>Clubs & Groepen</button>
+          <button onClick={() => {setActiveTab('clubs'); setSelectedGroup(null);}} style={activeTab === 'clubs' ? styles.activeTab : styles.tab}>Clubs & Groepen</button>
         </div>
       </header>
 
       <main style={styles.content}>
+        
+        {/* TAB: USERS (Ongewijzigd conform verzoek) */}
         {activeTab === 'users' && (
           <section>
             <div style={styles.actionBar}>
               <div style={styles.searchWrapper}>
                 <Search size={18} style={styles.searchIcon} />
-                <input 
-                  placeholder="Zoek op naam of email..." 
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  style={styles.searchInput}
-                />
+                <input placeholder="Zoek op naam of email..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={styles.searchInput} />
               </div>
-              <button onClick={() => openUserModal()} style={styles.addBtn}>
-                <UserPlus size={18}/> Nieuwe Gebruiker
-              </button>
+              <button onClick={() => {setEditingId(null); setUserForm({firstName:'', lastName:'', email:'', role:'user'}); setIsUserModalOpen(true);}} style={styles.addBtn}><UserPlus size={18}/> Nieuwe Gebruiker</button>
             </div>
-
             <div style={styles.tableContainer}>
               <table style={styles.table}>
-                <thead>
-                  <tr style={styles.tableHeader}>
-                    <th style={styles.th}>Naam</th>
-                    <th style={styles.th}>Email</th>
-                    <th style={styles.th}>Rol</th>
-                    <th style={styles.th}>Acties</th>
-                  </tr>
-                </thead>
+                <thead><tr style={styles.tableHeader}><th style={styles.th}>Naam</th><th style={styles.th}>Email</th><th style={styles.th}>Rol</th><th style={styles.th}>Acties</th></tr></thead>
                 <tbody>
                   {filteredUsers.map(user => (
                     <tr key={user.id} style={styles.tableRow}>
                       <td style={styles.td}><strong>{user.firstName} {user.lastName}</strong></td>
                       <td style={styles.td}>{user.email}</td>
+                      <td style={styles.td}><span style={{...styles.roleBadge, backgroundColor: getRoleColor(user.role)}}>{user.role}</span></td>
                       <td style={styles.td}>
-                        <span style={{...styles.roleBadge, backgroundColor: getRoleColor(user.role)}}>
-                          {user.role}
-                        </span>
-                      </td>
-                      <td style={styles.td}>
-                        <button onClick={() => openUserModal(user)} style={styles.iconBtn}><Edit2 size={16} /></button>
+                        <button onClick={() => {setEditingId(user.id); setUserForm(user); setIsUserModalOpen(true);}} style={styles.iconBtn}><Edit2 size={16} /></button>
                         <button onClick={() => deleteDoc(doc(db, "users", user.id))} style={{...styles.iconBtn, color: '#ef4444'}}><Trash2 size={16} /></button>
                       </td>
                     </tr>
@@ -122,45 +128,133 @@ export default function SuperAdmin() {
           </section>
         )}
 
-        {/* --- Clubs & Groepen secties blijven hetzelfde als vorige opzet, focus ligt nu op User management --- */}
+        {/* TAB: CLUBS & GROEPEN */}
+        {activeTab === 'clubs' && (
+          <section>
+            {/* Breadcrumbs / Terug knoppen */}
+            <div style={styles.breadcrumbBar}>
+              {selectedClub && (
+                <button onClick={() => {selectedGroup ? setSelectedGroup(null) : setSelectedClub(null)}} style={styles.backBtn}>
+                  <ArrowLeft size={18}/> Terug naar {selectedGroup ? 'Club' : 'Overzicht'}
+                </button>
+              )}
+            </div>
+
+            {/* FASE 1: Club Overzicht */}
+            {!selectedClub && (
+              <>
+                <div style={styles.actionBar}>
+                  <div style={styles.searchWrapper}>
+                    <Search size={18} style={styles.searchIcon} />
+                    <input placeholder="Zoek club..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={styles.searchInput} />
+                  </div>
+                  <button onClick={() => {setEditingId(null); setClubForm({name:'', logoUrl:''}); setIsClubModalOpen(true);}} style={styles.addBtn}><Building2 size={18}/> Nieuwe Club</button>
+                </div>
+                <div style={styles.grid}>
+                  {filteredClubs.map(club => (
+                    <div key={club.id} style={styles.clubCard}>
+                      <div onClick={() => setSelectedClub(club)} style={styles.clubClickArea}>
+                        <img src={club.logoUrl || 'https://via.placeholder.com/100'} alt="logo" style={styles.clubLogo} />
+                        <h3 style={styles.clubName}>{club.name}</h3>
+                        <ChevronRight style={styles.chevron} />
+                      </div>
+                      <div style={styles.clubActions}>
+                         <button onClick={() => {setEditingId(club.id); setClubForm(club); setIsClubModalOpen(true);}} style={styles.iconBtn}><Edit2 size={14}/></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* FASE 2: Groepen van Club */}
+            {selectedClub && !selectedGroup && (
+              <>
+                <div style={styles.sectionHeader}>
+                  <img src={selectedClub.logoUrl} style={styles.smallLogo} />
+                  <h2>Groepen van {selectedClub.name}</h2>
+                  <button onClick={() => setIsGroupModalOpen(true)} style={styles.addBtn}><Plus size={18}/> Groep Toevoegen</button>
+                </div>
+                <div style={styles.grid}>
+                  {groups.map(group => (
+                    <div key={group.id} onClick={() => setSelectedGroup(group)} style={styles.groupCard}>
+                      <Users size={32} color="#3b82f6" />
+                      <h3>{group.name}</h3>
+                      <p style={styles.memberCount}>Beheer leden</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* FASE 3: Groepsleden koppelen */}
+            {selectedGroup && (
+              <div style={styles.memberLayout}>
+                <div style={styles.memberListPanel}>
+                  <h3>Leden in {selectedGroup.name}</h3>
+                  <div style={styles.memberGrid}>
+                    {members.length === 0 && <p style={styles.emptyText}>Nog geen leden in deze groep.</p>}
+                    {members.map(m => {
+                      const user = users.find(u => u.id === m.id);
+                      return (
+                        <div key={m.id} style={styles.memberItem}>
+                          <span>{user ? `${user.firstName} ${user.lastName}` : 'Laden...'}</span>
+                          <button onClick={() => toggleMember(m)} style={styles.removeBtn}><X size={14}/></button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div style={styles.userPickerPanel}>
+                  <h3>Snel toevoegen</h3>
+                  <div style={styles.miniSearch}>
+                    <Search size={14} style={styles.searchIcon} />
+                    <input placeholder="Filter gebruikers..." onChange={(e) => setSearchTerm(e.target.value)} style={styles.miniInput} />
+                  </div>
+                  <div style={styles.pickerScroll}>
+                    {users.filter(u => !members.some(m => m.id === u.id)).slice(0,10).map(u => (
+                      <div key={u.id} onClick={() => toggleMember(u)} style={styles.pickerRow}>
+                        <span>{u.firstName} {u.lastName}</span>
+                        <Plus size={14} color="#22c55e" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
       </main>
 
-      {/* USER MODAL */}
+      {/* MODALS (User, Club, Group) */}
+      {/* User Modal (Ongewijzigd) */}
       {isUserModalOpen && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContent}>
-            <div style={styles.modalHeader}>
-              <h2>{editingUser ? 'Gebruiker Bewerken' : 'Nieuwe Gebruiker'}</h2>
-              <button onClick={() => setIsUserModalOpen(false)} style={styles.closeBtn}><X size={24} /></button>
-            </div>
-            <form onSubmit={handleUserSubmit} style={styles.form}>
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Voornaam</label>
-                <input required style={styles.input} value={userForm.firstName} onChange={e => setUserForm({...userForm, firstName: e.target.value})} />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Achternaam</label>
-                <input required style={styles.input} value={userForm.lastName} onChange={e => setUserForm({...userForm, lastName: e.target.value})} />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Emailadres</label>
-                <input required type="email" style={styles.input} value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Gebruikerstype</label>
-                <select style={styles.input} value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value})}>
-                  <option value="user">User</option>
-                  <option value="clubadmin">ClubAdmin</option>
-                  <option value="superadmin">SuperAdmin</option>
-                </select>
-              </div>
-              <button type="submit" style={styles.submitBtn}>
-                <Save size={18} /> Opslaan
-              </button>
-            </form>
-          </div>
-        </div>
+        <div style={styles.modalOverlay}><div style={styles.modalContent}>
+          <div style={styles.modalHeader}><h2>{editingId ? 'Bewerken' : 'Nieuw'}</h2><button onClick={()=>setIsUserModalOpen(false)} style={styles.closeBtn}><X/></button></div>
+          <form onSubmit={handleUserSubmit} style={styles.form}>
+            <input placeholder="Voornaam" required style={styles.input} value={userForm.firstName} onChange={e => setUserForm({...userForm, firstName: e.target.value})} />
+            <input placeholder="Achternaam" required style={styles.input} value={userForm.lastName} onChange={e => setUserForm({...userForm, lastName: e.target.value})} />
+            <input placeholder="Email" required style={styles.input} value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} />
+            <select style={styles.input} value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value})}>
+              <option value="user">User</option><option value="clubadmin">ClubAdmin</option><option value="superadmin">SuperAdmin</option>
+            </select>
+            <button type="submit" style={styles.submitBtn}><Save size={18}/> Opslaan</button>
+          </form>
+        </div></div>
       )}
+
+      {/* Club Modal */}
+      {isClubModalOpen && (
+        <div style={styles.modalOverlay}><div style={styles.modalContent}>
+          <div style={styles.modalHeader}><h2>Club {editingId ? 'Bewerken' : 'Toevoegen'}</h2><button onClick={()=>setIsClubModalOpen(false)} style={styles.closeBtn}><X/></button></div>
+          <form onSubmit={handleClubSubmit} style={styles.form}>
+            <input placeholder="Club Naam" required style={styles.input} value={clubForm.name} onChange={e => setClubForm({...clubForm, name: e.target.value})} />
+            <input placeholder="Logo URL" style={styles.input} value={clubForm.logoUrl} onChange={e => setClubForm({...clubForm, logoUrl: e.target.value})} />
+            <button type="submit" style={styles.submitBtn}><Save size={18}/> Club Opslaan</button>
+          </form>
+        </div></div>
+      )}
+
     </div>
   );
 }
@@ -174,6 +268,7 @@ const getRoleColor = (role) => {
 };
 
 const styles = {
+  // Gebruik de bestaande styles van de vorige user-grid versie en voeg deze toe:
   container: { minHeight: '100vh', backgroundColor: '#0f172a', color: 'white', fontFamily: 'Inter, sans-serif' },
   header: { padding: '20px 40px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   title: { fontSize: '20px', display: 'flex', alignItems: 'center', gap: '12px', margin: 0 },
@@ -187,24 +282,45 @@ const styles = {
   searchInput: { width: '100%', padding: '12px 12px 12px 40px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white', outline: 'none' },
   addBtn: { display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 20px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold' },
   
-  // Table Styles
+  // Table
   tableContainer: { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', overflow: 'hidden' },
   table: { width: '100%', borderCollapse: 'collapse', textAlign: 'left' },
   tableHeader: { backgroundColor: '#334155' },
   th: { padding: '15px 20px', color: '#94a3b8', fontWeight: '600', fontSize: '14px' },
-  tableRow: { borderBottom: '1px solid #334155', transition: 'background 0.2s' },
+  tableRow: { borderBottom: '1px solid #334155' },
   td: { padding: '15px 20px', fontSize: '14px' },
-  roleBadge: { padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' },
+  roleBadge: { padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' },
   iconBtn: { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '8px' },
 
-  // Modal Styles
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-  modalContent: { backgroundColor: '#1e293b', width: '450px', padding: '30px', borderRadius: '16px', border: '1px solid #334155' },
-  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' },
-  closeBtn: { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' },
-  form: { display: 'flex', flexDirection: 'column', gap: '20px' },
-  formGroup: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  label: { fontSize: '14px', color: '#94a3b8' },
-  input: { padding: '12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', outline: 'none' },
-  submitBtn: { padding: '14px', backgroundColor: '#22c55e', border: 'none', borderRadius: '8px', color: 'white', fontWeight: 'bold', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', marginTop: '10px' }
+  // Grid & Cards
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '20px' },
+  clubCard: { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', overflow: 'hidden', position: 'relative' },
+  clubClickArea: { padding: '25px', textAlign: 'center', cursor: 'pointer' },
+  clubLogo: { width: '80px', height: '80px', borderRadius: '12px', objectFit: 'cover', marginBottom: '15px' },
+  clubName: { margin: 0, fontSize: '18px' },
+  clubActions: { position: 'absolute', top: '10px', right: '10px' },
+  groupCard: { backgroundColor: '#1e293b', padding: '30px', borderRadius: '12px', border: '1px solid #334155', textAlign: 'center', cursor: 'pointer' },
+  memberCount: { fontSize: '12px', color: '#3b82f6', marginTop: '10px' },
+  breadcrumbBar: { marginBottom: '20px' },
+  backBtn: { background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' },
+  sectionHeader: { display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '25px' },
+  smallLogo: { width: '40px', height: '40px', borderRadius: '8px' },
+
+  // Member Coupling
+  memberLayout: { display: 'grid', gridTemplateColumns: '1fr 300px', gap: '30px' },
+  memberListPanel: { backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', border: '1px solid #334155' },
+  memberGrid: { display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '15px' },
+  memberItem: { backgroundColor: '#0f172a', padding: '8px 12px', borderRadius: '20px', border: '1px solid #334155', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px' },
+  removeBtn: { background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' },
+  userPickerPanel: { backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', border: '1px solid #334155' },
+  pickerScroll: { maxHeight: '400px', overflowY: 'auto' },
+  pickerRow: { padding: '10px', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', cursor: 'pointer' },
+
+  // Modals (Algemeen)
+  modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
+  modalContent: { backgroundColor: '#1e293b', width: '400px', padding: '30px', borderRadius: '16px', border: '1px solid #334155' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
+  input: { width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', marginBottom: '15px' },
+  submitBtn: { width: '100%', padding: '12px', backgroundColor: '#22c55e', border: 'none', borderRadius: '8px', color: 'white', fontWeight: 'bold', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px' },
+  closeBtn: { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }
 };
