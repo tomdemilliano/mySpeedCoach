@@ -5,6 +5,7 @@ import {
   Play, Clock, User, Users, Building2, Trophy, ArrowLeft 
 } from 'lucide-react';
 
+
 // --- GEÏSOLEERDE TIMER COMPONENT (Blijft ongewijzigd voor performance) ---
 const LiveTimer = memo(({ startTime, sessionType, isRecording, isFinished }) => {
   const [display, setDisplay] = useState("0:00");
