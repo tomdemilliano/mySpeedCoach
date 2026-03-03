@@ -101,7 +101,7 @@ export const SCHEMA = {
   }
 };
 
-iimport { db, rtdb } from '../firebaseConfig';
+import { db, rtdb } from '../firebaseConfig';
 import { 
   collection, doc, setDoc, getDoc, getDocs, updateDoc, 
   deleteDoc, query, where, serverTimestamp, addDoc 
