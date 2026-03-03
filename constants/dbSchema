@@ -13,9 +13,8 @@ export const SCHEMA = {
         deviceName: "string", // Bijv. "Garmin HRM-Dual"
         lastConnection: "timestamp"
       },
-	  heartrateZones: {
-	    [{ name: "string", min: "number", max: "number", color: "string" }]
-	  },
+	// hartslagzones 	  
+	  heartrateZones: [{ name: "string", min: "number", max: "number", color: "string" }],
 	  
 	// persoonlijke records  
 	  records: {
