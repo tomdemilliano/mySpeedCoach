@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebaseConfig';
-import { doc, deleteDoc, onSnapshot, collection, serverTimestamp } from "firebase/firestore";
+import { doc, deleteDoc, onSnapshot, collection, serverTimestamp, updateDoc } from "firebase/firestore";
 import { UserFactory, ClubFactory, GroupFactory } from '../constants/dbSchema'; 
 
 import { 
   ShieldAlert, UserPlus, Building2, Users, 
-  Trash2, Search, Edit2, X, Save, ChevronRight, ArrowLeft, Plus, 
-  ToggleLeft, ToggleRight, Heart, HeartOff, PlusCircle, Calendar
+  Trash2, Search, Edit2, X, Save, ArrowLeft, Plus, 
+  Heart, HeartOff, PlusCircle, Calendar
 } from 'lucide-react';
 
 export default function SuperAdmin() {
@@ -98,7 +98,8 @@ export default function SuperAdmin() {
     await GroupFactory.addMember(selectedClub.id, selectedGroup.id, user.id, {
       isSkipper: true,
       isCoach: false,
-      startMembership: new Date()
+      startMembership: new Date(),
+      endMembership: null
     });
   };
 
@@ -108,7 +109,8 @@ export default function SuperAdmin() {
   };
 
   const handleRemoveMember = async (uid) => {
-    if (confirm("Lid verwijderen uit deze groep?")) {
+    // Punt 1: Gebruiker echt verwijderen uit de collectie
+    if (confirm("Weet je zeker dat je dit lidmaatschap definitief wilt verwijderen?")) {
       await GroupFactory.removeMember(selectedClub.id, selectedGroup.id, uid);
     }
   };
@@ -125,7 +127,6 @@ export default function SuperAdmin() {
 
       <main style={styles.content}>
         
-        {/* TAB: USERS */}
         {activeTab === 'users' && (
           <section>
             <div style={styles.actionBar}>
@@ -156,7 +157,6 @@ export default function SuperAdmin() {
           </section>
         )}
 
-        {/* TAB: CLUBS & GROEPEN */}
         {activeTab === 'clubs' && (
           <section>
             <div style={styles.breadcrumbBar}>
@@ -167,7 +167,6 @@ export default function SuperAdmin() {
               )}
             </div>
 
-            {/* CLUBS OVERZICHT */}
             {!selectedClub && (
               <>
                 <div style={styles.actionBar}>
@@ -191,7 +190,6 @@ export default function SuperAdmin() {
               </>
             )}
 
-            {/* GROEPEN OVERZICHT */}
             {selectedClub && !selectedGroup && (
               <>
                 <div style={styles.sectionHeader}>
@@ -222,7 +220,6 @@ export default function SuperAdmin() {
               </>
             )}
 
-            {/* LEDEN BEHEER GRID */}
             {selectedGroup && (
               <div style={styles.memberLayout}>
                 <div style={styles.memberListPanel}>
@@ -242,7 +239,8 @@ export default function SuperAdmin() {
                               <div style={styles.memberName}>{user ? `${user.firstName} ${user.lastName}` : 'Onbekend'}</div>
                               <div style={styles.memberEmail}>{user?.email || 'geen email'}</div>
                             </div>
-                            <button onClick={() => handleRemoveMember(m.id)} style={styles.deleteMemberBtn}><Trash2 size={16}/></button>
+                            {/* Punt 1: Lidmaatschap document echt verwijderen */}
+                            <button onClick={() => handleRemoveMember(m.id)} style={styles.deleteMemberBtn} title="Lid verwijderen"><Trash2 size={16}/></button>
                           </div>
 
                           <div style={styles.memberRoles}>
@@ -280,16 +278,16 @@ export default function SuperAdmin() {
                                   onChange={(e) => setMemberEditForm({...memberEditForm, endMembership: e.target.value ? new Date(e.target.value) : null})}
                                 />
                               ) : (
-                                <strong>{m.endMembership?.toDate ? m.endMembership.toDate().toLocaleDateString() : 'Actief'}</strong>
+                                <strong>{m.endMembership?.toDate ? m.endMembership.toDate().toLocaleDateString() : 'Geen'}</strong>
                               )}
                             </div>
                           </div>
 
                           <div style={styles.memberCardFooter}>
                             {isEditing ? (
-                              <button onClick={() => handleUpdateMember(m.id, memberEditForm)} style={styles.saveMemberBtn}><Save size={14}/> Opslaan</button>
+                              <button onClick={() => handleUpdateMember(m.id, memberEditForm)} style={styles.saveMemberBtn}><Save size={14}/> Gegevens Opslaan</button>
                             ) : (
-                              <button onClick={() => {setEditingMemberUid(m.id); setMemberEditForm(m);}} style={styles.editMemberBtn}><Edit2 size={14}/> Aanpassen</button>
+                              <button onClick={() => {setEditingMemberUid(m.id); setMemberEditForm(m);}} style={styles.editMemberBtn}><Edit2 size={14}/> Wijzig Lidmaatschap</button>
                             )}
                           </div>
                         </div>
@@ -299,8 +297,8 @@ export default function SuperAdmin() {
                 </div>
 
                 <div style={styles.userPickerPanel}>
-                  <h3>Toevoegen</h3>
-                  <input placeholder="Filter gebruikers..." onChange={(e) => setSearchTerm(e.target.value)} style={styles.miniInput} />
+                  <h3>Snel Toevoegen</h3>
+                  <input placeholder="Zoek gebruiker..." onChange={(e) => setSearchTerm(e.target.value)} style={styles.miniInput} />
                   <div style={styles.pickerScroll}>
                     {users.filter(u => !members.some(m => m.id === u.id))
                           .filter(u => `${u.firstName} ${u.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -412,27 +410,27 @@ const styles = {
   switchContainer: { display: 'flex', borderRadius: '8px', overflow: 'hidden', border: '1px solid #334155', cursor: 'pointer', marginTop: '5px' },
   switchHalf: { flex: 1, padding: '10px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold' },
 
-  // LIDMAATSCHAP SPECIFIEK
   memberLayout: { display: 'grid', gridTemplateColumns: '1fr 300px', gap: '30px' },
   memberListPanel: { backgroundColor: '#1e293b', padding: '25px', borderRadius: '12px', border: '1px solid #334155' },
   memberGridDisplay: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' },
   memberCard: { backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #334155', padding: '15px', display: 'flex', flexDirection: 'column', gap: '12px' },
-  memberCardHeader: { display: 'flex', justifyContent: 'space-between' },
+  memberCardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
   memberName: { fontWeight: 'bold', fontSize: '15px' },
   memberEmail: { fontSize: '12px', color: '#64748b' },
-  deleteMemberBtn: { background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' },
+  deleteMemberBtn: { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px', transition: 'color 0.2s' },
   memberRoles: { display: 'flex', gap: '8px' },
   roleToggle: { flex: 1, padding: '6px', borderRadius: '6px', border: 'none', color: 'white', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' },
   memberDates: { backgroundColor: '#1e293b', borderRadius: '8px', padding: '10px', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '5px' },
   dateInfo: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  miniDateInput: { backgroundColor: '#0f172a', border: '1px solid #334155', color: 'white', borderRadius: '4px', padding: '2px 4px', fontSize: '11px', width: '100px' },
+  miniDateInput: { backgroundColor: '#0f172a', border: '1px solid #334155', color: 'white', borderRadius: '4px', padding: '2px 4px', fontSize: '11px', width: '105px' },
+  memberCardFooter: { marginTop: '5px' },
   editMemberBtn: { width: '100%', background: 'none', border: '1px solid #334155', color: '#94a3b8', padding: '6px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px' },
   saveMemberBtn: { width: '100%', backgroundColor: '#22c55e', border: 'none', color: 'white', padding: '6px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' },
 
   userPickerPanel: { backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', border: '1px solid #334155', height: 'fit-content' },
   miniInput: { width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', marginBottom: '15px' },
   pickerScroll: { maxHeight: '500px', overflowY: 'auto' },
-  pickerRow: { padding: '12px', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', cursor: 'pointer' },
+  pickerRow: { padding: '12px', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' },
 
   modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
   modalContent: { backgroundColor: '#1e293b', width: '400px', padding: '30px', borderRadius: '16px', border: '1px solid #334155' },
