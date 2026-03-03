@@ -1,0 +1,126 @@
+import { db, rtdb } from '../firebaseConfig';
+import { 
+  collection, doc, setDoc, getDoc, getDocs, updateDoc, 
+  deleteDoc, query, where, serverTimestamp, addDoc 
+} from "firebase/firestore";
+import { ref, set, update, remove } from "firebase/database";
+
+// ==========================================
+// 1. USER & PERSONAL DATA FACTORIES
+// ==========================================
+
+export const UserFactory = {
+  // Gebruiker aanmaken met STANDAARD ZONES
+  create: async (uid, userData) => {
+    const defaultZones = [
+      { name: 'Warm-up', min: 0, max: 120, color: '#94a3b8' },
+      { name: 'Fat Burn', min: 120, max: 145, color: '#22c55e' },
+      { name: 'Aerobic', min: 145, max: 165, color: '#facc15' },
+      { name: 'Anaerobic', min: 165, max: 185, color: '#f97316' },
+      { name: 'Red Line', min: 185, max: 250, color: '#ef4444' }
+    ];
+
+    return setDoc(doc(db, "users", uid), {
+      ...userData,
+      role: userData.role || 'user',
+      heartrateZones: defaultZones,
+      createdAt: serverTimestamp(),
+      assignedDevice: {
+        deviceId: "",
+        deviceName: "",
+        lastConnection: null
+      }
+    });
+  },
+
+  get: (uid) => getDoc(doc(db, "users", uid)),
+  
+  updateProfile: (uid, data) => updateDoc(doc(db, "users", uid), data),
+
+  // Hartslagzones handmatig updaten
+  updateZones: (uid, zones) => updateDoc(doc(db, "users", uid), { heartrateZones: zones }),
+
+  // Device koppelen
+  assignDevice: (uid, deviceId, deviceName) => 
+    updateDoc(doc(db, "users", uid), {
+      "assignedDevice.deviceId": deviceId,
+      "assignedDevice.deviceName": deviceName,
+      "assignedDevice.lastConnection": serverTimestamp()
+    }),
+
+  // Records & Historiek (Subcollecties)
+  addRecord: (uid, recordData) => 
+    addDoc(collection(db, `users/${uid}/records`), { ...recordData, achievedAt: serverTimestamp() }),
+
+  saveToHistory: (uid, sessionData) => 
+    addDoc(collection(db, `users/${uid}/sessionHistory`), {
+      ...sessionData,
+      sessionEnd: serverTimestamp()
+    })
+};
+
+// ==========================================
+// 2. CLUB & GROUP FACTORIES (Hierarchical)
+// ==========================================
+
+export const ClubFactory = {
+  create: (data) => addDoc(collection(db, "clubs"), { ...data, createdAt: serverTimestamp() }),
+  getAll: () => getDocs(collection(db, "clubs")),
+  getById: (clubId) => getDoc(doc(db, "clubs", clubId))
+};
+
+export const GroupFactory = {
+  // Pad: clubs/{clubId}/groups/{groupId}
+  create: (clubId, groupData) => 
+    addDoc(collection(db, `clubs/${clubId}/groups`), { ...groupData, isActive: true }),
+
+  // Ledenbeheer: clubs/{clubId}/groups/{groupId}/members/{uid}
+  addMember: (clubId, groupId, uid, memberData) => 
+    setDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, uid), {
+      uid,
+      isSkipper: memberData.isSkipper ?? true,
+      isCoach: memberData.isCoach ?? false,
+      startMembership: serverTimestamp()
+    }),
+
+  removeMember: (clubId, groupId, uid) => 
+    updateDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, uid), {
+      endMembership: serverTimestamp()
+    })
+};
+
+// ==========================================
+// 3. REALTIME DATABASE FACTORIES (Live Data)
+// ==========================================
+
+export const LiveSessionFactory = {
+  // Update hartslag (Continu)
+  syncHeartbeat: (uid, bpm, status = "online") => {
+    return update(ref(rtdb, `live_sessions/${uid}`), {
+      bpm,
+      lastHeartbeat: Date.now(),
+      connectionStatus: status
+    });
+  },
+
+  // Start de teller
+  startCounter: (uid, discipline, sessionType) => {
+    return update(ref(rtdb, `live_sessions/${uid}/session`), {
+      isActive: true,
+      startTime: Date.now(),
+      steps: 0,
+      discipline,
+      sessionType
+    });
+  },
+
+  updateSteps: (uid, steps) => {
+    return update(ref(rtdb, `live_sessions/${uid}/session`), { steps });
+  },
+
+  stopCounter: (uid) => {
+    return update(ref(rtdb, `live_sessions/${uid}/session`), {
+      isActive: false
+    });
+  }
+};
