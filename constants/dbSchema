@@ -137,7 +137,29 @@ export const UserFactory = {
   },
 
   get: (uid) => getDoc(doc(db, "users", uid)),
-  
+
+  delete: async (uid) => {
+    // 1. Zoek alle clubs op
+    const clubsSnap = await getDocs(collection(db, "clubs"));
+    
+    for (const clubDoc of clubsSnap.docs) {
+      // 2. Zoek alle groepen binnen deze club
+      const groupsSnap = await getDocs(collection(db, `clubs/${clubDoc.id}/groups`));
+      
+      for (const groupDoc of groupsSnap.docs) {
+        // 3. Probeer het lidmaatschap document van deze gebruiker in deze groep te verwijderen
+        // We gebruiken deleteDoc direct op het pad; als het niet bestaat gebeurt er niets
+        await deleteDoc(doc(db, `clubs/${clubDoc.id}/groups/${groupDoc.id}/members`, uid));
+      }
+    }
+
+    // 4. Verwijder eventuele live sessie in RTDB (optioneel maar netjes)
+    // await remove(ref(rtdb, `live_sessions/${uid}`));
+
+    // 5. Verwijder het hoofd-document van de gebruiker
+    return deleteDoc(doc(db, "users", uid));
+  },
+
   updateProfile: (uid, data) => updateDoc(doc(db, "users", uid), data),
 
   // Hartslagzones handmatig updaten
