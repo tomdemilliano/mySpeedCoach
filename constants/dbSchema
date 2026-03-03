@@ -189,7 +189,22 @@ export const GroupFactory = {
   removeMember: (clubId, groupId, uid) => 
     updateDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, uid), {
       endMembership: serverTimestamp()
-    })
+    }),
+
+  // Haal alle groepen van een specifieke club op
+  getGroupsByClub: (clubId, callback) => {
+    return onSnapshot(collection(db, `clubs/${clubId}/groups`), (snap) => {
+      callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  },
+
+  // Haal alle leden van een specifieke groep op
+  getMembersByGroup: (clubId, groupId, callback) => {
+    return onSnapshot(collection(db, `clubs/${clubId}/groups/${groupId}/members`), (snap) => {
+      callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+
 };
 
 // ==========================================
