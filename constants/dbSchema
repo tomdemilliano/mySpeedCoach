@@ -41,7 +41,7 @@ export const SCHEMA = {
 	// historiek van opgenomen sessies
 	  sessionHistory: {
 		discipline: "string",
-		sessionStart: "timstamp",
+		sessionStart: "timestamp",
 		sessionEnd: "timestamp",
 		score: "number",
 		avgBpm: "number",
