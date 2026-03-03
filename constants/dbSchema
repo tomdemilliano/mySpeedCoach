@@ -262,6 +262,16 @@ export const GroupFactory = {
     return onSnapshot(collection(db, `clubs/${clubId}/groups/${groupId}/members`), (snap) => {
       callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
+  },
+  
+  getSkippersByGroup: (clubId, groupId, callback) => {
+    const q = query(
+      collection(db, `clubs/${clubId}/groups/${groupId}/members`),
+      where("isSkipper", "==", true)
+    );
+    return onSnapshot(q, (snap) => {
+      callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
   }
 };
 
