@@ -170,13 +170,36 @@ export const ClubFactory = {
   create: (data) => addDoc(collection(db, "clubs"), { ...data, createdAt: serverTimestamp() }),
   getAll: () => getDocs(collection(db, "clubs")),
   getById: (clubId) => getDoc(doc(db, "clubs", clubId)), 
-  update: (clubId, data) => updateDoc(doc(db, "clubs", clubId), data)
+  update: (clubId, data) => updateDoc(doc(db, "clubs", clubId), data), 
+
+  delete: async (clubId) => {
+    // 1. Haal alle groepen op van deze club
+    const groupsSnap = await getDocs(collection(db, `clubs/${clubId}/groups`));
+    
+    for (const groupDoc of groupsSnap.docs) {
+      // 2. Verwijder alle leden uit de subcollectie van de groep
+      const membersSnap = await getDocs(collection(db, `clubs/${clubId}/groups/${groupDoc.id}/members`));
+      for (const memberDoc of membersSnap.docs) {
+        await deleteDoc(doc(db, `clubs/${clubId}/groups/${groupDoc.id}/members`, memberDoc.id));
+      }
+      // 3. Verwijder de groep zelf
+      await deleteDoc(doc(db, `clubs/${clubId}/groups`, groupDoc.id));
+    }
+    
+    // 4. Verwijder de club zelf
+    return deleteDoc(doc(db, "clubs", clubId));
+  }
+
 };
 
 export const GroupFactory = {
   // Pad: clubs/{clubId}/groups/{groupId}
   create: (clubId, groupData) => 
     addDoc(collection(db, `clubs/${clubId}/groups`), { ...groupData, isActive: true }),
+  update: (clubId, groupId, data) => 
+    updateDoc(doc(db, `clubs/${clubId}/groups`, groupId), data),
+  delete: (clubId, groupId) => 
+    deleteDoc(doc(db, `clubs/${clubId}/groups`, groupId)),
 
   // Ledenbeheer: clubs/{clubId}/groups/{groupId}/members/{uid}
   addMember: (clubId, groupId, uid, memberData) => 
@@ -205,7 +228,6 @@ export const GroupFactory = {
       callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
   }
-
 };
 
 // ==========================================
