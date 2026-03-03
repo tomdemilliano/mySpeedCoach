@@ -280,23 +280,42 @@ export const LiveSessionFactory = {
   },
 
   // Start de teller
-  startCounter: (uid, discipline, sessionType) => {
+startCounter: (uid, discipline, sessionType) => {
     return update(ref(rtdb, `live_sessions/${uid}/session`), {
       isActive: true,
+      isFinished: false,
       startTime: Date.now(),
       steps: 0,
-      discipline,
-      sessionType
+      discipline: discipline,
+      sessionType: sessionType
     });
   },
 
-  updateSteps: (uid, steps) => {
-    return update(ref(rtdb, `live_sessions/${uid}/session`), { steps });
+  incrementSteps: (uid) => {
+    const stepRef = ref(rtdb, `live_sessions/${uid}/session/steps`);
+    return runTransaction(stepRef, (current) => (current || 0) + 1);
   },
 
   stopCounter: (uid) => {
     return update(ref(rtdb, `live_sessions/${uid}/session`), {
-      isActive: false
+      isActive: false,
+      isFinished: true
+    });
+  },
+
+  resetSession: (uid) => {
+    return update(ref(rtdb, `live_sessions/${uid}/session`), {
+      isActive: false,
+      isFinished: false,
+      steps: 0,
+      startTime: null
+    });
+  },
+
+  subscribeToSession: (uid, callback) => {
+    const sessionRef = ref(rtdb, `live_sessions/${uid}/session`);
+    return onValue(sessionRef, (snapshot) => {
+      callback(snapshot.val());
     });
   }
 };
