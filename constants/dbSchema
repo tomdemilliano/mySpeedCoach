@@ -170,6 +170,7 @@ export const ClubFactory = {
   create: (data) => addDoc(collection(db, "clubs"), { ...data, createdAt: serverTimestamp() }),
   getAll: () => getDocs(collection(db, "clubs")),
   getById: (clubId) => getDoc(doc(db, "clubs", clubId))
+  update: (clubId, data) => updateDoc(doc(db, "clubs", clubId), data)
 };
 
 export const GroupFactory = {
