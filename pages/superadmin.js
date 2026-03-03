@@ -129,7 +129,15 @@ export default function SuperAdmin() {
                       <td style={styles.td}><span style={{...styles.roleBadge, backgroundColor: getRoleColor(user.role)}}>{user.role}</span></td>
                       <td style={styles.td}>
                         <button onClick={() => {setEditingId(user.id); setUserForm(user); setIsUserModalOpen(true);}} style={styles.iconBtn}><Edit2 size={16} /></button>
-                        <button onClick={() => deleteDoc(doc(db, "users", user.id))} style={{...styles.iconBtn, color: '#ef4444'}}><Trash2 size={16} /></button>
+                        <button onClick={() => {
+                          if(confirm("Weet je zeker dat je deze gebruiker wilt verwijderen? Alle groepslidmaatschappen worden ook gewist.")) {
+                            UserFactory.delete(user.id); // <--- Verander dit naar de Factory call
+                          }
+                        }} 
+                        style={{...styles.iconBtn, color: '#ef4444'}}
+                        >
+                          <Trash2 size={16} />
+                          </button>                      
                       </td>
                     </tr>
                   ))}
