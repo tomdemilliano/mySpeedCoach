@@ -257,6 +257,12 @@ export const GroupFactory = {
     return deleteDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, uid));
   },
 
+  getMemberCount: (clubId, groupId, callback) => 
+    onSnapshot(collection(db, `clubs/${clubId}/groups/${groupId}/members`), (snap) => {
+      callback(snap.size);
+    }
+  ),
+
   // Haal alle groepen van een specifieke club op
   getGroupsByClub: (clubId, callback) => {
     return onSnapshot(collection(db, `clubs/${clubId}/groups`), (snap) => {
