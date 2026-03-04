@@ -1,5 +1,7 @@
 import { useState, useEffect, memo } from 'react';
 import { LiveSessionFactory, GroupFactory, ClubFactory } from '../constants/dbSchema';
+import { db } from '../firebaseConfig';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { 
   Hash, ChevronRight, Timer, Square, History, 
   Play, Clock, User, Users, Building2, Trophy, ArrowLeft 
@@ -50,6 +52,7 @@ export default function CounterPage() {
   const [clubs, setClubs] = useState([]);
   const [groups, setGroups] = useState([]);
   const [skippers, setSkippers] = useState([]);
+  const [users, setUsers] = useState([]);
   
   const [selectedClubId, setSelectedClubId] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState('');
@@ -63,10 +66,13 @@ export default function CounterPage() {
   // --- LIVE DATA STATE ---
   const [currentData, setCurrentData] = useState(null);
 
-  // 1. Laad alle clubs bij mount
+  // 1. Laad alle clubs & users bij mount
   useEffect(() => {
-    const unsub = ClubFactory.getAll((data) => setClubs(data));
-    return () => unsub();
+    const unsubClubs = ClubFactory.getAll((data) => setClubs(data));
+    const unsubUsers = onSnapshot(collection(db, "users"), (snap) => {
+      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => { unsubClubs(); unsubUsers(); };
   }, []);
 
   // 2. Laad groepen zodra club wijzigt
@@ -168,12 +174,18 @@ export default function CounterPage() {
                 <label style={styles.label}>3. Kies de Skipper</label>
                 {selectedGroupId ? (
                     <div style={styles.grid}>
-                        {skippers.length > 0 ? skippers.map(s => (
-                            <button key={s.id} style={styles.card} onClick={() => { setSelectedSkipper(s); setShowConfigModal(true); }}>
-                                <div style={styles.avatar}>{s.firstName[0]}{s.lastName[0]}</div>
-                                <div style={{marginTop: '10px', fontSize: '14px'}}>{s.firstName} {s.lastName}</div>
-                            </button>
-                        )) : <p style={styles.infoText}>Geen actieve skippers gevonden in deze groep.</p>}
+                        {skippers.length > 0 ? skippers.map(s => {
+                            const userProfile = users.find(u => u.id === s.id);
+                            const firstName = userProfile?.firstName || '?';
+                            const lastName = userProfile?.lastName || '';
+                            const initials = `${firstName[0] || '?'}${lastName[0] || ''}`;
+                            return (
+                                <button key={s.id} style={styles.card} onClick={() => { setSelectedSkipper({ ...s, firstName, lastName }); setShowConfigModal(true); }}>
+                                    <div style={styles.avatar}>{initials}</div>
+                                    <div style={{marginTop: '10px', fontSize: '14px'}}>{firstName} {lastName}</div>
+                                </button>
+                            );
+                        }) : <p style={styles.infoText}>Geen actieve skippers gevonden in deze groep.</p>}
                     </div>
                 ) : (
                     <p style={styles.infoText}>Selecteer eerst een club en groep.</p>
