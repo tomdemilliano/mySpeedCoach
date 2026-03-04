@@ -138,6 +138,10 @@ export const UserFactory = {
 
   get: (uid) => getDoc(doc(db, "users", uid)),
 
+  getAll: (callback) => onSnapshot(collection(db, "users"), (snap) => {
+  	callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  }),  
+
   delete: async (uid) => {
     // 1. Zoek alle clubs op
     const clubsSnap = await getDocs(collection(db, "clubs"));
