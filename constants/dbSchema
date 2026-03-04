@@ -190,7 +190,10 @@ export const UserFactory = {
 
 export const ClubFactory = {
   create: (data) => addDoc(collection(db, "clubs"), { ...data, createdAt: serverTimestamp() }),
-  getAll: () => getDocs(collection(db, "clubs")),
+//  getAll: () => getDocs(collection(db, "clubs")),
+  getAll: (callback) => onSnapshot(collection(db, "clubs"), (snap) => {
+    callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  }),
   getById: (clubId) => getDoc(doc(db, "clubs", clubId)), 
   update: (clubId, data) => updateDoc(doc(db, "clubs", clubId), data), 
 
