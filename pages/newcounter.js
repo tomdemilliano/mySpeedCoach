@@ -1,7 +1,5 @@
 import { useState, useEffect, memo } from 'react';
 import { LiveSessionFactory, GroupFactory, ClubFactory } from '../constants/dbSchema';
-import { db } from '../firebaseConfig';
-import { collection, onSnapshot } from 'firebase/firestore';
 import { 
   Hash, ChevronRight, Timer, Square, History, 
   Play, Clock, User, Users, Building2, Trophy, ArrowLeft 
@@ -69,9 +67,7 @@ export default function CounterPage() {
   // 1. Laad alle clubs & users bij mount
   useEffect(() => {
     const unsubClubs = ClubFactory.getAll((data) => setClubs(data));
-    const unsubUsers = onSnapshot(collection(db, "users"), (snap) => {
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    const unsubUsers = UserFactory.getAll((data) => setUsers(data));
     return () => { unsubClubs(); unsubUsers(); };
   }, []);
 
