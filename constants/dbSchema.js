@@ -303,6 +303,8 @@ export const LiveSessionFactory = {
   },
 
   // Start de teller
+// discipline: '30sec' | '2min' | '3min'
+// sessionType: 'Training' | 'Wedstrijd'
 startCounter: (uid, discipline, sessionType) => {
     return update(ref(rtdb, `live_sessions/${uid}/session`), {
       isActive: true,
