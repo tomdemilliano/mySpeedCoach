@@ -330,7 +330,7 @@ export const LiveSessionFactory = {
     return update(ref(rtdb, `live_sessions/${uid}/session`), {
       isActive: true,
       isFinished: false,
-      startTime: Date.now(),
+      startTime: null,       // Will be set on the first tap, not on session start
       steps: 0,
       discipline: discipline,
       sessionType: sessionType,
@@ -339,22 +339,20 @@ export const LiveSessionFactory = {
     });
   },
 
-  incrementSteps: (uid, currentBpm) => {
+  // incrementSteps: pass firstTapTime so startTime is set on the very first tap
+  incrementSteps: (uid, currentBpm, firstTapTime) => {
     const stepRef = ref(rtdb, `live_sessions/${uid}/session/steps`);
-    // Increment steps atomically
     const stepPromise = runTransaction(stepRef, (current) => (current || 0) + 1);
 
-    // Also update lastStepTime and append telemetry point
-    // We read current steps after increment in the calling code
-    const metaPromise = update(ref(rtdb, `live_sessions/${uid}/session`), {
-      lastStepTime: Date.now(),
-    });
+    const now = Date.now();
+    const metaUpdate = { lastStepTime: now };
+    // Only set startTime once — when firstTapTime is provided and it hasn't been set yet
+    if (firstTapTime) {
+      metaUpdate.startTime = firstTapTime;
+    }
+    const metaPromise = update(ref(rtdb, `live_sessions/${uid}/session`), metaUpdate);
 
-    // Push a telemetry point to the telemetry list (keyed by timestamp for ordering)
-    const telPoint = {
-      time: Date.now(),
-      heartRate: currentBpm || 0
-    };
+    const telPoint = { time: now, heartRate: currentBpm || 0 };
     const telPromise = push(ref(rtdb, `live_sessions/${uid}/session/telemetry`), telPoint);
 
     return Promise.all([stepPromise, metaPromise, telPromise]);
