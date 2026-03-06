@@ -100,7 +100,7 @@ export const SCHEMA = {
           isActive: "boolean",     // Is de counter gestart?
           startTime: "timestamp",  // Wanneer is de 'Start' knop ingedrukt?
           steps: "number",         // De huidige tellerstand
-          discipline: "30s|2m|3m",     // Wat zijn we aan het tellen?
+          discipline: "30sec|2min|3min",   // Wat zijn we aan het tellen?
 		  sessionType: "training|wedstrijd" // type van de sessie
         }
       }
