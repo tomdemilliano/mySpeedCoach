@@ -61,6 +61,21 @@ export const SCHEMA = {
           endMembership: "timestamp"
         }
       }
+    },
+    // Top-level collection for club join requests
+    clubJoinRequests: {
+      uid: "string",               // user who is requesting
+      firstName: "string",
+      lastName: "string",
+      email: "string",
+      clubId: "string",
+      clubName: "string",
+      message: "string",           // optional motivation message from user
+      status: "pending|approved|rejected",
+      rejectionReason: "string",   // filled in by superadmin on rejection
+      createdAt: "timestamp",
+      resolvedAt: "timestamp|null",
+      hidden: "boolean"            // user can hide rejected requests from their view
     }
   },
 
@@ -78,7 +93,6 @@ export const SCHEMA = {
           discipline: "30sec|2min|3min",
           sessionType: "training|wedstrijd",
           lastStepTime: "timestamp",
-          // Live telemetry buffer (cleared after session saved)
           telemetry: [{
             time: "number",
             steps: "number",
@@ -147,11 +161,10 @@ export const UserFactory = {
 
   // ---- SESSION HISTORY ----
 
-  // Save a completed session with full telemetry to Firestore subcollection
   saveSessionHistory: (uid, sessionData) => 
     addDoc(collection(db, `users/${uid}/sessionHistory`), {
-      discipline: sessionData.discipline,          // '30sec' | '2min' | '3min'
-      sessionType: sessionData.sessionType,        // 'Training' | 'Wedstrijd'
+      discipline: sessionData.discipline,
+      sessionType: sessionData.sessionType,
       score: sessionData.score,
       avgBpm: sessionData.avgBpm,
       maxBpm: sessionData.maxBpm,
@@ -160,7 +173,6 @@ export const UserFactory = {
       telemetry: sessionData.telemetry || []
     }),
 
-  // Get all session history for a user (realtime)
   getSessionHistory: (uid, callback) =>
     onSnapshot(collection(db, `users/${uid}/sessionHistory`), (snap) => {
       const sorted = snap.docs
@@ -175,9 +187,6 @@ export const UserFactory = {
 
   // ---- RECORDS ----
 
-  // Add a new record entry (does NOT replace — appends to subcollection)
-  // discipline: '30sec' | '2min' | '3min'
-  // sessionType: 'Training' | 'Wedstrijd'
   addRecord: (uid, recordData) => 
     addDoc(collection(db, `users/${uid}/records`), {
       discipline: recordData.discipline,
@@ -187,7 +196,6 @@ export const UserFactory = {
       telemetry: recordData.telemetry || []
     }),
 
-  // Get the best (highest) record for a specific discipline + sessionType
   getBestRecord: async (uid, discipline, sessionType) => {
     const q = query(
       collection(db, `users/${uid}/records`),
@@ -200,7 +208,6 @@ export const UserFactory = {
     return records.reduce((best, r) => (!best || r.score > best.score) ? r : best, null);
   },
 
-  // Listen to best record realtime
   subscribeToRecords: (uid, discipline, sessionType, callback) => {
     const q = query(
       collection(db, `users/${uid}/records`),
@@ -216,13 +223,11 @@ export const UserFactory = {
 
   // ---- GOALS ----
 
-  // Get all goals for a user
   getGoals: (uid, callback) =>
     onSnapshot(collection(db, `users/${uid}/goals`), (snap) => {
       callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }),
 
-  // Mark a goal as achieved
   markGoalAchieved: (uid, goalId) =>
     updateDoc(doc(db, `users/${uid}/goals`, goalId), {
       achievedAt: serverTimestamp()
@@ -316,7 +321,6 @@ export const GroupFactory = {
 // ==========================================
 
 export const LiveSessionFactory = {
-  // Update hartslag (Continu)
   syncHeartbeat: (uid, bpm, status = "online") => {
     return update(ref(rtdb, `live_sessions/${uid}`), {
       bpm,
@@ -325,12 +329,11 @@ export const LiveSessionFactory = {
     });
   },
 
-  // Start de teller
   startCounter: (uid, discipline, sessionType) => {
     return update(ref(rtdb, `live_sessions/${uid}/session`), {
       isActive: false,
       isFinished: false,
-      startTime: null,       // Will be set on the first tap, not on session start
+      startTime: null,
       steps: 0,
       discipline: discipline,
       sessionType: sessionType,
@@ -339,17 +342,15 @@ export const LiveSessionFactory = {
     });
   },
 
-  // incrementSteps: pass firstTapTime so startTime is set on the very first tap
   incrementSteps: (uid, currentBpm, firstTapTime) => {
     const stepRef = ref(rtdb, `live_sessions/${uid}/session/steps`);
     const stepPromise = runTransaction(stepRef, (current) => (current || 0) + 1);
 
     const now = Date.now();
     const metaUpdate = { lastStepTime: now };
-    // Only set startTime once — when firstTapTime is provided and it hasn't been set yet
     if (firstTapTime) {
       metaUpdate.startTime = firstTapTime;
-      metaUpdate.isActive = true
+      metaUpdate.isActive = true;
     }
     const metaPromise = update(ref(rtdb, `live_sessions/${uid}/session`), metaUpdate);
 
@@ -378,7 +379,6 @@ export const LiveSessionFactory = {
     });
   },
 
-  // Read entire session once (for finalizing)
   getSessionOnce: (uid) => {
     return new Promise((resolve) => {
       const sessionRef = ref(rtdb, `live_sessions/${uid}/session`);
@@ -388,7 +388,6 @@ export const LiveSessionFactory = {
     });
   },
 
-  // Read current BPM once
   getBpmOnce: (uid) => {
     return new Promise((resolve) => {
       const bpmRef = ref(rtdb, `live_sessions/${uid}/bpm`);
@@ -411,4 +410,113 @@ export const LiveSessionFactory = {
       callback(snapshot.val());
     });
   }
+};
+
+// ==========================================
+// 4. CLUB JOIN REQUEST FACTORY
+// ==========================================
+
+export const ClubJoinRequestFactory = {
+
+  /**
+   * User submits a request to join a club.
+   * @param {string} uid - The requesting user's ID
+   * @param {object} userData - { firstName, lastName, email }
+   * @param {string} clubId
+   * @param {string} clubName
+   * @param {string} message - optional motivation text
+   */
+  create: (uid, userData, clubId, clubName, message = '') =>
+    addDoc(collection(db, 'clubJoinRequests'), {
+      uid,
+      firstName: userData.firstName || '',
+      lastName: userData.lastName || '',
+      email: userData.email || '',
+      clubId,
+      clubName,
+      message,
+      status: 'pending',
+      rejectionReason: '',
+      hidden: false,
+      createdAt: serverTimestamp(),
+      resolvedAt: null,
+    }),
+
+  /**
+   * Real-time listener for all requests of a specific user.
+   */
+  getByUser: (uid, callback) => {
+    const q = query(
+      collection(db, 'clubJoinRequests'),
+      where('uid', '==', uid)
+    );
+    return onSnapshot(q, (snap) => {
+      callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  },
+
+  /**
+   * Real-time listener for ALL pending requests (superadmin view).
+   */
+  getAllPending: (callback) => {
+    const q = query(
+      collection(db, 'clubJoinRequests'),
+      where('status', '==', 'pending')
+    );
+    return onSnapshot(q, (snap) => {
+      callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  },
+
+  /**
+   * Real-time listener for ALL requests regardless of status (superadmin full view).
+   */
+  getAll: (callback) => {
+    return onSnapshot(collection(db, 'clubJoinRequests'), (snap) => {
+      callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  },
+
+  /**
+   * Superadmin approves a request.
+   * Does NOT automatically add to group — superadmin still assigns group manually.
+   */
+  approve: (requestId) =>
+    updateDoc(doc(db, 'clubJoinRequests', requestId), {
+      status: 'approved',
+      rejectionReason: '',
+      resolvedAt: serverTimestamp(),
+    }),
+
+  /**
+   * Superadmin rejects a request with a mandatory reason.
+   */
+  reject: (requestId, reason) =>
+    updateDoc(doc(db, 'clubJoinRequests', requestId), {
+      status: 'rejected',
+      rejectionReason: reason || 'Geen reden opgegeven.',
+      resolvedAt: serverTimestamp(),
+    }),
+
+  /**
+   * User hides a rejected request from their view (soft-hide).
+   */
+  hide: (requestId) =>
+    updateDoc(doc(db, 'clubJoinRequests', requestId), {
+      hidden: true,
+    }),
+
+  /**
+   * User un-hides a request.
+   */
+  unhide: (requestId) =>
+    updateDoc(doc(db, 'clubJoinRequests', requestId), {
+      hidden: false,
+    }),
+
+  /**
+   * Permanently delete a request (user can delete their own rejected/approved ones).
+   */
+  delete: (requestId) =>
+    deleteDoc(doc(db, 'clubJoinRequests', requestId)),
 };
