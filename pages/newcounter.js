@@ -58,8 +58,9 @@ export default function CounterPage() {
   
   // --- CONFIGURATIE STATES ---
   const [showConfigModal, setShowConfigModal] = useState(false);
-  const [discipline, setDiscipline] = useState('Speed');
-  const [sessionType, setSessionType] = useState(30);
+  const [sessionType, setSessionType] = useState('Training');
+  const [discipline, setDiscipline] = useState('30sec');
+
 
   // --- LIVE DATA STATE ---
   const [currentData, setCurrentData] = useState(null);
@@ -199,25 +200,25 @@ export default function CounterPage() {
         <div style={styles.modalContent}>
           <h2 style={{marginBottom: '20px'}}>Sessie voor {selectedSkipper.firstName}</h2>
           
-          <label style={styles.label}>Discipline</label>
+          <label style={styles.label}>Type sessie</label>
           <div style={styles.toggleGroup}>
-            {['Speed', 'Double Dutch'].map(d => (
+            {['Training', 'Wedstrijd'].map(t => (
+              <button 
+                key={t} 
+                onClick={() => setSessionType(t)}
+                style={{...styles.toggleBtn, backgroundColor: sessionType === t ? '#3b82f6' : '#0f172a'}}
+              >{t}</button>
+            ))}
+          </div>
+
+          <label style={styles.label}>Onderdeel</label>
+          <div style={styles.toggleGroup}>
+            {['30sec', '2min', '3min'].map(d => (
               <button 
                 key={d} 
                 onClick={() => setDiscipline(d)}
                 style={{...styles.toggleBtn, backgroundColor: discipline === d ? '#3b82f6' : '#0f172a'}}
               >{d}</button>
-            ))}
-          </div>
-
-          <label style={styles.label}>Duur (seconden)</label>
-          <div style={styles.toggleGroup}>
-            {[30, 60, 180].map(t => (
-              <button 
-                key={t} 
-                onClick={() => setSessionType(t)}
-                style={{...styles.toggleBtn, backgroundColor: sessionType === t ? '#3b82f6' : '#0f172a'}}
-              >{t}s</button>
             ))}
           </div>
 
@@ -243,7 +244,7 @@ export default function CounterPage() {
             </div>
             <div>
                 <div style={{fontWeight: 'bold'}}>{selectedSkipper.firstName} {selectedSkipper.lastName}</div>
-                <div style={{fontSize: '12px', color: '#94a3b8'}}>{discipline} - {sessionType}s</div>
+                <div style={{fontSize: '12px', color: '#94a3b8'}}>{sessionType} - {discipline}</div>
             </div>
         </div>
       </div>
