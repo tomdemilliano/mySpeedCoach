@@ -1,8 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { rtdb as db } from '../firebaseConfig';
-import { ref, onValue } from "firebase/database";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from 'recharts';
-import { Activity, Heart, Hash, Zap, Timer, Users, CheckCircle2, Trophy, XCircle, Settings } from 'lucide-react';
+import { 
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea 
+} from 'recharts';
+import { 
+  Heart, Hash, Zap, Timer, Users, CheckCircle2, Trophy, Settings 
+} from 'lucide-react';
+
+// Importeer de factories uit je schema
+import { UserFactory, LiveSessionFactory, ClubFactory } from '../dbSchema';
 import SkipperManagement from './SkipperManagement';
 
 const DEFAULT_ZONES = [
@@ -14,71 +19,62 @@ const DEFAULT_ZONES = [
 ];
 
 export default function Dashboard() {
-  const [sessions, setSessions] = useState({});
+  const [availableUsers, setAvailableUsers] = useState([]); // Firestore data
+  const [liveSessions, setLiveSessions] = useState({});     // RTDB data
   const [history, setHistory] = useState({});
-  const [selectedSkippers, setSelectedSkippers] = useState([]);
-  const [allStats, setAllStats] = useState({}); // Bevat nu records én zones
+  const [selectedSkipperIds, setSelectedSkipperIds] = useState([]);
   const [viewMode, setViewMode] = useState('selection');
   const [showManagement, setShowManagement] = useState(false);
   
   const lastStepsRef = useRef({});
-  const currentSessionsRef = useRef({});
+  const currentLiveRef = useRef({});
 
-  // Functie om de juiste zones voor een specifieke skipper te bepalen
-  const getSkipperZones = (name) => {
-    return allStats[name]?.zones || DEFAULT_ZONES;
-  };
-
-  // Functie om kleur te bepalen op basis van persoonlijke zones
-  const getZoneColor = (bpm, name) => {
-    const zones = getSkipperZones(name);
-    const zone = zones.find(z => bpm >= z.min && bpm < z.max);
-    return zone ? zone.color : '#94a3b8';
-  };
-
+  // 1. Haal alle beschikbare gebruikers (skippers) op uit Firestore
   useEffect(() => {
-    const sessionsRef = ref(db, 'live_sessions/');
-    const statsRef = ref(db, 'skipper_stats/');
-
-    const unsubSessions = onValue(sessionsRef, (snapshot) => {
-      const data = snapshot.val() || {};
-      setSessions(data);
-      currentSessionsRef.current = data;
+    const unsubUsers = UserFactory.getAll((users) => {
+      setAvailableUsers(users);
     });
-
-    const unsubStats = onValue(statsRef, (snapshot) => {
-      setAllStats(snapshot.val() || {});
-    });
-
-    return () => {
-      unsubSessions();
-      unsubStats();
-    };
+    return () => unsubUsers();
   }, []);
 
+  // 2. Luister naar de RTDB live_sessions voor ALLE gebruikers
+  useEffect(() => {
+    // We gebruiken een generieke listener of we zouden per geselecteerde user kunnen subscriben
+    // Voor dit dashboard luisteren we naar de root van live_sessions (RTDB)
+    const unsubLive = LiveSessionFactory.subscribeToLive('', (data) => {
+      const liveData = data || {};
+      setLiveSessions(liveData);
+      currentLiveRef.current = liveData;
+    });
+
+    return () => unsubLive();
+  }, []);
+
+  // 3. Telemetrie/History Logica (elke seconde)
   useEffect(() => {
     const interval = setInterval(() => {
-      const data = currentSessionsRef.current;
+      const data = currentLiveRef.current;
       const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
       setHistory(prevHistory => {
         const newHistory = { ...prevHistory };
-        Object.keys(data).forEach(name => {
-          if (data[name].isRecording) {
-            const currentTotalSteps = data[name].steps || 0;
-            const lastSteps = lastStepsRef.current[name] || 0;
+        Object.keys(data).forEach(uid => {
+          const session = data[uid]?.session;
+          if (session?.isActive) {
+            const currentTotalSteps = session.steps || 0;
+            const lastSteps = lastStepsRef.current[uid] || 0;
             const stepsThisSecond = currentTotalSteps - lastSteps;
             const tempo = stepsThisSecond * 60; 
 
-            if (!newHistory[name]) newHistory[name] = [];
-            newHistory[name] = [...newHistory[name], {
+            if (!newHistory[uid]) newHistory[uid] = [];
+            newHistory[uid] = [...newHistory[uid], {
               time: now,
-              bpm: data[name].bpm || 0,
+              bpm: data[uid].bpm || 0,
               steps: currentTotalSteps,
               tempo: tempo
             }].slice(-200);
 
-            lastStepsRef.current[name] = currentTotalSteps;
+            lastStepsRef.current[uid] = currentTotalSteps;
           }
         });
         return newHistory;
@@ -88,39 +84,47 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  const toggleSkipperSelection = (name) => {
-    if (selectedSkippers.includes(name)) {
-      setSelectedSkippers(prev => prev.filter(s => s !== name));
+  const toggleSkipperSelection = (uid) => {
+    if (selectedSkipperIds.includes(uid)) {
+      setSelectedSkipperIds(prev => prev.filter(id => id !== uid));
     } else {
-      if (selectedSkippers.length < 4) {
-        setSelectedSkippers(prev => [...prev, name]);
+      if (selectedSkipperIds.length < 4) {
+        setSelectedSkipperIds(prev => [...prev, uid]);
       } else {
         alert("Je kunt maximaal 4 skippers tegelijk monitoren.");
       }
     }
   };
 
-  const calculateExpectedSteps = (skipper) => {
-    if (skipper.isFinished) return skipper.steps || 0;
-    if (!skipper.isRecording || !skipper.startTime || !skipper.sessionType) return 0;
+  const getSkipperZones = (uid) => {
+    const user = availableUsers.find(u => u.id === uid);
+    return user?.heartrateZones || DEFAULT_ZONES;
+  };
+
+  const getZoneColor = (bpm, uid) => {
+    const zones = getSkipperZones(uid);
+    const zone = zones.find(z => bpm >= z.min && bpm < z.max);
+    return zone ? zone.color : '#94a3b8';
+  };
+
+  const calculateExpectedSteps = (uid, liveData) => {
+    const session = liveData?.session;
+    if (!session || !session.isActive) return session?.steps || 0;
+    if (session.isFinished) return session.steps || 0;
     
-    const elapsedSeconds = (Date.now() - skipper.startTime) / 1000;
-    const remainingSeconds = Math.max(0, skipper.sessionType - elapsedSeconds);
-    const currentSteps = skipper.steps || 0;
+    // In dbSchema gebruiken we milliseconden voor RTDB timestamps
+    const elapsedSeconds = (Date.now() - session.startTime) / 1000;
+    const totalDuration = session.discipline === '30sec' ? 30 : (parseInt(session.discipline) * 60 || 30);
+    const remainingSeconds = Math.max(0, totalDuration - elapsedSeconds);
     
-    const skipperHistory = history[skipper.name] || [];
+    const skipperHistory = history[uid] || [];
     const currentTempo = skipperHistory.length > 0 ? skipperHistory[skipperHistory.length - 1].tempo : 0;
     const stepsPerSecond = currentTempo / 60;
 
-    return Math.round(currentSteps + (remainingSeconds * stepsPerSecond));
+    return Math.round((session.steps || 0) + (remainingSeconds * stepsPerSecond));
   };
 
-  const getPersonalRecord = (name, type, cat) => {
-    const sessionType = type || 30;
-    const sessionCat = cat || 'Training';
-    return allStats[name]?.records?.[sessionType]?.[sessionCat]?.score || '---';
-  };
-
+  // Styles object (ongewijzigd)
   const styles = {
     container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', padding: '20px', fontFamily: 'sans-serif' },
     selectionGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '15px', marginTop: '20px' },
@@ -141,51 +145,41 @@ export default function Dashboard() {
     return (
       <div style={styles.container}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 style={{ fontSize: '24px', fontWeight: '800' }}>SELECTEER SKIPPERS ({selectedSkippers.length}/4)</h1>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button 
-                disabled={selectedSkippers.length === 0}
-                onClick={() => setViewMode('monitoring')}
-                style={{ ...styles.btn, backgroundColor: '#22c55e', color: 'white', opacity: selectedSkippers.length === 0 ? 0.5 : 1 }}
-              >
-                START MONITORING
-              </button>
-              <button 
-                onClick={() => setShowManagement(true)}
-                style={{ 
-                  ...styles.btn, 
-                  backgroundColor: '#475569', 
-                  color: 'white', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '8px' 
-                }}
-              >
-                <Settings size={18} /> Skipper Beheer
+          <h1 style={{ fontSize: '24px', fontWeight: '800' }}>SELECTEER SKIPPERS ({selectedSkipperIds.length}/4)</h1>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button 
+              disabled={selectedSkipperIds.length === 0}
+              onClick={() => setViewMode('monitoring')}
+              style={{ ...styles.btn, backgroundColor: '#22c55e', color: 'white', opacity: selectedSkipperIds.length === 0 ? 0.5 : 1 }}
+            >
+              START MONITORING
+            </button>
+            <button onClick={() => setShowManagement(true)} style={{ ...styles.btn, backgroundColor: '#475569', color: 'white', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Settings size={18} /> Skipper Beheer
             </button>
           </div>
         </div>
 
         <div style={styles.selectionGrid}>
-          {Object.keys(sessions).map(name => {
-            const isSelected = selectedSkippers.includes(name);
-            const hasHRM = (Date.now() - sessions[name].lastUpdate) < 10000;
+          {availableUsers.map(user => {
+            const isSelected = selectedSkipperIds.includes(user.id);
+            const liveData = liveSessions[user.id];
+            const isOnline = liveData?.connectionStatus === 'online';
 
             return (
-              <div key={name} style={styles.skipperCard(isSelected)} onClick={() => toggleSkipperSelection(name)}>
+              <div key={user.id} style={styles.skipperCard(isSelected)} onClick={() => toggleSkipperSelection(user.id)}>
                 {isSelected && <CheckCircle2 style={{ position: 'absolute', top: 10, right: 10, color: '#3b82f6' }} size={20} />}
-                <h3 style={{ margin: '0 0 10px 0' }}>{name}</h3>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: hasHRM ? '#22c55e' : '#64748b' }}>
-                  <Heart size={14} fill={hasHRM ? '#22c55e' : 'none'} />
-                  {hasHRM ? 'HRM Gekoppeld' : 'Geen HRM'}
+                <h3 style={{ margin: '0 0 5px 0' }}>{user.firstName} {user.lastName}</h3>
+                <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '10px' }}>{user.role}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: isOnline ? '#22c55e' : '#64748b' }}>
+                  <Heart size={14} fill={isOnline ? '#22c55e' : 'none'} />
+                  {isOnline ? 'Online' : 'Offline'}
                 </div>
               </div>
             );
           })}
         </div>
-          {showManagement && (
-            <SkipperManagement onClose={() => setShowManagement(false)} />
-          )}
+        {showManagement && <SkipperManagement onClose={() => setShowManagement(false)} />}
       </div>
     );
   }
@@ -200,34 +194,34 @@ export default function Dashboard() {
       </div>
 
       <div style={styles.monitoringGrid}>
-        {selectedSkippers.map(name => {
-          const skipper = sessions[name] || { name };
-          const skipperHistory = history[name] || [];
+        {selectedSkipperIds.map(uid => {
+          const user = availableUsers.find(u => u.id === uid) || {};
+          const liveData = liveSessions[uid] || {};
+          const session = liveData.session || {};
+          const skipperHistory = history[uid] || [];
           const currentTempo = skipperHistory.length > 0 ? skipperHistory[skipperHistory.length - 1].tempo : 0;
-          const personalRecord = getPersonalRecord(name, skipper.sessionType, skipper.category);
-          const currentBpm = skipper.bpm || 0;
-          
-          // Haal persoonlijke zones voor deze skipper op
-          const currentZones = getSkipperZones(name);
-          const currentHrColor = getZoneColor(currentBpm, name);
+          const currentBpm = liveData.bpm || 0;
+          const currentZones = getSkipperZones(uid);
+          const currentHrColor = getZoneColor(currentBpm, uid);
 
-          const getTimerValue = (s) => {
-            if (!s.startTime) return "0:00";
-            const endTime = s.isRecording ? Date.now() : (s.lastStepTime || s.lastUpdate || Date.now());
-            const elapsed = Math.floor((endTime - s.startTime) / 1000);
-            const remaining = (s.sessionType || 30) - elapsed;
+          const getTimerValue = () => {
+            if (!session.startTime) return "0:00";
+            const endTime = session.isActive ? Date.now() : (session.lastStepTime || Date.now());
+            const elapsed = Math.floor((endTime - session.startTime) / 1000);
+            const duration = session.discipline === '30sec' ? 30 : (parseInt(session.discipline) * 60 || 30);
+            const remaining = duration - elapsed;
             const mins = Math.floor(Math.abs(remaining) / 60);
             const secs = Math.abs(remaining) % 60;
             return `${remaining < 0 ? '+' : ''}${mins}:${secs.toString().padStart(2, '0')}`;
           };
 
           return (
-            <div key={name} style={styles.card}>
+            <div key={uid} style={styles.card}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: '22px' }}>{name}</h2>
+                  <h2 style={{ margin: 0, fontSize: '22px' }}>{user.firstName}</h2>
                   <span style={{ fontSize: '12px', color: '#facc15', fontWeight: 'bold' }}>
-                    {skipper.sessionType === 30 ? '30s' : (skipper.sessionType / 60) + 'm'} | {skipper.category || 'Training'}
+                    {session.discipline || '---'} | {session.sessionType || 'Training'}
                   </span>
                 </div>
                 <div style={{ textAlign: 'right' }}>
@@ -235,10 +229,10 @@ export default function Dashboard() {
                     <div style={{ color: currentHrColor, display: 'flex', alignItems: 'center', gap: '4px', marginRight: '10px' }}>
                        <Heart size={14} fill={currentHrColor} /> {currentBpm}
                     </div>
-                    <Timer size={16} /> {getTimerValue(skipper)}
+                    <Timer size={16} /> {getTimerValue()}
                   </div>
-                  <div style={{ fontSize: '10px', color: skipper.isRecording ? '#22c55e' : '#ef4444' }}>
-                    {skipper.isRecording ? '● RECORDING' : '○ IDLE'}
+                  <div style={{ fontSize: '10px', color: session.isActive ? '#22c55e' : '#ef4444' }}>
+                    {session.isActive ? '● LIVE' : '○ IDLE'}
                   </div>
                 </div>
               </div>
@@ -252,21 +246,23 @@ export default function Dashboard() {
                 </div>
                 <div style={styles.statBox}>
                   <div style={styles.label}>Stappen</div>
-                  <div style={{ ...styles.value, color: '#60a5fa' }}><Hash size={16} /> {skipper.steps || 0}</div>
+                  <div style={{ ...styles.value, color: '#60a5fa' }}><Hash size={16} /> {session.steps || 0}</div>
                 </div>
                 <div style={styles.statBox}>
                   <div style={styles.label}>Tempo</div>
                   <div style={{ ...styles.value, color: '#22c55e' }}><Zap size={16} fill="#22c55e" /> {currentTempo}</div>
                 </div>
                 <div style={styles.statBox}>
-                  <div style={styles.label}>Record</div>
-                  <div style={{ ...styles.value, color: '#facc15' }}><Trophy size={16} /> {personalRecord}</div>
+                  <div style={styles.label}>Personal Best</div>
+                  <div style={{ ...styles.value, color: '#facc15' }}>
+                    <Trophy size={16} /> {/* PB logica kan hier via UserFactory.getBestRecord */} --
+                  </div>
                 </div>
               </div>
 
               <div style={{ ...styles.statBox, marginBottom: '20px', backgroundColor: 'rgba(34, 197, 94, 0.05)', borderColor: '#22c55e' }}>
                 <div style={{ ...styles.label, color: '#22c55e' }}>Verwachte Eindscore</div>
-                <div style={{ ...styles.value, color: '#22c55e', fontSize: '32px' }}>{calculateExpectedSteps(skipper)}</div>
+                <div style={{ ...styles.value, color: '#22c55e', fontSize: '32px' }}>{calculateExpectedSteps(uid, liveData)}</div>
               </div>
 
               <div style={{ height: '220px', width: '100%', backgroundColor: '#0f172a', padding: '10px', borderRadius: '12px' }}>
@@ -278,7 +274,6 @@ export default function Dashboard() {
                     <YAxis yAxisId="right" orientation="right" domain={[0, 140]} stroke="#60a5fa" fontSize={10} />
                     <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', fontSize: '12px' }} />
                     
-                    {/* Persoonlijke Hartslagzones op de achtergrond */}
                     {currentZones.map(zone => (
                       <ReferenceArea 
                         key={zone.name} 
@@ -299,9 +294,6 @@ export default function Dashboard() {
           );
         })}
       </div>
-      {showManagement && (
-        <SkipperManagement onClose={() => setShowManagement(false)} />
-      )}
     </div>
   );
 }
