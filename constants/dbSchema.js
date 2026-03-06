@@ -328,7 +328,7 @@ export const LiveSessionFactory = {
   // Start de teller
   startCounter: (uid, discipline, sessionType) => {
     return update(ref(rtdb, `live_sessions/${uid}/session`), {
-      isActive: true,
+      isActive: false,
       isFinished: false,
       startTime: null,       // Will be set on the first tap, not on session start
       steps: 0,
@@ -349,6 +349,7 @@ export const LiveSessionFactory = {
     // Only set startTime once — when firstTapTime is provided and it hasn't been set yet
     if (firstTapTime) {
       metaUpdate.startTime = firstTapTime;
+      metaUpdate.isActive = true
     }
     const metaPromise = update(ref(rtdb, `live_sessions/${uid}/session`), metaUpdate);
 
