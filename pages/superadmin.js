@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebaseConfig';
-import { doc, deleteDoc, onSnapshot, collection, serverTimestamp, updateDoc } from "firebase/firestore";
-import { UserFactory, ClubFactory, GroupFactory } from '../constants/dbSchema'; 
+import { UserFactory, ClubFactory, GroupFactory, UserFactory } from '../constants/dbSchema'; 
 
 import { 
   ShieldAlert, UserPlus, Building2, Users, 
@@ -37,23 +35,18 @@ export default function SuperAdmin() {
 
   // Real-time data sync
   useEffect(() => {
-    const unsubUsers = onSnapshot(collection(db, "users"), (snap) => {
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-    const unsubClubs = onSnapshot(collection(db, "clubs"), (snap) => {
-      setClubs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    const unsubUsers = UserFactory.getAll((data) => setUsers(data));
+    const unsubClubs = ClubFactory.getAll((data) => setClubs(data));
     return () => { unsubUsers(); unsubClubs(); };
   }, []);
 
   useEffect(() => {
     if (!selectedClub) return;
-    const unsubGroups = onSnapshot(collection(db, `clubs/${selectedClub.id}/groups`), (snap) => {
-      const groupsData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const unsubGroups = GroupFactory.getGroupsByClub(selectedClub.id, (groupsData) => {
       setGroups(groupsData);
       groupsData.forEach(group => {
-        onSnapshot(collection(db, `clubs/${selectedClub.id}/groups/${group.id}/members`), (mSnap) => {
-          setMemberCounts(prev => ({ ...prev, [group.id]: mSnap.size }));
+        GroupFactory.getMemberCount(selectedClub.id, group.id, (count) => {
+        setMemberCounts(prev => ({ ...prev, [group.id]: count }));
         });
       });
     });
@@ -62,8 +55,8 @@ export default function SuperAdmin() {
 
   useEffect(() => {
     if (!selectedGroup || !selectedClub) return;
-    const unsubMembers = onSnapshot(collection(db, `clubs/${selectedClub.id}/groups/${selectedGroup.id}/members`), (snap) => {
-      setMembers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const unsubMembers = GroupFactory.getMembersByGroup(selectedClub.id, selectedGroup.id, (data) => {
+      setMembers(data);
     });
     return () => unsubMembers();
   }, [selectedGroup, selectedClub]);
