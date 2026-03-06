@@ -497,8 +497,10 @@ export default function CounterPage() {
     return `${(u.firstName || '?')[0]}${(u.lastName || '')[0] || ''}`;
   };
 
-  const isRecording = currentData?.isActive;
-  const isFinished = currentData?.isFinished && !currentData?.isActive;
+  const isRecording = currentData?.isActive === true;
+  const isFinished = currentData?.isFinished === true && !currentData?.isActive;
+  // "Startklaar": session created (currentData exists), not yet recording, not finished
+  const isStartklaar = currentData !== null && currentData !== undefined && !isRecording && !isFinished;
 
   // ─── Screen 1: Skipper Selection ──────────────────────────────────────────────
   if (!selectedSkipper) {
@@ -722,16 +724,13 @@ export default function CounterPage() {
           <div style={{ fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
             {isRecording ? (
               <>
-                <span style={{
-                  width: '8px', height: '8px', borderRadius: '50%',
-                  backgroundColor: '#ef4444',
-                  animation: 'pulse 1s ease-in-out infinite',
-                  display: 'inline-block'
-                }} />
+              <span style={{width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'pulse 1s ease-in-out infinite', display: 'inline-block' }} />
                 <span style={{ color: '#ef4444' }}>OPNAME</span>
               </>
             ) : isFinished ? (
-              <span style={{ color: '#22c55e' }}>KLAAR</span>
+                <span style={{ color: '#22c55e' }}>KLAAR</span>
+            ) : isStartklaar ? (
+                <span style={{ color: '#facc15' }}>STARTKLAAR</span>
             ) : (
               <span style={{ color: '#64748b' }}>WACHT</span>
             )}
@@ -804,9 +803,21 @@ export default function CounterPage() {
           >
             <Play size={18} fill="white" /> NIEUWE SESSIE
           </button>
+        ) : isStartklaar ? (
+          <>
+            <div style={{ color: '#facc15', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
+              <Zap size={16} /> Eerste tik start de opname
+            </div>
+            <button
+              style={{ ...styles.stopButton, backgroundColor: '#3b82f6' }}
+              onClick={handleNewSession}
+            >
+              <Play size={18} fill="white" /> NIEUWE SESSIE
+            </button>
+          </>
         ) : (
           <div style={{ color: '#64748b', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Zap size={16} /> Eerste tik start de opname
+            <Zap size={16} /> Selecteer een skipper
           </div>
         )}
       </div>
