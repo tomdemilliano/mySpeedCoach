@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 
 // Importeer de factories uit je schema
-import { UserFactory, LiveSessionFactory, ClubFactory } from '../dbSchema';
+import { UserFactory, LiveSessionFactory, ClubFactory } from '../constants/dbSchema';
 
 const DEFAULT_ZONES = [
   { name: 'Warm-up', min: 0, max: 120, color: '#94a3b8' },
