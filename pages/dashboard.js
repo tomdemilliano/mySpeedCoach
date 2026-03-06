@@ -8,7 +8,6 @@ import {
 
 // Importeer de factories uit je schema
 import { UserFactory, LiveSessionFactory, ClubFactory } from '../dbSchema';
-import SkipperManagement from './SkipperManagement';
 
 const DEFAULT_ZONES = [
   { name: 'Warm-up', min: 0, max: 120, color: '#94a3b8' },
