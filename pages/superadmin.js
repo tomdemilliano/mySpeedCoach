@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserFactory, ClubFactory, GroupFactory, UserFactory } from '../constants/dbSchema'; 
+import { UserFactory, ClubFactory, GroupFactory } from '../constants/dbSchema'; 
 
 import { 
   ShieldAlert, UserPlus, Building2, Users, 
