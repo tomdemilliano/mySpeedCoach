@@ -5,8 +5,11 @@ import {
   Play, Clock, User, Users, Building2, Trophy, ArrowLeft 
 } from 'lucide-react';
 
+
 // --- GEÏSOLEERDE TIMER COMPONENT ---
-const LiveTimer = memo(({ startTime, sessionType, isRecording, isFinished }) => {
+const DISCIPLINE_DURATION = { '30sec': 30, '2min': 120, '3min': 180 };
+
+const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished }) => {
   const [display, setDisplay] = useState("0:00");
 
   useEffect(() => {
@@ -19,7 +22,7 @@ const LiveTimer = memo(({ startTime, sessionType, isRecording, isFinished }) => 
       if (isRecording && startTime) {
         const now = Date.now();
         const elapsed = Math.floor((now - startTime) / 1000);
-        const remaining = sessionType - elapsed;
+        const remaining = durationSeconds - elapsed;
 
         if (remaining >= 0) {
           const mins = Math.floor(remaining / 60);
@@ -35,7 +38,7 @@ const LiveTimer = memo(({ startTime, sessionType, isRecording, isFinished }) => 
     }, 100);
 
     return () => clearInterval(interval);
-  }, [startTime, sessionType, isRecording, isFinished]);
+  }, [startTime, durationSeconds, isRecording, isFinished]);
 
   return (
     <div style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'monospace', color: isFinished ? '#94a3b8' : '#fff' }}>
@@ -264,10 +267,10 @@ export default function CounterPage() {
 
       <div style={styles.controls}>
         <LiveTimer 
-          startTime={currentData?.startTime} 
-          sessionType={sessionType} 
-          isRecording={isRecording} 
-          isFinished={isFinished} 
+          startTime={currentData?.startTime}
+          durationSeconds={DISCIPLINE_DURATION[currentData?.discipline] || 30}
+          isRecording={isRecording}
+          isFinished={isFinished}
         />
         
         {isRecording ? (
