@@ -317,7 +317,7 @@ export default function CounterPage() {
   const handleStartSession = async () => {
     telemetryRef.current = [];
     lastStepCountRef.current = 0;
-    sessionStartRef.current = Date.now();
+    sessionStartRef.current = null; // Will be set on first tap
     await LiveSessionFactory.startCounter(selectedSkipper.id, discipline, sessionType);
     setShowConfigModal(false);
   };
@@ -325,12 +325,17 @@ export default function CounterPage() {
   const handleCountStep = () => {
     if (!currentData?.isActive || currentData?.isFinished) return;
 
-    // Pass current BPM so telemetry is attached
-    LiveSessionFactory.incrementSteps(selectedSkipper.id, liveBpm);
+    // Record start time on the very first tap
+    if (!sessionStartRef.current) {
+      sessionStartRef.current = Date.now();
+    }
+
+    // Pass current BPM so telemetry is attached; also pass startTime for RTDB if first tap
+    LiveSessionFactory.incrementSteps(selectedSkipper.id, liveBpm, sessionStartRef.current);
 
     // Also maintain a local telemetry buffer for reliable final save
     telemetryRef.current.push({
-      time: Date.now() - (sessionStartRef.current || Date.now()),
+      time: Date.now() - sessionStartRef.current,
       steps: (currentData?.steps || 0) + 1,
       heartRate: liveBpm
     });
@@ -586,18 +591,18 @@ export default function CounterPage() {
   if (showConfigModal) {
     return (
       <div style={styles.modalOverlay}>
-        <div style={styles.modalContent}>
+        <div style={{ ...styles.modalContent, fontFamily: 'sans-serif' }}>
           <div style={{ textAlign: 'center', marginBottom: '24px' }}>
             <div style={{ ...styles.avatar, margin: '0 auto 12px', width: '60px', height: '60px', fontSize: '20px' }}>
               {selectedSkipper.firstName[0]}{selectedSkipper.lastName[0]}
             </div>
-            <h2 style={{ margin: 0, fontSize: '22px' }}>
+            <h2 style={{ margin: 0, fontSize: '22px', color: '#f1f5f9' }}>
               {selectedSkipper.firstName} {selectedSkipper.lastName}
             </h2>
-            <p style={{ color: '#94a3b8', margin: '4px 0 0' }}>Kies sessie-instellingen</p>
+            <p style={{ color: '#94a3b8', margin: '4px 0 0', fontFamily: 'sans-serif' }}>Kies sessie-instellingen</p>
           </div>
 
-          <label style={styles.label}>Type sessie</label>
+          <label style={{ ...styles.label, fontFamily: 'sans-serif' }}>Type sessie</label>
           <div style={styles.toggleGroup}>
             {['Training', 'Wedstrijd'].map(t => (
               <button
@@ -616,7 +621,7 @@ export default function CounterPage() {
             ))}
           </div>
 
-          <label style={styles.label}>Onderdeel</label>
+          <label style={{ ...styles.label, fontFamily: 'sans-serif' }}>Onderdeel</label>
           <div style={styles.toggleGroup}>
             {['30sec', '2min', '3min'].map(d => (
               <button
@@ -634,7 +639,8 @@ export default function CounterPage() {
           {bestRecord && (
             <div style={{
               backgroundColor: '#0f172a', borderRadius: '8px', padding: '12px',
-              marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px'
+              marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px',
+              fontFamily: 'sans-serif'
             }}>
               <Trophy size={18} color="#facc15" />
               <div style={{ fontSize: '13px', color: '#94a3b8' }}>
@@ -883,14 +889,15 @@ const styles = {
   toggleGroup: { display: 'flex', gap: '10px', marginBottom: '20px' },
   toggleBtn: {
     flex: 1, padding: '12px', border: '1px solid #334155',
-    borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold'
+    borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold',
+    fontFamily: 'sans-serif'
   },
   mainStartBtn: {
     width: '100%', padding: '15px', backgroundColor: '#3b82f6',
     border: 'none', borderRadius: '10px', color: 'white',
     fontWeight: 'bold', marginTop: '10px',
     display: 'flex', justifyContent: 'center', gap: '10px', alignItems: 'center',
-    cursor: 'pointer', fontSize: '16px'
+    cursor: 'pointer', fontSize: '16px', fontFamily: 'sans-serif'
   },
 
   // Active counter screen
