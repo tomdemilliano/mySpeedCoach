@@ -1,5 +1,5 @@
 import { useState, useEffect, memo } from 'react';
-import { LiveSessionFactory, GroupFactory, ClubFactory } from '../constants/dbSchema';
+import { LiveSessionFactory, GroupFactory, ClubFactory, UserFactory } from '../constants/dbSchema';
 import { 
   Hash, ChevronRight, Timer, Square, History, 
   Play, Clock, User, Users, Building2, Trophy, ArrowLeft 
