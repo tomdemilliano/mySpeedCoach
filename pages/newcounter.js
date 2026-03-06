@@ -323,7 +323,7 @@ export default function CounterPage() {
   };
 
   const handleCountStep = () => {
-    if (!currentData?.isActive || currentData?.isFinished) return;
+    if (!currentData || currentData?.isFinished) return;
 
     // Record start time on the very first tap
     if (!sessionStartRef.current) {
