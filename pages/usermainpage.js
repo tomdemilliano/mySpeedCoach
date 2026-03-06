@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { UserFactory, ClubFactory, GroupFactory, LiveSessionFactory } from '../constants/dbSchema';
+import { UserFactory, ClubFactory, GroupFactory, LiveSessionFactory, ClubJoinRequestFactory } from '../constants/dbSchema';
 import {
   Bluetooth, BluetoothOff, Heart, User, Settings, Trophy,
   Target, Plus, Edit2, Trash2, Check, X, ChevronRight,
   Building2, Users, Save, LogOut, Award, Zap, AlertCircle,
-  Clock, TrendingUp, Star, ShieldCheck, Dumbbell
+  Clock, TrendingUp, Star, ShieldCheck, Dumbbell,
+  UserPlus, Send, EyeOff, Eye, Bell, CheckCircle2, XCircle,
+  ChevronDown, ChevronUp, MessageSquare, ArrowLeft
 } from 'lucide-react';
 
 // ─── Cookie helpers ──────────────────────────────────────────────────────────
@@ -44,22 +46,33 @@ const getZoneName = (bpm, zones) => {
   return z ? z.name : '—';
 };
 
-// ─── DISCIPLINE LABELS ───────────────────────────────────────────────────────
 const DISC_LABELS = { '30sec': '30 sec', '2min': '2 min', '3min': '3 min' };
+
+// ─── Status badge helper ─────────────────────────────────────────────────────
+const STATUS_CONFIG = {
+  pending:  { label: 'In behandeling', color: '#f59e0b', bg: '#f59e0b22', icon: Clock },
+  approved: { label: 'Goedgekeurd',    color: '#22c55e', bg: '#22c55e22', icon: CheckCircle2 },
+  rejected: { label: 'Afgewezen',      color: '#ef4444', bg: '#ef444422', icon: XCircle },
+};
 
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════════════════
 export default function IndexPage() {
   // ── Auth / identity state
-  const [phase, setPhase] = useState('loading'); // loading | identify | app
+  const [phase, setPhase] = useState('loading'); // loading | identify | createUser | app
   const [allUsers, setAllUsers] = useState([]);
   const [allClubs, setAllClubs] = useState([]);
   const [selectedClubFilter, setSelectedClubFilter] = useState('');
-  const [clubMembers, setClubMembers] = useState([]); // {uid, firstName, lastName}
+  const [clubMembers, setClubMembers] = useState([]);
+
+  // ── New-user creation form
+  const [newUserForm, setNewUserForm] = useState({ firstName: '', lastName: '', email: '' });
+  const [newUserError, setNewUserError] = useState('');
+  const [newUserSaving, setNewUserSaving] = useState(false);
 
   // ── Current user
-  const [currentUser, setCurrentUser] = useState(null); // full user doc
+  const [currentUser, setCurrentUser] = useState(null);
 
   // ── HRM
   const [heartRate, setHeartRate] = useState(0);
@@ -69,7 +82,7 @@ export default function IndexPage() {
   const lastBpmRef = useRef(0);
 
   // ── Records
-  const [records, setRecords] = useState([]); // flat list from subcollection
+  const [records, setRecords] = useState([]);
   const [editingRecord, setEditingRecord] = useState(null);
 
   // ── Goals
@@ -77,22 +90,30 @@ export default function IndexPage() {
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [goalForm, setGoalForm] = useState({ discipline: '30sec', targetScore: '', targetDate: '' });
 
-  // ── Club memberships of the user
-  const [memberships, setMemberships] = useState([]); // [{clubId, clubName, groupId, groupName, isSkipper, isCoach}]
+  // ── Club memberships
+  const [memberships, setMemberships] = useState([]);
+
+  // ── Club join requests
+  const [joinRequests, setJoinRequests] = useState([]);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [joinForm, setJoinForm] = useState({ clubId: '', message: '' });
+  const [joinSending, setJoinSending] = useState(false);
+  const [joinError, setJoinError] = useState('');
+  const [showHiddenRequests, setShowHiddenRequests] = useState(false);
 
   // ── Settings modal
   const [showSettings, setShowSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState({ firstName: '', lastName: '', email: '' });
   const [zonesForm, setZonesForm] = useState(DEFAULT_ZONES);
 
-  // ── Load all users & clubs for identification
+  // ── Load all users & clubs
   useEffect(() => {
     const unsubUsers = UserFactory.getAll(setAllUsers);
     const unsubClubs = ClubFactory.getAll(setAllClubs);
     return () => { unsubUsers(); unsubClubs(); };
   }, []);
 
-  // ── Try cookie identification after users loaded
+  // ── Cookie auto-login
   useEffect(() => {
     if (allUsers.length === 0 || phase !== 'loading') return;
     const uid = getCookie();
@@ -103,10 +124,9 @@ export default function IndexPage() {
     setPhase('identify');
   }, [allUsers]);
 
-  // ── When club filter changes in identify screen load members
+  // ── Club filter for identify screen
   useEffect(() => {
     if (!selectedClubFilter) { setClubMembers([]); return; }
-    // Get all groups for this club and collect member UIDs
     const unsub = GroupFactory.getGroupsByClub(selectedClubFilter, async (groups) => {
       const memberSets = await Promise.all(
         groups.map(g => new Promise(res => {
@@ -128,10 +148,9 @@ export default function IndexPage() {
     setPhase('app');
   }, []);
 
-  // ── Subscribe to records, goals when user identified
+  // ── Subscribe to records + goals
   useEffect(() => {
     if (!currentUser) return;
-    // Records: fetch all disciplines/types
     const disciplines = ['30sec', '2min', '3min'];
     const sessionTypes = ['Training', 'Wedstrijd'];
     const unsubRecords = [];
@@ -148,21 +167,25 @@ export default function IndexPage() {
       });
       unsubRecords.push(u);
     }));
-
     const unsubGoals = UserFactory.getGoals(currentUser.id, setGoals);
-
     return () => {
       unsubRecords.forEach(u => u && u());
       unsubGoals && unsubGoals();
     };
   }, [currentUser]);
 
-  // ── Load memberships across all clubs/groups
+  // ── Subscribe to join requests
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsub = ClubJoinRequestFactory.getByUser(currentUser.id, setJoinRequests);
+    return () => unsub();
+  }, [currentUser]);
+
+  // ── Load memberships
   useEffect(() => {
     if (!currentUser || allClubs.length === 0) return;
     const allUnsubs = [];
     const collectedMemberships = {};
-
     allClubs.forEach(club => {
       const u = GroupFactory.getGroupsByClub(club.id, (groups) => {
         groups.forEach(group => {
@@ -187,7 +210,6 @@ export default function IndexPage() {
       });
       allUnsubs.push(u);
     });
-
     return () => allUnsubs.forEach(u => u && u());
   }, [currentUser, allClubs]);
 
@@ -216,8 +238,6 @@ export default function IndexPage() {
       });
       setHrmDeviceName(device.name || 'HRM Device');
       setHrmConnected(true);
-
-      // Check if device is known; if not, save it
       if (currentUser) {
         const knownId = currentUser.assignedDevice?.deviceId;
         if (device.id && knownId !== device.id) {
@@ -234,9 +254,7 @@ export default function IndexPage() {
     setHrmConnected(false);
     setHeartRate(0);
     setHrmHistory([]);
-    if (currentUser) {
-      LiveSessionFactory.syncHeartbeat(currentUser.id, 0, 'offline');
-    }
+    if (currentUser) LiveSessionFactory.syncHeartbeat(currentUser.id, 0, 'offline');
   };
 
   // ── Settings save
@@ -252,7 +270,41 @@ export default function IndexPage() {
     setShowSettings(false);
   };
 
-  // ── Goal add
+  // ── New user creation
+  const handleCreateUser = async () => {
+    setNewUserError('');
+    if (!newUserForm.firstName.trim() || !newUserForm.lastName.trim()) {
+      setNewUserError('Voornaam en achternaam zijn verplicht.');
+      return;
+    }
+    // Basic email check
+    if (newUserForm.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newUserForm.email)) {
+      setNewUserError('Voer een geldig e-mailadres in.');
+      return;
+    }
+    setNewUserSaving(true);
+    try {
+      const uid = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      await UserFactory.create(uid, {
+        firstName: newUserForm.firstName.trim(),
+        lastName: newUserForm.lastName.trim(),
+        email: newUserForm.email.trim(),
+        role: 'user',
+      });
+      // Find the newly created user and log in
+      const userSnap = await UserFactory.get(uid);
+      if (userSnap.exists()) {
+        loginUser({ id: uid, ...userSnap.data() });
+      }
+    } catch (err) {
+      console.error(err);
+      setNewUserError('Er ging iets mis. Probeer opnieuw.');
+    } finally {
+      setNewUserSaving(false);
+    }
+  };
+
+  // ── Goal handlers
   const handleAddGoal = async () => {
     if (!goalForm.targetScore || !currentUser) return;
     const { db: firestoreDb } = await import('../firebaseConfig');
@@ -267,7 +319,7 @@ export default function IndexPage() {
     setShowGoalModal(false);
   };
 
-  // ── Record edit save
+  // ── Record handlers
   const saveRecordEdit = async () => {
     if (!editingRecord || !currentUser) return;
     const { db: firestoreDb } = await import('../firebaseConfig');
@@ -292,6 +344,51 @@ export default function IndexPage() {
     await deleteDoc(doc(firestoreDb, `users/${currentUser.id}/goals`, goal.id));
   };
 
+  // ── Join request handlers
+  const handleSendJoinRequest = async () => {
+    setJoinError('');
+    if (!joinForm.clubId) { setJoinError('Selecteer een club.'); return; }
+    // Check for already-pending request to this club
+    const alreadyPending = joinRequests.find(
+      r => r.clubId === joinForm.clubId && r.status === 'pending'
+    );
+    if (alreadyPending) {
+      setJoinError('Je hebt al een openstaande aanvraag voor deze club.');
+      return;
+    }
+    setJoinSending(true);
+    try {
+      const club = allClubs.find(c => c.id === joinForm.clubId);
+      await ClubJoinRequestFactory.create(
+        currentUser.id,
+        { firstName: currentUser.firstName, lastName: currentUser.lastName, email: currentUser.email || '' },
+        joinForm.clubId,
+        club?.name || '',
+        joinForm.message
+      );
+      setShowJoinModal(false);
+      setJoinForm({ clubId: '', message: '' });
+    } catch (err) {
+      console.error(err);
+      setJoinError('Aanvraag kon niet worden verzonden.');
+    } finally {
+      setJoinSending(false);
+    }
+  };
+
+  const handleHideRequest = async (requestId) => {
+    await ClubJoinRequestFactory.hide(requestId);
+  };
+
+  const handleUnhideRequest = async (requestId) => {
+    await ClubJoinRequestFactory.unhide(requestId);
+  };
+
+  const handleDeleteRequest = async (requestId) => {
+    if (!window.confirm('Aanvraag definitief verwijderen?')) return;
+    await ClubJoinRequestFactory.delete(requestId);
+  };
+
   const logout = () => {
     clearCookie();
     setCurrentUser(null);
@@ -301,12 +398,19 @@ export default function IndexPage() {
     setRecords([]);
     setGoals([]);
     setMemberships([]);
+    setJoinRequests([]);
     setPhase('identify');
   };
 
-  // ════════════════════════════════════════════════════════════════════════
+  // ── Derived join request data
+  const visibleRequests = joinRequests.filter(r => !r.hidden);
+  const hiddenRequests = joinRequests.filter(r => r.hidden);
+  const pendingCount = joinRequests.filter(r => r.status === 'pending').length;
+  const newRejections = joinRequests.filter(r => r.status === 'rejected' && !r.hidden).length;
+
+  // ════════════════════════════════════════════════════════════════════════════
   // RENDER: Loading
-  // ════════════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════════════════
   if (phase === 'loading') {
     return (
       <div style={s.fullCenter}>
@@ -316,9 +420,95 @@ export default function IndexPage() {
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════════════════
+  // RENDER: Create New User
+  // ════════════════════════════════════════════════════════════════════════════
+  if (phase === 'createUser') {
+    return (
+      <div style={s.page}>
+        <div style={s.identifyWrap}>
+          <button
+            style={{ ...s.backBtn, marginBottom: '24px' }}
+            onClick={() => { setPhase('identify'); setNewUserForm({ firstName: '', lastName: '', email: '' }); setNewUserError(''); }}
+          >
+            <ArrowLeft size={16} /> Terug naar selectie
+          </button>
+
+          <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+            <div style={s.appLogo}><UserPlus size={28} color="#22c55e" /></div>
+            <h1 style={s.appTitle}>Nieuw account</h1>
+            <p style={s.appSubtitle}>Maak een nieuw profiel aan</p>
+          </div>
+
+          <div style={s.createUserCard}>
+            <div style={s.formGrid}>
+              <div>
+                <label style={s.fieldLabel}>Voornaam <span style={{ color: '#ef4444' }}>*</span></label>
+                <input
+                  style={s.input}
+                  placeholder="bijv. Emma"
+                  value={newUserForm.firstName}
+                  onChange={e => setNewUserForm({ ...newUserForm, firstName: e.target.value })}
+                  onKeyDown={e => e.key === 'Enter' && handleCreateUser()}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label style={s.fieldLabel}>Achternaam <span style={{ color: '#ef4444' }}>*</span></label>
+                <input
+                  style={s.input}
+                  placeholder="bijv. De Smet"
+                  value={newUserForm.lastName}
+                  onChange={e => setNewUserForm({ ...newUserForm, lastName: e.target.value })}
+                  onKeyDown={e => e.key === 'Enter' && handleCreateUser()}
+                />
+              </div>
+            </div>
+            <div style={{ marginTop: '14px' }}>
+              <label style={s.fieldLabel}>E-mailadres <span style={{ color: '#64748b', fontWeight: 400 }}>(optioneel)</span></label>
+              <input
+                style={s.input}
+                type="email"
+                placeholder="bijv. emma@example.com"
+                value={newUserForm.email}
+                onChange={e => setNewUserForm({ ...newUserForm, email: e.target.value })}
+                onKeyDown={e => e.key === 'Enter' && handleCreateUser()}
+              />
+            </div>
+
+            {newUserError && (
+              <div style={s.errorBanner}>
+                <AlertCircle size={14} /> {newUserError}
+              </div>
+            )}
+
+            <button
+              style={{ ...s.primaryBtn, marginTop: '24px', opacity: newUserSaving ? 0.6 : 1 }}
+              onClick={handleCreateUser}
+              disabled={newUserSaving}
+            >
+              {newUserSaving ? (
+                <>
+                  <div style={{ width: '16px', height: '16px', border: '2px solid #ffffff55', borderTop: '2px solid white', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                  Aanmaken…
+                </>
+              ) : (
+                <><UserPlus size={16} /> Account aanmaken</>
+              )}
+            </button>
+
+            <p style={{ textAlign: 'center', color: '#475569', fontSize: '12px', marginTop: '16px' }}>
+              Na het aanmaken word je direct ingelogd. Een beheerder kan je daarna toevoegen aan een club en groep.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
   // RENDER: Identify
-  // ════════════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════════════════
   if (phase === 'identify') {
     const displayUsers = selectedClubFilter && clubMembers.length > 0 ? clubMembers : allUsers;
     return (
@@ -354,25 +544,41 @@ export default function IndexPage() {
                 <div style={s.userTileRole}>{u.role}</div>
               </button>
             ))}
+
+            {/* New user tile */}
+            <button
+              style={{ ...s.userTile, borderStyle: 'dashed', borderColor: '#22c55e44', backgroundColor: '#0f172a' }}
+              onClick={() => setPhase('createUser')}
+            >
+              <div style={{ ...s.userAvatar, backgroundColor: '#0d2818', border: '1px dashed #22c55e' }}>
+                <UserPlus size={20} color="#22c55e" />
+              </div>
+              <div style={{ ...s.userTileName, color: '#22c55e' }}>Nieuw account</div>
+              <div style={s.userTileRole}>aanmaken</div>
+            </button>
           </div>
         </div>
       </div>
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════════════════
   // RENDER: App
-  // ════════════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════════════════
   const zones = currentUser?.heartrateZones || DEFAULT_ZONES;
   const bpmColor = getZoneColor(heartRate, zones);
   const zoneName = getZoneName(heartRate, zones);
-
-  // Group records by discipline for table
   const disciplines = ['30sec', '2min', '3min'];
   const sessionTypes = ['Training', 'Wedstrijd'];
 
   return (
     <div style={s.page}>
+      {/* ── CSS for spinner ── */}
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
+
       {/* ── HEADER ── */}
       <header style={s.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -380,6 +586,15 @@ export default function IndexPage() {
           <span style={{ fontWeight: '700', fontSize: '16px', color: '#f1f5f9', fontFamily: 'sans-serif' }}>MySpeedCoach</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {/* Notification badge for new rejections */}
+          {newRejections > 0 && (
+            <div style={{ position: 'relative', cursor: 'pointer' }} title={`${newRejections} aanvraag(en) afgewezen`}>
+              <Bell size={18} color="#f59e0b" />
+              <span style={{ position: 'absolute', top: '-6px', right: '-6px', backgroundColor: '#ef4444', color: 'white', fontSize: '9px', fontWeight: 'bold', width: '14px', height: '14px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {newRejections}
+              </span>
+            </div>
+          )}
           <div style={s.userChip}>
             <div style={{ ...s.userAvatar, width: '28px', height: '28px', fontSize: '11px' }}>
               {currentUser.firstName?.[0]}{currentUser.lastName?.[0]}
@@ -394,7 +609,6 @@ export default function IndexPage() {
       <main style={s.main}>
         {/* ── ROW 1: HRM + Records ── */}
         <div style={s.row}>
-
           {/* ── HRM BOX ── */}
           <section style={{ ...s.card, flex: '0 0 340px' }}>
             <div style={s.cardHeader}>
@@ -406,7 +620,6 @@ export default function IndexPage() {
                 </button>
               )}
             </div>
-
             {!hrmConnected ? (
               <div style={{ textAlign: 'center', padding: '30px 0' }}>
                 <div style={s.hrmIdle}><Heart size={40} color="#334155" /></div>
@@ -432,8 +645,6 @@ export default function IndexPage() {
                 <div style={{ fontSize: '11px', color: '#475569', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                   <Bluetooth size={12} color="#3b82f6" /> {hrmDeviceName}
                 </div>
-
-                {/* Mini zone bar */}
                 <div style={{ display: 'flex', borderRadius: '6px', overflow: 'hidden', marginTop: '20px', height: '6px' }}>
                   {zones.map(z => (
                     <div key={z.name} style={{ flex: 1, backgroundColor: heartRate >= z.min && heartRate < z.max ? z.color : `${z.color}33` }} />
@@ -454,7 +665,6 @@ export default function IndexPage() {
               <Trophy size={16} color="#facc15" />
               <span>Persoonlijke Records</span>
             </div>
-
             {records.length === 0 ? (
               <div style={s.emptyState}>
                 <Award size={32} color="#334155" />
@@ -481,13 +691,8 @@ export default function IndexPage() {
                             {rec ? (
                               isEditThis ? (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <input
-                                    autoFocus
-                                    style={s.miniInput}
-                                    value={editingRecord.score}
-                                    type="number"
-                                    onChange={e => setEditingRecord({ ...editingRecord, score: e.target.value })}
-                                  />
+                                  <input autoFocus style={s.miniInput} value={editingRecord.score} type="number"
+                                    onChange={e => setEditingRecord({ ...editingRecord, score: e.target.value })} />
                                   <button style={s.iconBtnGreen} onClick={saveRecordEdit}><Check size={14} /></button>
                                   <button style={s.iconBtnGray} onClick={() => setEditingRecord(null)}><X size={14} /></button>
                                 </div>
@@ -513,9 +718,8 @@ export default function IndexPage() {
           </section>
         </div>
 
-        {/* ── ROW 2: Goals + Memberships ── */}
+        {/* ── ROW 2: Goals + Memberships + Join Requests ── */}
         <div style={s.row}>
-
           {/* ── GOALS ── */}
           <section style={{ ...s.card, flex: 1 }}>
             <div style={s.cardHeader}>
@@ -525,7 +729,6 @@ export default function IndexPage() {
                 <Plus size={13} /> Doel toevoegen
               </button>
             </div>
-
             {goals.length === 0 ? (
               <div style={s.emptyState}>
                 <Target size={32} color="#334155" />
@@ -559,34 +762,142 @@ export default function IndexPage() {
             )}
           </section>
 
-          {/* ── MEMBERSHIPS ── */}
+          {/* ── MEMBERSHIPS + JOIN REQUESTS ── */}
           <section style={{ ...s.card, flex: 1 }}>
             <div style={s.cardHeader}>
               <Building2 size={16} color="#a78bfa" />
               <span>Clubs & Groepen</span>
+              <button style={{ ...s.chipBtn, marginLeft: 'auto' }} onClick={() => { setShowJoinModal(true); setJoinError(''); }}>
+                <Send size={13} /> Aanvraag indienen
+              </button>
             </div>
 
-            {memberships.length === 0 ? (
+            {/* Active memberships */}
+            {memberships.length > 0 && (
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
+                  Lidmaatschappen
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {memberships.map((m, i) => (
+                    <div key={i} style={s.membershipRow}>
+                      <div style={s.clubIcon}><Building2 size={16} color="#a78bfa" /></div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: '600', fontSize: '14px', color: '#f1f5f9' }}>{m.clubName}</div>
+                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{m.groupName}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        {m.isSkipper && <span style={s.roleBadge('#3b82f6')}>Skipper</span>}
+                        {m.isCoach && <span style={s.roleBadge('#f59e0b')}>Coach</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {memberships.length === 0 && visibleRequests.length === 0 && (
               <div style={s.emptyState}>
                 <Users size={32} color="#334155" />
                 <p>Geen clublidmaatschappen</p>
-                <span>Vraag een beheerder om je toe te voegen aan een club.</span>
+                <span>Dien een aanvraag in om toe te treden tot een club.</span>
               </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {memberships.map((m, i) => (
-                  <div key={i} style={s.membershipRow}>
-                    <div style={s.clubIcon}><Building2 size={16} color="#a78bfa" /></div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: '600', fontSize: '14px', color: '#f1f5f9' }}>{m.clubName}</div>
-                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{m.groupName}</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      {m.isSkipper && <span style={s.roleBadge('#3b82f6')}>Skipper</span>}
-                      {m.isCoach && <span style={s.roleBadge('#f59e0b')}>Coach</span>}
-                    </div>
+            )}
+
+            {/* Join requests */}
+            {visibleRequests.length > 0 && (
+              <div>
+                <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', marginTop: memberships.length > 0 ? '8px' : 0 }}>
+                  Aanvragen
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {visibleRequests.map(req => {
+                    const cfg = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending;
+                    const StatusIcon = cfg.icon;
+                    return (
+                      <div key={req.id} style={{ ...s.requestRow, borderColor: `${cfg.color}44`, backgroundColor: cfg.bg }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                            <span style={{ fontWeight: '600', fontSize: '14px', color: '#f1f5f9' }}>{req.clubName}</span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '700', backgroundColor: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}44` }}>
+                              <StatusIcon size={11} /> {cfg.label}
+                            </span>
+                          </div>
+                          {req.message && (
+                            <div style={{ fontSize: '12px', color: '#94a3b8', fontStyle: 'italic', marginBottom: '4px' }}>
+                              "{req.message}"
+                            </div>
+                          )}
+                          {req.status === 'rejected' && req.rejectionReason && (
+                            <div style={{ fontSize: '12px', color: '#ef4444', backgroundColor: '#ef444411', padding: '6px 10px', borderRadius: '6px', marginTop: '6px', display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                              <MessageSquare size={12} style={{ flexShrink: 0, marginTop: '1px' }} />
+                              <span><strong>Reden:</strong> {req.rejectionReason}</span>
+                            </div>
+                          )}
+                          <div style={{ fontSize: '10px', color: '#475569', marginTop: '4px' }}>
+                            {req.createdAt?.seconds ? new Date(req.createdAt.seconds * 1000).toLocaleDateString('nl-BE', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flexShrink: 0 }}>
+                          {req.status !== 'pending' && (
+                            <button
+                              title="Verbergen"
+                              style={{ ...s.iconBtnGray, padding: '4px' }}
+                              onClick={() => handleHideRequest(req.id)}
+                            >
+                              <EyeOff size={14} />
+                            </button>
+                          )}
+                          {(req.status === 'approved' || req.status === 'rejected') && (
+                            <button
+                              title="Verwijderen"
+                              style={{ ...s.iconBtnGray, color: '#ef4444', padding: '4px' }}
+                              onClick={() => handleDeleteRequest(req.id)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Hidden requests toggle */}
+            {hiddenRequests.length > 0 && (
+              <div style={{ marginTop: '12px' }}>
+                <button
+                  style={{ ...s.chipBtn, width: '100%', justifyContent: 'center' }}
+                  onClick={() => setShowHiddenRequests(v => !v)}
+                >
+                  {showHiddenRequests ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                  {showHiddenRequests ? 'Verberg' : `Toon`} {hiddenRequests.length} verborgen aanvraag/aanvragen
+                </button>
+                {showHiddenRequests && (
+                  <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px', animation: 'fadeIn 0.2s ease-out' }}>
+                    {hiddenRequests.map(req => {
+                      const cfg = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending;
+                      return (
+                        <div key={req.id} style={{ ...s.requestRow, opacity: 0.6, borderColor: '#334155' }}>
+                          <div style={{ flex: 1 }}>
+                            <span style={{ fontSize: '13px', color: '#94a3b8' }}>{req.clubName}</span>
+                            <span style={{ marginLeft: '8px', fontSize: '11px', color: cfg.color }}>({cfg.label})</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <button title="Tonen" style={s.iconBtnGray} onClick={() => handleUnhideRequest(req.id)}>
+                              <Eye size={14} />
+                            </button>
+                            <button title="Verwijderen" style={{ ...s.iconBtnGray, color: '#ef4444' }} onClick={() => handleDeleteRequest(req.id)}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
+                )}
               </div>
             )}
           </section>
@@ -601,7 +912,6 @@ export default function IndexPage() {
               <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}><Settings size={18} /> Instellingen</h3>
               <button style={s.iconBtnGray} onClick={() => setShowSettings(false)}><X size={18} /></button>
             </div>
-
             <div style={{ marginBottom: '24px' }}>
               <h4 style={s.sectionLabel}>Profiel</h4>
               <div style={s.formGrid}>
@@ -619,7 +929,6 @@ export default function IndexPage() {
                 <input style={s.input} value={settingsForm.email} onChange={e => setSettingsForm({ ...settingsForm, email: e.target.value })} />
               </div>
             </div>
-
             <div style={{ marginBottom: '24px' }}>
               <h4 style={s.sectionLabel}>Hartslagzones (BPM)</h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -637,7 +946,6 @@ export default function IndexPage() {
                 ))}
               </div>
             </div>
-
             <button style={s.primaryBtn} onClick={saveSettings}><Save size={16} /> Opslaan</button>
           </div>
         </div>
@@ -651,21 +959,72 @@ export default function IndexPage() {
               <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}><Target size={18} /> Doel toevoegen</h3>
               <button style={s.iconBtnGray} onClick={() => setShowGoalModal(false)}><X size={18} /></button>
             </div>
-
             <label style={s.fieldLabel}>Onderdeel</label>
             <select style={s.select} value={goalForm.discipline} onChange={e => setGoalForm({ ...goalForm, discipline: e.target.value })}>
               {disciplines.map(d => <option key={d} value={d}>{DISC_LABELS[d]}</option>)}
             </select>
-
             <label style={{ ...s.fieldLabel, marginTop: '14px' }}>Doelstelling (steps)</label>
             <input style={s.input} type="number" placeholder="bijv. 150" value={goalForm.targetScore}
               onChange={e => setGoalForm({ ...goalForm, targetScore: e.target.value })} />
-
             <label style={{ ...s.fieldLabel, marginTop: '14px' }}>Deadline (optioneel)</label>
             <input style={s.input} type="date" value={goalForm.targetDate}
               onChange={e => setGoalForm({ ...goalForm, targetDate: e.target.value })} />
-
             <button style={{ ...s.primaryBtn, marginTop: '20px' }} onClick={handleAddGoal}><Plus size={16} /> Doel Toevoegen</button>
+          </div>
+        </div>
+      )}
+
+      {/* ════ JOIN REQUEST MODAL ════ */}
+      {showJoinModal && (
+        <div style={s.modalOverlay}>
+          <div style={{ ...s.modal, maxWidth: '420px' }}>
+            <div style={s.modalHeader}>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}><Send size={18} color="#a78bfa" /> Aanvraag voor club</h3>
+              <button style={s.iconBtnGray} onClick={() => setShowJoinModal(false)}><X size={18} /></button>
+            </div>
+
+            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px', lineHeight: 1.6 }}>
+              Selecteer de club waarbij je wilt aansluiten. Een beheerder zal je aanvraag beoordelen en je vervolgens aan een groep toewijzen.
+            </p>
+
+            <label style={s.fieldLabel}>Club <span style={{ color: '#ef4444' }}>*</span></label>
+            <select
+              style={{ ...s.select, marginBottom: '16px' }}
+              value={joinForm.clubId}
+              onChange={e => setJoinForm({ ...joinForm, clubId: e.target.value })}
+            >
+              <option value="">-- Selecteer een club --</option>
+              {allClubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+
+            <label style={s.fieldLabel}>Motivatie <span style={{ color: '#64748b', fontWeight: 400 }}>(optioneel)</span></label>
+            <textarea
+              style={{ ...s.input, minHeight: '80px', resize: 'vertical', lineHeight: 1.5 }}
+              placeholder="Vertel iets over jezelf of waarom je wilt deelnemen…"
+              value={joinForm.message}
+              onChange={e => setJoinForm({ ...joinForm, message: e.target.value })}
+            />
+
+            {joinError && (
+              <div style={s.errorBanner}>
+                <AlertCircle size={14} /> {joinError}
+              </div>
+            )}
+
+            <button
+              style={{ ...s.primaryBtn, marginTop: '20px', backgroundColor: '#7c3aed', opacity: joinSending ? 0.6 : 1 }}
+              onClick={handleSendJoinRequest}
+              disabled={joinSending}
+            >
+              {joinSending ? (
+                <>
+                  <div style={{ width: '16px', height: '16px', border: '2px solid #ffffff55', borderTop: '2px solid white', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                  Verzenden…
+                </>
+              ) : (
+                <><Send size={16} /> Aanvraag verzenden</>
+              )}
+            </button>
           </div>
         </div>
       )}
@@ -679,8 +1038,9 @@ const s = {
   fullCenter: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#0f172a' },
   spinner: { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
 
-  // Identify screen
+  // Identify / create-user screens
   identifyWrap: { maxWidth: '560px', margin: '0 auto', padding: '60px 20px' },
+  backBtn: { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', padding: 0 },
   appLogo: { width: '56px', height: '56px', borderRadius: '16px', backgroundColor: '#1e293b', border: '1px solid #334155', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' },
   appTitle: { fontSize: '28px', fontWeight: '800', margin: '0 0 8px', color: '#f1f5f9' },
   appSubtitle: { color: '#64748b', fontSize: '15px', margin: 0 },
@@ -689,6 +1049,10 @@ const s = {
   userAvatar: { width: '44px', height: '44px', borderRadius: '50%', backgroundColor: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '14px', flexShrink: 0 },
   userTileName: { fontWeight: '600', fontSize: '13px', textAlign: 'center', lineHeight: 1.3 },
   userTileRole: { fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' },
+
+  // Create user card
+  createUserCard: { backgroundColor: '#1e293b', borderRadius: '16px', padding: '28px', border: '1px solid #334155' },
+  errorBanner: { display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ef444422', color: '#ef4444', fontSize: '13px', padding: '10px 14px', borderRadius: '8px', marginTop: '12px', border: '1px solid #ef444433' },
 
   // App layout
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 24px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 100 },
@@ -709,14 +1073,15 @@ const s = {
   discBadge: { display: 'inline-block', padding: '3px 10px', borderRadius: '6px', backgroundColor: '#0f172a', color: '#94a3b8', fontSize: '12px', fontWeight: '600', border: '1px solid #334155' },
   miniInput: { width: '64px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px' },
 
-  // Goal/membership rows
+  // Goal/membership/request rows
   goalRow: { display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid' },
   membershipRow: { display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #334155' },
+  requestRow: { display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '12px', backgroundColor: 'transparent', borderRadius: '10px', border: '1px solid' },
   clubIcon: { width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#2d1d4e', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   roleBadge: (color) => ({ padding: '3px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', backgroundColor: `${color}22`, color: color, border: `1px solid ${color}44` }),
 
   // Empty state
-  emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '30px 0', gap: '8px', '& p': { margin: 0 } },
+  emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '30px 0', gap: '8px' },
 
   // Buttons
   primaryBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px 20px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '10px', fontWeight: '700', cursor: 'pointer', width: '100%', fontSize: '14px' },
