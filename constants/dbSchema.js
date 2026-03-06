@@ -3,85 +3,62 @@ import {
   collection, doc, setDoc, getDoc, getDocs, updateDoc, 
   deleteDoc, query, where, serverTimestamp, addDoc, onSnapshot 
 } from "firebase/firestore";
-import { ref, set, update, remove, onValue, runTransaction } from "firebase/database";
+import { ref, set, update, remove, onValue, runTransaction, push } from "firebase/database";
 
 export const SCHEMA = {
   firestore: {
-    // 1. Gebruikers & hun eigenschappen
     users: { 
       firstName: "string", 
       lastName: "string", 
       email: "string", 
       role: "superadmin|clubadmin|user",
-     
-   // bluetooth device	 
       assignedDevice: {
-        deviceId: "string",   // Het Bluetooth ID
-        deviceName: "string", // Bijv. "Garmin HRM-Dual"
+        deviceId: "string",
+        deviceName: "string",
         lastConnection: "timestamp"
       },
-	// hartslagzones 	  
-	  heartrateZones: [{ name: "string", min: "number", max: "number", color: "string" }],
-	  
-	// persoonlijke records  
-	  records: {
-	    sessionType: "string", 
-		discipline: "string", 
-		score: "number", 
-		achievedAt: "timestamp", 
-		
-		// Bij het behalen van een record wordt de telmetry van de recordsessie hier bijgehouden
-		telemetry: 
-		[{
-		   time: "number",  //aantal 100sten seconden sinds begin sessie
-		   steps: "number", //totaal aantal steps
-		   heartRate: "number"
-		}]	
-	  },
-	  
-	// persoonlijke doelen
-	  goals: {
-		discipline: "string", targetScore: "number", targetDate: "timestamp", achievedAt: "timestamp|null"
-	  },
-
-	// historiek van opgenomen sessies
-	  sessionHistory: {
-		discipline: "string",
-		sessionStart: "timestamp",
-		sessionEnd: "timestamp",
-		score: "number",
-		avgBpm: "number",
-		maxBpm: "number",
-		
-	// hou hier de telemetry bij van de sessie
-		telemetry: 
-		[{
-		   time: "number",  //aantal 100sten seconden sinds begin sessie
-		   steps: "number", //totaal aantal steps
-		   heartRate: "number"
-		}]
-	  }
-	  
+      heartrateZones: [{ name: "string", min: "number", max: "number", color: "string" }],
+      records: {
+        sessionType: "string", 
+        discipline: "string", 
+        score: "number", 
+        achievedAt: "timestamp", 
+        telemetry: [{
+          time: "number",
+          steps: "number",
+          heartRate: "number"
+        }]	
+      },
+      goals: {
+        discipline: "string", targetScore: "number", targetDate: "timestamp", achievedAt: "timestamp|null"
+      },
+      sessionHistory: {
+        discipline: "string",
+        sessionStart: "timestamp",
+        sessionEnd: "timestamp",
+        score: "number",
+        avgBpm: "number",
+        maxBpm: "number",
+        telemetry: [{
+          time: "number",
+          steps: "number",
+          heartRate: "number"
+        }]
+      }
     },
-
-    // 2. Clubs & Hiërarchie (Jouw voorstel voor nesting)
     clubs: { 
       name: "string", 
       logoUrl: "string",
-      
-	  // De groepen zijn nu een subcollectie: clubs/{clubId}/groups/{groupId}
       groups: {
         name: "string",
         useHRM: "boolean",
-		isActive: "boolean", 
-        
-		// De leden van de groep: clubs/{clubId}/groups/{groupId}/members/{uid}
+        isActive: "boolean", 
         members: {
-          uid: "string", // link naar het user-object
-		  isSkipper: "boolean",
+          uid: "string",
+          isSkipper: "boolean",
           isCoach: "boolean",
-          startMembership: "timestamp", //startdatum waarop user is toegevoegd aan de groep
-		  endMembership: "timestamp" //datum waarop de user verwijderd is uit de groep
+          startMembership: "timestamp",
+          endMembership: "timestamp"
         }
       }
     }
@@ -90,18 +67,23 @@ export const SCHEMA = {
   rtdb: {
     live_sessions: {
       "$uid": {
-        // ASPECT 1: Continu (altijd aanwezig bij verbinding)
         bpm: "number",
         lastHeartbeat: "timestamp",
         connectionStatus: "online|offline",
-
-        // ASPECT 2: Sessie-gebonden (alleen gevuld tijdens tellen)
         session: {
-          isActive: "boolean",     // Is de counter gestart?
-          startTime: "timestamp",  // Wanneer is de 'Start' knop ingedrukt?
-          steps: "number",         // De huidige tellerstand
-          discipline: "30sec|2min|3min",   // Wat zijn we aan het tellen?
-		  sessionType: "training|wedstrijd" // type van de sessie
+          isActive: "boolean",
+          isFinished: "boolean",
+          startTime: "timestamp",
+          steps: "number",
+          discipline: "30sec|2min|3min",
+          sessionType: "training|wedstrijd",
+          lastStepTime: "timestamp",
+          // Live telemetry buffer (cleared after session saved)
+          telemetry: [{
+            time: "number",
+            steps: "number",
+            heartRate: "number"
+          }]
         }
       }
     }
@@ -113,7 +95,6 @@ export const SCHEMA = {
 // ==========================================
 
 export const UserFactory = {
-  // Gebruiker aanmaken met STANDAARD ZONES
   create: async (uid, userData) => {
     const defaultZones = [
       { name: 'Warm-up', min: 0, max: 120, color: '#94a3b8' },
@@ -139,37 +120,24 @@ export const UserFactory = {
   get: (uid) => getDoc(doc(db, "users", uid)),
 
   getAll: (callback) => onSnapshot(collection(db, "users"), (snap) => {
-  	callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
   }),  
 
   delete: async (uid) => {
-    // 1. Zoek alle clubs op
     const clubsSnap = await getDocs(collection(db, "clubs"));
-    
     for (const clubDoc of clubsSnap.docs) {
-      // 2. Zoek alle groepen binnen deze club
       const groupsSnap = await getDocs(collection(db, `clubs/${clubDoc.id}/groups`));
-      
       for (const groupDoc of groupsSnap.docs) {
-        // 3. Probeer het lidmaatschap document van deze gebruiker in deze groep te verwijderen
-        // We gebruiken deleteDoc direct op het pad; als het niet bestaat gebeurt er niets
         await deleteDoc(doc(db, `clubs/${clubDoc.id}/groups/${groupDoc.id}/members`, uid));
       }
     }
-
-    // 4. Verwijder eventuele live sessie in RTDB (optioneel maar netjes)
-    // await remove(ref(rtdb, `live_sessions/${uid}`));
-
-    // 5. Verwijder het hoofd-document van de gebruiker
     return deleteDoc(doc(db, "users", uid));
   },
 
   updateProfile: (uid, data) => updateDoc(doc(db, "users", uid), data),
 
-  // Hartslagzones handmatig updaten
   updateZones: (uid, zones) => updateDoc(doc(db, "users", uid), { heartrateZones: zones }),
 
-  // Device koppelen
   assignDevice: (uid, deviceId, deviceName) => 
     updateDoc(doc(db, "users", uid), {
       "assignedDevice.deviceId": deviceId,
@@ -177,15 +145,88 @@ export const UserFactory = {
       "assignedDevice.lastConnection": serverTimestamp()
     }),
 
-  // Records & Historiek (Subcollecties)
-  addRecord: (uid, recordData) => 
-    addDoc(collection(db, `users/${uid}/records`), { ...recordData, achievedAt: serverTimestamp() }),
+  // ---- SESSION HISTORY ----
 
-  saveToHistory: (uid, sessionData) => 
+  // Save a completed session with full telemetry to Firestore subcollection
+  saveSessionHistory: (uid, sessionData) => 
     addDoc(collection(db, `users/${uid}/sessionHistory`), {
-      ...sessionData,
-      sessionEnd: serverTimestamp()
-    })
+      discipline: sessionData.discipline,          // '30sec' | '2min' | '3min'
+      sessionType: sessionData.sessionType,        // 'Training' | 'Wedstrijd'
+      score: sessionData.score,
+      avgBpm: sessionData.avgBpm,
+      maxBpm: sessionData.maxBpm,
+      sessionStart: sessionData.sessionStart,
+      sessionEnd: serverTimestamp(),
+      telemetry: sessionData.telemetry || []
+    }),
+
+  // Get all session history for a user (realtime)
+  getSessionHistory: (uid, callback) =>
+    onSnapshot(collection(db, `users/${uid}/sessionHistory`), (snap) => {
+      const sorted = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => {
+          const aTime = a.sessionEnd?.seconds || 0;
+          const bTime = b.sessionEnd?.seconds || 0;
+          return bTime - aTime;
+        });
+      callback(sorted);
+    }),
+
+  // ---- RECORDS ----
+
+  // Add a new record entry (does NOT replace — appends to subcollection)
+  // discipline: '30sec' | '2min' | '3min'
+  // sessionType: 'Training' | 'Wedstrijd'
+  addRecord: (uid, recordData) => 
+    addDoc(collection(db, `users/${uid}/records`), {
+      discipline: recordData.discipline,
+      sessionType: recordData.sessionType,
+      score: recordData.score,
+      achievedAt: serverTimestamp(),
+      telemetry: recordData.telemetry || []
+    }),
+
+  // Get the best (highest) record for a specific discipline + sessionType
+  getBestRecord: async (uid, discipline, sessionType) => {
+    const q = query(
+      collection(db, `users/${uid}/records`),
+      where("discipline", "==", discipline),
+      where("sessionType", "==", sessionType)
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    return records.reduce((best, r) => (!best || r.score > best.score) ? r : best, null);
+  },
+
+  // Listen to best record realtime
+  subscribeToRecords: (uid, discipline, sessionType, callback) => {
+    const q = query(
+      collection(db, `users/${uid}/records`),
+      where("discipline", "==", discipline),
+      where("sessionType", "==", sessionType)
+    );
+    return onSnapshot(q, (snap) => {
+      const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const best = records.reduce((b, r) => (!b || r.score > b.score) ? r : b, null);
+      callback(best);
+    });
+  },
+
+  // ---- GOALS ----
+
+  // Get all goals for a user
+  getGoals: (uid, callback) =>
+    onSnapshot(collection(db, `users/${uid}/goals`), (snap) => {
+      callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }),
+
+  // Mark a goal as achieved
+  markGoalAchieved: (uid, goalId) =>
+    updateDoc(doc(db, `users/${uid}/goals`, goalId), {
+      achievedAt: serverTimestamp()
+    }),
 };
 
 // ==========================================
@@ -194,7 +235,6 @@ export const UserFactory = {
 
 export const ClubFactory = {
   create: (data) => addDoc(collection(db, "clubs"), { ...data, createdAt: serverTimestamp() }),
-//  getAll: () => getDocs(collection(db, "clubs")),
   getAll: (callback) => onSnapshot(collection(db, "clubs"), (snap) => {
     callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
   }),
@@ -202,45 +242,31 @@ export const ClubFactory = {
   update: (clubId, data) => updateDoc(doc(db, "clubs", clubId), data), 
 
   delete: async (clubId) => {
-    // 1. Haal alle groepen op van deze club
     const groupsSnap = await getDocs(collection(db, `clubs/${clubId}/groups`));
-    
     for (const groupDoc of groupsSnap.docs) {
-      // 2. Verwijder alle leden uit de subcollectie van de groep
       const membersSnap = await getDocs(collection(db, `clubs/${clubId}/groups/${groupDoc.id}/members`));
       for (const memberDoc of membersSnap.docs) {
         await deleteDoc(doc(db, `clubs/${clubId}/groups/${groupDoc.id}/members`, memberDoc.id));
       }
-      // 3. Verwijder de groep zelf
       await deleteDoc(doc(db, `clubs/${clubId}/groups`, groupDoc.id));
     }
-    
-    // 4. Verwijder de club zelf
     return deleteDoc(doc(db, "clubs", clubId));
   }
-
 };
 
 export const GroupFactory = {
-  // Pad: clubs/{clubId}/groups/{groupId}
   create: (clubId, groupData) => 
     addDoc(collection(db, `clubs/${clubId}/groups`), { ...groupData, isActive: true }),
   update: (clubId, groupId, data) => 
     updateDoc(doc(db, `clubs/${clubId}/groups`, groupId), data),
   delete: async (clubId, groupId) => {
-    // 1. Haal eerst alle leden op uit de subcollectie
     const membersSnap = await getDocs(collection(db, `clubs/${clubId}/groups/${groupId}/members`));
-    
-    // 2. Verwijder elk lidmaatschap document
     for (const memberDoc of membersSnap.docs) {
       await deleteDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, memberDoc.id));
     }
-    
-    // 3. Verwijder de groep zelf
     return deleteDoc(doc(db, `clubs/${clubId}/groups`, groupId));
   },
 
-  // Ledenbeheer: clubs/{clubId}/groups/{groupId}/members/{uid}
   addMember: (clubId, groupId, uid, memberData) => 
     setDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, uid), {
       uid,
@@ -260,17 +286,14 @@ export const GroupFactory = {
   getMemberCount: (clubId, groupId, callback) => 
     onSnapshot(collection(db, `clubs/${clubId}/groups/${groupId}/members`), (snap) => {
       callback(snap.size);
-    }
-  ),
+    }),
 
-  // Haal alle groepen van een specifieke club op
   getGroupsByClub: (clubId, callback) => {
     return onSnapshot(collection(db, `clubs/${clubId}/groups`), (snap) => {
       callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
   },
 
-  // Haal alle leden van een specifieke groep op
   getMembersByGroup: (clubId, groupId, callback) => {
     return onSnapshot(collection(db, `clubs/${clubId}/groups/${groupId}/members`), (snap) => {
       callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -303,28 +326,45 @@ export const LiveSessionFactory = {
   },
 
   // Start de teller
-// discipline: '30sec' | '2min' | '3min'
-// sessionType: 'Training' | 'Wedstrijd'
-startCounter: (uid, discipline, sessionType) => {
+  startCounter: (uid, discipline, sessionType) => {
     return update(ref(rtdb, `live_sessions/${uid}/session`), {
       isActive: true,
       isFinished: false,
       startTime: Date.now(),
       steps: 0,
       discipline: discipline,
-      sessionType: sessionType
+      sessionType: sessionType,
+      lastStepTime: null,
+      telemetry: []
     });
   },
 
-  incrementSteps: (uid) => {
+  incrementSteps: (uid, currentBpm) => {
     const stepRef = ref(rtdb, `live_sessions/${uid}/session/steps`);
-    return runTransaction(stepRef, (current) => (current || 0) + 1);
+    // Increment steps atomically
+    const stepPromise = runTransaction(stepRef, (current) => (current || 0) + 1);
+
+    // Also update lastStepTime and append telemetry point
+    // We read current steps after increment in the calling code
+    const metaPromise = update(ref(rtdb, `live_sessions/${uid}/session`), {
+      lastStepTime: Date.now(),
+    });
+
+    // Push a telemetry point to the telemetry list (keyed by timestamp for ordering)
+    const telPoint = {
+      time: Date.now(),
+      heartRate: currentBpm || 0
+    };
+    const telPromise = push(ref(rtdb, `live_sessions/${uid}/session/telemetry`), telPoint);
+
+    return Promise.all([stepPromise, metaPromise, telPromise]);
   },
 
   stopCounter: (uid) => {
     return update(ref(rtdb, `live_sessions/${uid}/session`), {
       isActive: false,
-      isFinished: true
+      isFinished: true,
+      lastStepTime: Date.now()
     });
   },
 
@@ -333,13 +373,42 @@ startCounter: (uid, discipline, sessionType) => {
       isActive: false,
       isFinished: false,
       steps: 0,
-      startTime: null
+      startTime: null,
+      lastStepTime: null,
+      telemetry: []
+    });
+  },
+
+  // Read entire session once (for finalizing)
+  getSessionOnce: (uid) => {
+    return new Promise((resolve) => {
+      const sessionRef = ref(rtdb, `live_sessions/${uid}/session`);
+      onValue(sessionRef, (snapshot) => {
+        resolve(snapshot.val());
+      }, { onlyOnce: true });
+    });
+  },
+
+  // Read current BPM once
+  getBpmOnce: (uid) => {
+    return new Promise((resolve) => {
+      const bpmRef = ref(rtdb, `live_sessions/${uid}/bpm`);
+      onValue(bpmRef, (snapshot) => {
+        resolve(snapshot.val() || 0);
+      }, { onlyOnce: true });
     });
   },
 
   subscribeToSession: (uid, callback) => {
     const sessionRef = ref(rtdb, `live_sessions/${uid}/session`);
     return onValue(sessionRef, (snapshot) => {
+      callback(snapshot.val());
+    });
+  },
+
+  subscribeToLive: (uid, callback) => {
+    const liveRef = ref(rtdb, `live_sessions/${uid}`);
+    return onValue(liveRef, (snapshot) => {
       callback(snapshot.val());
     });
   }
