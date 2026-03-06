@@ -1,11 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { UserFactory, ClubFactory, GroupFactory } from '../constants/dbSchema'; 
+import { UserFactory, ClubFactory, GroupFactory, ClubJoinRequestFactory } from '../constants/dbSchema'; 
 
 import { 
   ShieldAlert, UserPlus, Building2, Users, 
   Trash2, Search, Edit2, X, Save, ArrowLeft, Plus, 
-  Heart, HeartOff, PlusCircle, Calendar
+  Heart, HeartOff, PlusCircle, Calendar,
+  Bell, CheckCircle2, XCircle, Clock, MessageSquare,
+  ChevronDown, ChevronUp, Filter, Check, AlertCircle,
+  Send
 } from 'lucide-react';
+
+// ─── Status config ────────────────────────────────────────────────────────────
+const STATUS_CONFIG = {
+  pending:  { label: 'In behandeling', color: '#f59e0b', bg: '#f59e0b15' },
+  approved: { label: 'Goedgekeurd',    color: '#22c55e', bg: '#22c55e15' },
+  rejected: { label: 'Afgewezen',      color: '#ef4444', bg: '#ef444415' },
+};
 
 export default function SuperAdmin() {
   const [activeTab, setActiveTab] = useState('users');
@@ -33,11 +43,31 @@ export default function SuperAdmin() {
   const [memberEditForm, setMemberEditForm] = useState({});
   const [showOnlyActive, setShowOnlyActive] = useState(true);
 
-  // Real-time data sync
+  // ── Join requests state
+  const [joinRequests, setJoinRequests] = useState([]);
+  const [requestFilter, setRequestFilter] = useState('pending'); // 'all' | 'pending' | 'approved' | 'rejected'
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectingRequestId, setRejectingRequestId] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectError, setRejectError] = useState('');
+  const [rejectSaving, setRejectSaving] = useState(false);
+
+  // ── Real-time data sync
   useEffect(() => {
     const unsubUsers = UserFactory.getAll((data) => setUsers(data));
     const unsubClubs = ClubFactory.getAll((data) => setClubs(data));
-    return () => { unsubUsers(); unsubClubs(); };
+    const unsubRequests = ClubJoinRequestFactory.getAll((data) => {
+      // Sort: pending first, then by date descending
+      const sorted = [...data].sort((a, b) => {
+        if (a.status === 'pending' && b.status !== 'pending') return -1;
+        if (a.status !== 'pending' && b.status === 'pending') return 1;
+        const aT = a.createdAt?.seconds || 0;
+        const bT = b.createdAt?.seconds || 0;
+        return bT - aT;
+      });
+      setJoinRequests(sorted);
+    });
+    return () => { unsubUsers(); unsubClubs(); unsubRequests(); };
   }, []);
 
   useEffect(() => {
@@ -46,7 +76,7 @@ export default function SuperAdmin() {
       setGroups(groupsData);
       groupsData.forEach(group => {
         GroupFactory.getMemberCount(selectedClub.id, group.id, (count) => {
-        setMemberCounts(prev => ({ ...prev, [group.id]: count }));
+          setMemberCounts(prev => ({ ...prev, [group.id]: count }));
         });
       });
     });
@@ -64,7 +94,13 @@ export default function SuperAdmin() {
   const filteredUsers = users.filter(u => `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredClubs = clubs.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  // Handlers
+  // ── Join request counts
+  const pendingCount = joinRequests.filter(r => r.status === 'pending').length;
+  const filteredRequests = requestFilter === 'all'
+    ? joinRequests
+    : joinRequests.filter(r => r.status === requestFilter);
+
+  // ── Handlers: Users, Clubs, Groups (unchanged)
   const handleUserSubmit = async (e) => {
     e.preventDefault();
     editingId ? await UserFactory.updateProfile(editingId, userForm) : await UserFactory.create(Date.now().toString(), userForm);
@@ -87,7 +123,6 @@ export default function SuperAdmin() {
     if (confirm("Club verwijderen? Dit wist ook alle groepen en lidmaatschappen!")) await ClubFactory.delete(clubId);
   };
 
-  // Lidmaatschap Handlers
   const handleAddMember = async (user) => {
     await GroupFactory.addMember(selectedClub.id, selectedGroup.id, user.id, {
       isSkipper: true,
@@ -103,10 +138,50 @@ export default function SuperAdmin() {
   };
 
   const handleRemoveMember = async (uid) => {
-    // Punt 1: Gebruiker echt verwijderen uit de collectie
     if (confirm("Weet je zeker dat je dit lidmaatschap definitief wilt verwijderen?")) {
       await GroupFactory.removeMember(selectedClub.id, selectedGroup.id, uid);
     }
+  };
+
+  // ── Handlers: Join Requests
+  const handleApproveRequest = async (requestId) => {
+    await ClubJoinRequestFactory.approve(requestId);
+  };
+
+  const openRejectModal = (requestId) => {
+    setRejectingRequestId(requestId);
+    setRejectReason('');
+    setRejectError('');
+    setRejectModalOpen(true);
+  };
+
+  const handleConfirmReject = async () => {
+    if (!rejectReason.trim()) {
+      setRejectError('Een reden is verplicht bij afwijzing.');
+      return;
+    }
+    setRejectSaving(true);
+    try {
+      await ClubJoinRequestFactory.reject(rejectingRequestId, rejectReason.trim());
+      setRejectModalOpen(false);
+      setRejectingRequestId(null);
+      setRejectReason('');
+    } catch (err) {
+      setRejectError('Er ging iets mis. Probeer opnieuw.');
+    } finally {
+      setRejectSaving(false);
+    }
+  };
+
+  const handleDeleteRequest = async (requestId) => {
+    if (confirm("Aanvraag permanent verwijderen?")) {
+      await ClubJoinRequestFactory.delete(requestId);
+    }
+  };
+
+  const getUserName = (uid) => {
+    const u = users.find(u => u.id === uid);
+    return u ? `${u.firstName} ${u.lastName}` : uid;
   };
 
   return (
@@ -114,13 +189,35 @@ export default function SuperAdmin() {
       <header style={styles.header}>
         <h1 style={styles.title}><ShieldAlert size={28} color="#3b82f6" /> SuperAdmin Panel</h1>
         <div style={styles.tabBar}>
-          <button onClick={() => {setActiveTab('users'); setSelectedClub(null);}} style={activeTab === 'users' ? styles.activeTab : styles.tab}>Gebruikers</button>
-          <button onClick={() => {setActiveTab('clubs'); setSelectedGroup(null);}} style={activeTab === 'clubs' ? styles.activeTab : styles.tab}>Clubs & Groepen</button>
+          <button onClick={() => { setActiveTab('users'); setSelectedClub(null); }} style={activeTab === 'users' ? styles.activeTab : styles.tab}>
+            Gebruikers
+          </button>
+          <button onClick={() => { setActiveTab('clubs'); setSelectedGroup(null); }} style={activeTab === 'clubs' ? styles.activeTab : styles.tab}>
+            Clubs & Groepen
+          </button>
+          <button onClick={() => setActiveTab('requests')} style={{
+            ...(activeTab === 'requests' ? styles.activeTab : styles.tab),
+            position: 'relative',
+          }}>
+            Aanvragen
+            {pendingCount > 0 && (
+              <span style={{
+                position: 'absolute', top: '-6px', right: '-6px',
+                backgroundColor: '#ef4444', color: 'white',
+                fontSize: '10px', fontWeight: 'bold',
+                width: '18px', height: '18px', borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {pendingCount > 9 ? '9+' : pendingCount}
+              </span>
+            )}
+          </button>
         </div>
       </header>
 
       <main style={styles.content}>
         
+        {/* ═══ TAB: USERS ═══ */}
         {activeTab === 'users' && (
           <section>
             <div style={styles.actionBar}>
@@ -128,20 +225,27 @@ export default function SuperAdmin() {
                 <Search size={18} style={styles.searchIcon} />
                 <input placeholder="Zoek op naam of email..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={styles.searchInput} />
               </div>
-              <button onClick={() => {setEditingId(null); setUserForm({firstName:'', lastName:'', email:'', role:'user'}); setIsUserModalOpen(true);}} style={styles.addBtn}><UserPlus size={18}/> Nieuwe Gebruiker</button>
+              <button onClick={() => { setEditingId(null); setUserForm({ firstName: '', lastName: '', email: '', role: 'user' }); setIsUserModalOpen(true); }} style={styles.addBtn}>
+                <UserPlus size={18} /> Nieuwe Gebruiker
+              </button>
             </div>
             <div style={styles.tableContainer}>
               <table style={styles.table}>
-                <thead><tr style={styles.tableHeader}><th style={styles.th}>Naam</th><th style={styles.th}>Email</th><th style={styles.th}>Rol</th><th style={styles.th}>Acties</th></tr></thead>
+                <thead><tr style={styles.tableHeader}>
+                  <th style={styles.th}>Naam</th>
+                  <th style={styles.th}>Email</th>
+                  <th style={styles.th}>Rol</th>
+                  <th style={styles.th}>Acties</th>
+                </tr></thead>
                 <tbody>
                   {filteredUsers.map(user => (
                     <tr key={user.id} style={styles.tableRow}>
                       <td style={styles.td}><strong>{user.firstName} {user.lastName}</strong></td>
                       <td style={styles.td}>{user.email}</td>
-                      <td style={styles.td}><span style={{...styles.roleBadge, backgroundColor: getRoleColor(user.role)}}>{user.role}</span></td>
+                      <td style={styles.td}><span style={{ ...styles.roleBadge, backgroundColor: getRoleColor(user.role) }}>{user.role}</span></td>
                       <td style={styles.td}>
-                        <button onClick={() => {setEditingId(user.id); setUserForm(user); setIsUserModalOpen(true);}} style={styles.iconBtn}><Edit2 size={16} /></button>
-                        <button onClick={() => { if(confirm("Gebruiker wissen?")) UserFactory.delete(user.id); }} style={{...styles.iconBtn, color: '#ef4444'}}><Trash2 size={16} /></button>
+                        <button onClick={() => { setEditingId(user.id); setUserForm(user); setIsUserModalOpen(true); }} style={styles.iconBtn}><Edit2 size={16} /></button>
+                        <button onClick={() => { if (confirm("Gebruiker wissen?")) UserFactory.delete(user.id); }} style={{ ...styles.iconBtn, color: '#ef4444' }}><Trash2 size={16} /></button>
                       </td>
                     </tr>
                   ))}
@@ -151,12 +255,13 @@ export default function SuperAdmin() {
           </section>
         )}
 
+        {/* ═══ TAB: CLUBS ═══ */}
         {activeTab === 'clubs' && (
           <section>
             <div style={styles.breadcrumbBar}>
               {selectedClub && (
-                <button onClick={() => {selectedGroup ? setSelectedGroup(null) : setSelectedClub(null)}} style={styles.backBtn}>
-                  <ArrowLeft size={18}/> Terug naar {selectedGroup ? 'Club Overzicht' : 'Clubs'}
+                <button onClick={() => { selectedGroup ? setSelectedGroup(null) : setSelectedClub(null); }} style={styles.backBtn}>
+                  <ArrowLeft size={18} /> Terug naar {selectedGroup ? 'Club Overzicht' : 'Clubs'}
                 </button>
               )}
             </div>
@@ -164,8 +269,13 @@ export default function SuperAdmin() {
             {!selectedClub && (
               <>
                 <div style={styles.actionBar}>
-                  <div style={styles.searchWrapper}><Search size={18} style={styles.searchIcon} /><input placeholder="Filter clubs..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={styles.searchInput} /></div>
-                  <button onClick={() => {setEditingId(null); setClubForm({name:'', logoUrl:''}); setIsClubModalOpen(true);}} style={styles.addBtn}><Building2 size={18}/> Nieuwe Club</button>
+                  <div style={styles.searchWrapper}>
+                    <Search size={18} style={styles.searchIcon} />
+                    <input placeholder="Filter clubs..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={styles.searchInput} />
+                  </div>
+                  <button onClick={() => { setEditingId(null); setClubForm({ name: '', logoUrl: '' }); setIsClubModalOpen(true); }} style={styles.addBtn}>
+                    <Building2 size={18} /> Nieuwe Club
+                  </button>
                 </div>
                 <div style={styles.grid}>
                   {filteredClubs.map(club => (
@@ -175,8 +285,8 @@ export default function SuperAdmin() {
                         <h3 style={styles.clubName}>{club.name}</h3>
                       </div>
                       <div style={styles.clubActions}>
-                         <button onClick={() => {setEditingId(club.id); setClubForm(club); setIsClubModalOpen(true);}} style={styles.iconBtn}><Edit2 size={14}/></button>
-                         <button onClick={() => handleDeleteClub(club.id)} style={{...styles.iconBtn, color: '#ef4444'}}><Trash2 size={14}/></button>
+                        <button onClick={() => { setEditingId(club.id); setClubForm(club); setIsClubModalOpen(true); }} style={styles.iconBtn}><Edit2 size={14} /></button>
+                        <button onClick={() => handleDeleteClub(club.id)} style={{ ...styles.iconBtn, color: '#ef4444' }}><Trash2 size={14} /></button>
                       </div>
                     </div>
                   ))}
@@ -189,24 +299,26 @@ export default function SuperAdmin() {
                 <div style={styles.sectionHeader}>
                   {selectedClub.logoUrl ? <img src={selectedClub.logoUrl} style={styles.smallLogo} /> : <Building2 size={30} />}
                   <h2>{selectedClub.name} - Groepen</h2>
-                  <button onClick={() => {setEditingId(null); setGroupForm({name:'', useHRM: true}); setIsGroupModalOpen(true);}} style={styles.addBtn}><Plus size={18}/> Groep Toevoegen</button>
+                  <button onClick={() => { setEditingId(null); setGroupForm({ name: '', useHRM: true }); setIsGroupModalOpen(true); }} style={styles.addBtn}>
+                    <Plus size={18} /> Groep Toevoegen
+                  </button>
                 </div>
                 <div style={styles.grid}>
                   {groups.map(group => (
                     <div key={group.id} style={styles.groupCard}>
-                      <div onClick={() => setSelectedGroup(group)} style={{cursor: 'pointer'}}>
-                         <Users size={32} color="#3b82f6" style={{marginBottom: '10px'}} />
-                         <h3>{group.name}</h3>
-                         <div style={styles.badgeRow}>
-                           <span style={styles.countBadge}>{memberCounts[group.id] || 0} Leden</span>
-                           <span style={{...styles.hrmBadge, backgroundColor: group.useHRM ? '#065f46' : '#334155'}}>
-                             {group.useHRM ? <Heart size={10} fill="white"/> : <HeartOff size={10}/>} HRM {group.useHRM ? 'AAN' : 'UIT'}
-                           </span>
-                         </div>
+                      <div onClick={() => setSelectedGroup(group)} style={{ cursor: 'pointer' }}>
+                        <Users size={32} color="#3b82f6" style={{ marginBottom: '10px' }} />
+                        <h3>{group.name}</h3>
+                        <div style={styles.badgeRow}>
+                          <span style={styles.countBadge}>{memberCounts[group.id] || 0} Leden</span>
+                          <span style={{ ...styles.hrmBadge, backgroundColor: group.useHRM ? '#065f46' : '#334155' }}>
+                            {group.useHRM ? <Heart size={10} fill="white" /> : <HeartOff size={10} />} HRM {group.useHRM ? 'AAN' : 'UIT'}
+                          </span>
+                        </div>
                       </div>
                       <div style={styles.groupCardActions}>
-                         <button onClick={() => {setEditingId(group.id); setGroupForm(group); setIsGroupModalOpen(true);}} style={styles.iconBtn}><Edit2 size={14}/></button>
-                         <button onClick={() => GroupFactory.delete(selectedClub.id, group.id)} style={{...styles.iconBtn, color: '#ef4444'}}><Trash2 size={14}/></button>
+                        <button onClick={() => { setEditingId(group.id); setGroupForm(group); setIsGroupModalOpen(true); }} style={styles.iconBtn}><Edit2 size={14} /></button>
+                        <button onClick={() => GroupFactory.delete(selectedClub.id, group.id)} style={{ ...styles.iconBtn, color: '#ef4444' }}><Trash2 size={14} /></button>
                       </div>
                     </div>
                   ))}
@@ -217,12 +329,11 @@ export default function SuperAdmin() {
             {selectedGroup && (
               <div style={styles.memberLayout}>
                 <div style={styles.memberListPanel}>
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                     <h2>Groepsleden ({members.length})</h2>
-                      {/* Filter voor actieve leden */}
-                    <div style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px', padding: '10px', backgroundColor: '#1e293b', borderRadius: '8px'}}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px', backgroundColor: '#1e293b', borderRadius: '8px' }}>
                       <label style={{ fontSize: '14px', color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input type="checkbox" checked={showOnlyActive} onChange={(e) => setShowOnlyActive(e.target.checked)} style={{ width: '16px', height: '16px' }}/>
+                        <input type="checkbox" checked={showOnlyActive} onChange={(e) => setShowOnlyActive(e.target.checked)} style={{ width: '16px', height: '16px' }} />
                         Toon alleen actieve leden
                       </label>
                     </div>
@@ -230,85 +341,65 @@ export default function SuperAdmin() {
 
                   <div style={styles.memberGridDisplay}>
                     {members
-                     .filter(m => {
-                      if (!showOnlyActive) return true; // Toon alles als filter uit staat
-                      
-                      const nu = new Date();
-                      // Helper om Firestore timestamp of Date om te zetten naar JS Date
-                      const start = m.startMembership?.toDate ? m.startMembership.toDate() : new Date(m.startMembership);
-                      const eind = m.endMembership?.toDate ? m.endMembership.toDate() : (m.endMembership ? new Date(m.endMembership) : null);
-                      
-                      const isGestart = start <= nu;
-                      const isNietBeëindigd = !eind || eind > nu;
-                      
-                      return isGestart && isNietBeëindigd;
-                      })           
-                     
-                     .map(m => {
-                      const user = users.find(u => u.id === m.id);
-                      const isEditing = editingMemberUid === m.id;
-                      
-                      return (
-                        <div key={m.id} style={styles.memberCard}>
-                          <div style={styles.memberCardHeader}>
-                            <div style={{flex: 1}}>
-                              <div style={styles.memberName}>{user ? `${user.firstName} ${user.lastName}` : 'Onbekend'}</div>
-                              <div style={styles.memberEmail}>{user?.email || 'geen email'}</div>
+                      .filter(m => {
+                        if (!showOnlyActive) return true;
+                        const nu = new Date();
+                        const start = m.startMembership?.toDate ? m.startMembership.toDate() : new Date(m.startMembership);
+                        const eind = m.endMembership?.toDate ? m.endMembership.toDate() : (m.endMembership ? new Date(m.endMembership) : null);
+                        return start <= nu && (!eind || eind > nu);
+                      })
+                      .map(m => {
+                        const user = users.find(u => u.id === m.id);
+                        const isEditing = editingMemberUid === m.id;
+                        return (
+                          <div key={m.id} style={styles.memberCard}>
+                            <div style={styles.memberCardHeader}>
+                              <div style={{ flex: 1 }}>
+                                <div style={styles.memberName}>{user ? `${user.firstName} ${user.lastName}` : 'Onbekend'}</div>
+                                <div style={styles.memberEmail}>{user?.email || 'geen email'}</div>
+                              </div>
+                              <button onClick={() => handleRemoveMember(m.id)} style={styles.deleteMemberBtn} title="Lid verwijderen"><Trash2 size={16} /></button>
                             </div>
-                            {/* Punt 1: Lidmaatschap document echt verwijderen */}
-                            <button onClick={() => handleRemoveMember(m.id)} style={styles.deleteMemberBtn} title="Lid verwijderen"><Trash2 size={16}/></button>
-                          </div>
-
-                          <div style={styles.memberRoles}>
-                            <button 
-                              onClick={() => handleUpdateMember(m.id, { isSkipper: !m.isSkipper })}
-                              style={{...styles.roleToggle, backgroundColor: m.isSkipper ? '#3b82f6' : '#334155'}}
-                            >
-                              Skipper: {m.isSkipper ? 'JA' : 'NEE'}
-                            </button>
-                            <button 
-                              onClick={() => handleUpdateMember(m.id, { isCoach: !m.isCoach })}
-                              style={{...styles.roleToggle, backgroundColor: m.isCoach ? '#f59e0b' : '#334155'}}
-                            >
-                              Coach: {m.isCoach ? 'JA' : 'NEE'}
-                            </button>
-                          </div>
-
-                          <div style={styles.memberDates}>
-                            <div style={styles.dateInfo}>
-                              <span style={{display:'flex', alignItems:'center', gap: '5px'}}><Calendar size={12}/> Start:</span>
-                              {isEditing ? (
-                                <input type="date" style={styles.miniDateInput} 
-                                  defaultValue={m.startMembership?.toDate ? m.startMembership.toDate().toISOString().split('T')[0] : ''}
-                                  onChange={(e) => setMemberEditForm({...memberEditForm, startMembership: new Date(e.target.value)})}
-                                />
-                              ) : (
-                                <strong>{m.startMembership?.toDate ? m.startMembership.toDate().toLocaleDateString() : '-'}</strong>
-                              )}
+                            <div style={styles.memberRoles}>
+                              <button onClick={() => handleUpdateMember(m.id, { isSkipper: !m.isSkipper })} style={{ ...styles.roleToggle, backgroundColor: m.isSkipper ? '#3b82f6' : '#334155' }}>
+                                Skipper: {m.isSkipper ? 'JA' : 'NEE'}
+                              </button>
+                              <button onClick={() => handleUpdateMember(m.id, { isCoach: !m.isCoach })} style={{ ...styles.roleToggle, backgroundColor: m.isCoach ? '#f59e0b' : '#334155' }}>
+                                Coach: {m.isCoach ? 'JA' : 'NEE'}
+                              </button>
                             </div>
-                            <div style={styles.dateInfo}>
-                              <span style={{display:'flex', alignItems:'center', gap: '5px'}}><Calendar size={12}/> Eind:</span>
+                            <div style={styles.memberDates}>
+                              <div style={styles.dateInfo}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Calendar size={12} /> Start:</span>
+                                {isEditing ? (
+                                  <input type="date" style={styles.miniDateInput}
+                                    defaultValue={m.startMembership?.toDate ? m.startMembership.toDate().toISOString().split('T')[0] : ''}
+                                    onChange={(e) => setMemberEditForm({ ...memberEditForm, startMembership: new Date(e.target.value) })} />
+                                ) : (
+                                  <strong>{m.startMembership?.toDate ? m.startMembership.toDate().toLocaleDateString() : '-'}</strong>
+                                )}
+                              </div>
+                              <div style={styles.dateInfo}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Calendar size={12} /> Eind:</span>
+                                {isEditing ? (
+                                  <input type="date" style={styles.miniDateInput}
+                                    defaultValue={m.endMembership?.toDate ? m.endMembership.toDate().toISOString().split('T')[0] : ''}
+                                    onChange={(e) => setMemberEditForm({ ...memberEditForm, endMembership: e.target.value ? new Date(e.target.value) : null })} />
+                                ) : (
+                                  <strong>{m.endMembership?.toDate ? m.endMembership.toDate().toLocaleDateString() : 'Geen'}</strong>
+                                )}
+                              </div>
+                            </div>
+                            <div style={styles.memberCardFooter}>
                               {isEditing ? (
-                                <input type="date" style={styles.miniDateInput} 
-                                  defaultValue={m.endMembership?.toDate ? m.endMembership.toDate().toISOString().split('T')[0] : ''}
-                                  onChange={(e) => setMemberEditForm({...memberEditForm, endMembership: e.target.value ? new Date(e.target.value) : null})}
-                                />
+                                <button onClick={() => handleUpdateMember(m.id, memberEditForm)} style={styles.saveMemberBtn}><Save size={14} /> Gegevens Opslaan</button>
                               ) : (
-                                <strong>{m.endMembership?.toDate ? m.endMembership.toDate().toLocaleDateString() : 'Geen'}</strong>
+                                <button onClick={() => { setEditingMemberUid(m.id); setMemberEditForm(m); }} style={styles.editMemberBtn}><Edit2 size={14} /> Wijzig Lidmaatschap</button>
                               )}
                             </div>
                           </div>
-
-                          <div style={styles.memberCardFooter}>
-                            {isEditing ? (
-                              <button onClick={() => handleUpdateMember(m.id, memberEditForm)} style={styles.saveMemberBtn}><Save size={14}/> Gegevens Opslaan</button>
-                            ) : (
-                              <button onClick={() => {setEditingMemberUid(m.id); setMemberEditForm(m);}} style={styles.editMemberBtn}><Edit2 size={14}/> Wijzig Lidmaatschap</button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
                   </div>
                 </div>
 
@@ -317,69 +408,360 @@ export default function SuperAdmin() {
                   <input placeholder="Zoek gebruiker..." onChange={(e) => setSearchTerm(e.target.value)} style={styles.miniInput} />
                   <div style={styles.pickerScroll}>
                     {users.filter(u => !members.some(m => m.id === u.id))
-                          .filter(u => `${u.firstName} ${u.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()))
-                          .map(u => (
-                      <div key={u.id} onClick={() => handleAddMember(u)} style={styles.pickerRow}>
-                        <span>{u.firstName} {u.lastName}</span>
-                        <PlusCircle size={18} color="#22c55e" />
-                      </div>
-                    ))}
+                      .filter(u => `${u.firstName} ${u.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map(u => (
+                        <div key={u.id} onClick={() => handleAddMember(u)} style={styles.pickerRow}>
+                          <span>{u.firstName} {u.lastName}</span>
+                          <PlusCircle size={18} color="#22c55e" />
+                        </div>
+                      ))}
                   </div>
                 </div>
               </div>
             )}
           </section>
         )}
+
+        {/* ═══ TAB: JOIN REQUESTS ═══ */}
+        {activeTab === 'requests' && (
+          <section>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h2 style={{ margin: '0 0 4px', fontSize: '20px' }}>Club Aanvragen</h2>
+                <p style={{ margin: 0, color: '#64748b', fontSize: '13px' }}>
+                  Beheer aanvragen van gebruikers om lid te worden van een club.
+                  {pendingCount > 0 && (
+                    <span style={{ marginLeft: '8px', color: '#f59e0b', fontWeight: '600' }}>
+                      {pendingCount} openstaande aanvraag/aanvragen
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              {/* Filter tabs */}
+              <div style={{ display: 'flex', gap: '6px', backgroundColor: '#1e293b', padding: '4px', borderRadius: '10px', border: '1px solid #334155' }}>
+                {[
+                  { key: 'pending',  label: 'In behandeling', count: joinRequests.filter(r => r.status === 'pending').length },
+                  { key: 'approved', label: 'Goedgekeurd',    count: joinRequests.filter(r => r.status === 'approved').length },
+                  { key: 'rejected', label: 'Afgewezen',      count: joinRequests.filter(r => r.status === 'rejected').length },
+                  { key: 'all',      label: 'Alle',           count: joinRequests.length },
+                ].map(f => (
+                  <button
+                    key={f.key}
+                    onClick={() => setRequestFilter(f.key)}
+                    style={{
+                      padding: '6px 14px', borderRadius: '7px', border: 'none', cursor: 'pointer',
+                      fontWeight: '600', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px',
+                      backgroundColor: requestFilter === f.key ? '#334155' : 'transparent',
+                      color: requestFilter === f.key ? '#f1f5f9' : '#64748b',
+                    }}
+                  >
+                    {f.label}
+                    {f.count > 0 && (
+                      <span style={{
+                        backgroundColor: f.key === 'pending' && f.count > 0 ? '#f59e0b' : '#334155',
+                        color: f.key === 'pending' && f.count > 0 ? '#000' : '#94a3b8',
+                        padding: '1px 6px', borderRadius: '10px', fontSize: '10px', fontWeight: 'bold',
+                        ...(requestFilter === f.key ? { backgroundColor: '#1e293b' } : {}),
+                      }}>
+                        {f.count}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {filteredRequests.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
+                <Bell size={40} color="#334155" style={{ marginBottom: '16px' }} />
+                <p style={{ margin: 0, fontSize: '16px' }}>
+                  {requestFilter === 'pending' ? 'Geen openstaande aanvragen.' : 'Geen aanvragen gevonden.'}
+                </p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {filteredRequests.map(req => {
+                  const cfg = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending;
+                  const userProfile = users.find(u => u.id === req.uid);
+                  const initials = `${(req.firstName?.[0] || '?')}${(req.lastName?.[0] || '')}`.toUpperCase();
+
+                  return (
+                    <div key={req.id} style={{
+                      backgroundColor: '#1e293b', borderRadius: '14px',
+                      border: `1px solid ${req.status === 'pending' ? '#f59e0b44' : '#334155'}`,
+                      overflow: 'hidden',
+                      animation: 'fadeIn 0.2s ease-out',
+                    }}>
+                      {/* Card header stripe */}
+                      {req.status === 'pending' && (
+                        <div style={{ height: '3px', backgroundColor: '#f59e0b', width: '100%' }} />
+                      )}
+
+                      <div style={{ padding: '20px' }}>
+                        <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                          {/* Avatar */}
+                          <div style={{
+                            width: '48px', height: '48px', borderRadius: '12px',
+                            backgroundColor: '#3b82f622', border: '1px solid #3b82f644',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontWeight: '700', fontSize: '16px', color: '#3b82f6', flexShrink: 0,
+                          }}>
+                            {initials}
+                          </div>
+
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            {/* Name + status */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                              <span style={{ fontWeight: '700', fontSize: '16px', color: '#f1f5f9' }}>
+                                {req.firstName} {req.lastName}
+                              </span>
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center', gap: '4px',
+                                padding: '3px 10px', borderRadius: '10px', fontSize: '11px', fontWeight: '700',
+                                backgroundColor: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}33`,
+                              }}>
+                                {req.status === 'pending' && <Clock size={11} />}
+                                {req.status === 'approved' && <CheckCircle2 size={11} />}
+                                {req.status === 'rejected' && <XCircle size={11} />}
+                                {cfg.label}
+                              </span>
+                            </div>
+
+                            {/* Meta info */}
+                            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '13px', color: '#64748b', marginBottom: req.message || req.rejectionReason ? '12px' : 0 }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                <Building2 size={12} /> {req.clubName}
+                              </span>
+                              {req.email && (
+                                <span>{req.email}</span>
+                              )}
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                <Calendar size={12} />
+                                {req.createdAt?.seconds
+                                  ? new Date(req.createdAt.seconds * 1000).toLocaleDateString('nl-BE', { day: '2-digit', month: 'short', year: 'numeric' })
+                                  : '—'}
+                              </span>
+                            </div>
+
+                            {/* Motivation message */}
+                            {req.message && (
+                              <div style={{
+                                backgroundColor: '#0f172a', borderRadius: '8px', padding: '10px 14px',
+                                fontSize: '13px', color: '#94a3b8', fontStyle: 'italic',
+                                borderLeft: '3px solid #334155', marginBottom: req.rejectionReason ? '10px' : 0,
+                              }}>
+                                <MessageSquare size={12} style={{ verticalAlign: 'middle', marginRight: '6px', color: '#475569' }} />
+                                "{req.message}"
+                              </div>
+                            )}
+
+                            {/* Rejection reason */}
+                            {req.status === 'rejected' && req.rejectionReason && (
+                              <div style={{
+                                backgroundColor: '#ef444411', borderRadius: '8px', padding: '10px 14px',
+                                fontSize: '13px', color: '#ef4444', borderLeft: '3px solid #ef4444',
+                                display: 'flex', alignItems: 'flex-start', gap: '8px',
+                              }}>
+                                <XCircle size={14} style={{ flexShrink: 0, marginTop: '1px' }} />
+                                <div>
+                                  <div style={{ fontWeight: '600', marginBottom: '2px' }}>Reden voor afwijzing:</div>
+                                  {req.rejectionReason}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Resolved date */}
+                            {req.resolvedAt?.seconds && req.status !== 'pending' && (
+                              <div style={{ fontSize: '11px', color: '#475569', marginTop: '8px' }}>
+                                Behandeld op {new Date(req.resolvedAt.seconds * 1000).toLocaleDateString('nl-BE', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Action buttons */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0 }}>
+                            {req.status === 'pending' && (
+                              <>
+                                <button
+                                  onClick={() => handleApproveRequest(req.id)}
+                                  style={{
+                                    display: 'flex', alignItems: 'center', gap: '6px',
+                                    padding: '8px 16px', backgroundColor: '#22c55e', border: 'none',
+                                    borderRadius: '8px', color: 'white', fontWeight: '600', fontSize: '13px', cursor: 'pointer',
+                                  }}
+                                >
+                                  <Check size={15} /> Goedkeuren
+                                </button>
+                                <button
+                                  onClick={() => openRejectModal(req.id)}
+                                  style={{
+                                    display: 'flex', alignItems: 'center', gap: '6px',
+                                    padding: '8px 16px', backgroundColor: '#ef4444', border: 'none',
+                                    borderRadius: '8px', color: 'white', fontWeight: '600', fontSize: '13px', cursor: 'pointer',
+                                  }}
+                                >
+                                  <X size={15} /> Afwijzen
+                                </button>
+                              </>
+                            )}
+                            <button
+                              onClick={() => handleDeleteRequest(req.id)}
+                              title="Aanvraag verwijderen"
+                              style={{
+                                background: 'none', border: '1px solid #334155', color: '#64748b',
+                                padding: '7px', borderRadius: '8px', cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              }}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Hint for approved: add to group manually */}
+                        {req.status === 'approved' && (
+                          <div style={{
+                            marginTop: '14px', backgroundColor: '#22c55e11', border: '1px solid #22c55e33',
+                            borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: '#22c55e',
+                            display: 'flex', alignItems: 'center', gap: '8px',
+                          }}>
+                            <CheckCircle2 size={14} />
+                            Aanvraag goedgekeurd. Voeg {req.firstName} toe aan een groep via het tabblad <strong style={{ textDecoration: 'underline', cursor: 'pointer' }} onClick={() => setActiveTab('clubs')}>Clubs & Groepen</strong>.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
       </main>
 
-      {/* MODALS */}
+      {/* ════ REJECT MODAL ════ */}
+      {rejectModalOpen && (
+        <div style={styles.modalOverlay}>
+          <div style={{ ...styles.modalContent, borderColor: '#ef444444', maxWidth: '440px' }}>
+            <div style={styles.modalHeader}>
+              <h2 style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <XCircle size={22} /> Aanvraag afwijzen
+              </h2>
+              <button onClick={() => setRejectModalOpen(false)} style={styles.closeBtn}><X /></button>
+            </div>
+
+            <p style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '20px', lineHeight: 1.6 }}>
+              Geef een duidelijke reden op voor de afwijzing. De gebruiker zal deze reden zien in zijn/haar dashboard.
+            </p>
+
+            <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '8px', fontWeight: '600' }}>
+              Reden voor afwijzing <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            <textarea
+              autoFocus
+              style={{
+                width: '100%', minHeight: '100px', padding: '12px',
+                borderRadius: '8px', border: '1px solid #334155',
+                backgroundColor: '#0f172a', color: 'white', fontSize: '14px',
+                resize: 'vertical', lineHeight: 1.5, boxSizing: 'border-box',
+              }}
+              placeholder="bijv. De club accepteert momenteel geen nieuwe leden, of: leeftijdsgrens niet bereikt, …"
+              value={rejectReason}
+              onChange={e => { setRejectReason(e.target.value); setRejectError(''); }}
+            />
+
+            {rejectError && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                backgroundColor: '#ef444422', color: '#ef4444',
+                fontSize: '13px', padding: '10px 14px', borderRadius: '8px',
+                marginTop: '10px', border: '1px solid #ef444433',
+              }}>
+                <AlertCircle size={14} /> {rejectError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+              <button
+                onClick={handleConfirmReject}
+                disabled={rejectSaving}
+                style={{
+                  flex: 1, padding: '12px', backgroundColor: '#ef4444', border: 'none',
+                  borderRadius: '8px', color: 'white', fontWeight: '700', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                  opacity: rejectSaving ? 0.6 : 1,
+                }}
+              >
+                {rejectSaving ? 'Opslaan…' : <><XCircle size={16} /> Afwijzen bevestigen</>}
+              </button>
+              <button
+                onClick={() => setRejectModalOpen(false)}
+                style={{
+                  flex: 1, padding: '12px', backgroundColor: '#475569', border: 'none',
+                  borderRadius: '8px', color: 'white', fontWeight: '600', cursor: 'pointer',
+                }}
+              >
+                Annuleren
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ════ USER MODAL ════ */}
       {isUserModalOpen && (
         <div style={styles.modalOverlay}><div style={styles.modalContent}>
-          <div style={styles.modalHeader}><h2>Gebruiker {editingId ? 'Bewerken' : 'Nieuw'}</h2><button onClick={()=>setIsUserModalOpen(false)} style={styles.closeBtn}><X/></button></div>
+          <div style={styles.modalHeader}><h2>Gebruiker {editingId ? 'Bewerken' : 'Nieuw'}</h2><button onClick={() => setIsUserModalOpen(false)} style={styles.closeBtn}><X /></button></div>
           <form onSubmit={handleUserSubmit} style={styles.form}>
-            <input placeholder="Voornaam" required style={styles.input} value={userForm.firstName} onChange={e => setUserForm({...userForm, firstName: e.target.value})} />
-            <input placeholder="Achternaam" required style={styles.input} value={userForm.lastName} onChange={e => setUserForm({...userForm, lastName: e.target.value})} />
-            <input placeholder="Email" required style={styles.input} value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} />
-            <select style={styles.input} value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value})}>
+            <input placeholder="Voornaam" required style={styles.input} value={userForm.firstName} onChange={e => setUserForm({ ...userForm, firstName: e.target.value })} />
+            <input placeholder="Achternaam" required style={styles.input} value={userForm.lastName} onChange={e => setUserForm({ ...userForm, lastName: e.target.value })} />
+            <input placeholder="Email" required style={styles.input} value={userForm.email} onChange={e => setUserForm({ ...userForm, email: e.target.value })} />
+            <select style={styles.input} value={userForm.role} onChange={e => setUserForm({ ...userForm, role: e.target.value })}>
               <option value="user">User</option><option value="clubadmin">ClubAdmin</option><option value="superadmin">SuperAdmin</option>
             </select>
-            <button type="submit" style={styles.submitBtn}><Save size={18}/> Opslaan</button>
+            <button type="submit" style={styles.submitBtn}><Save size={18} /> Opslaan</button>
           </form>
         </div></div>
       )}
 
+      {/* ════ CLUB MODAL ════ */}
       {isClubModalOpen && (
         <div style={styles.modalOverlay}><div style={styles.modalContent}>
-          <div style={styles.modalHeader}><h2>Club {editingId ? 'Bewerken' : 'Toevoegen'}</h2><button onClick={()=>setIsClubModalOpen(false)} style={styles.closeBtn}><X/></button></div>
+          <div style={styles.modalHeader}><h2>Club {editingId ? 'Bewerken' : 'Toevoegen'}</h2><button onClick={() => setIsClubModalOpen(false)} style={styles.closeBtn}><X /></button></div>
           <form onSubmit={handleClubSubmit} style={styles.form}>
-            <input placeholder="Club Naam" required style={styles.input} value={clubForm.name} onChange={e => setClubForm({...clubForm, name: e.target.value})} />
-            <input placeholder="Logo URL" style={styles.input} value={clubForm.logoUrl} onChange={e => setClubForm({...clubForm, logoUrl: e.target.value})} />
-            <button type="submit" style={styles.submitBtn}><Save size={18}/> Club Opslaan</button>
+            <input placeholder="Club Naam" required style={styles.input} value={clubForm.name} onChange={e => setClubForm({ ...clubForm, name: e.target.value })} />
+            <input placeholder="Logo URL" style={styles.input} value={clubForm.logoUrl} onChange={e => setClubForm({ ...clubForm, logoUrl: e.target.value })} />
+            <button type="submit" style={styles.submitBtn}><Save size={18} /> Club Opslaan</button>
           </form>
         </div></div>
       )}
 
+      {/* ════ GROUP MODAL ════ */}
       {isGroupModalOpen && (
         <div style={styles.modalOverlay}><div style={styles.modalContent}>
-          <div style={styles.modalHeader}><h2>Groep {editingId ? 'Bewerken' : 'Toevoegen'}</h2><button onClick={()=>setIsGroupModalOpen(false)} style={styles.closeBtn}><X/></button></div>
+          <div style={styles.modalHeader}><h2>Groep {editingId ? 'Bewerken' : 'Toevoegen'}</h2><button onClick={() => setIsGroupModalOpen(false)} style={styles.closeBtn}><X /></button></div>
           <form onSubmit={handleGroupSubmit} style={styles.form}>
-            <input placeholder="Groep Naam" required style={styles.input} value={groupForm.name} onChange={e => setGroupForm({...groupForm, name: e.target.value})} />
-            <label style={{color: '#94a3b8', fontSize: '12px', marginBottom: '-10px'}}>Gebruik Hartslagmeters?</label>
-            <div style={styles.switchContainer} onClick={() => setGroupForm({...groupForm, useHRM: !groupForm.useHRM})}>
-              <div style={{...styles.switchHalf, backgroundColor: groupForm.useHRM ? '#059669' : '#334155', color: 'white'}}>AAN</div>
-              <div style={{...styles.switchHalf, backgroundColor: !groupForm.useHRM ? '#ef4444' : '#334155', color: 'white'}}>UIT</div>
+            <input placeholder="Groep Naam" required style={styles.input} value={groupForm.name} onChange={e => setGroupForm({ ...groupForm, name: e.target.value })} />
+            <label style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '-10px' }}>Gebruik Hartslagmeters?</label>
+            <div style={styles.switchContainer} onClick={() => setGroupForm({ ...groupForm, useHRM: !groupForm.useHRM })}>
+              <div style={{ ...styles.switchHalf, backgroundColor: groupForm.useHRM ? '#059669' : '#334155', color: 'white' }}>AAN</div>
+              <div style={{ ...styles.switchHalf, backgroundColor: !groupForm.useHRM ? '#ef4444' : '#334155', color: 'white' }}>UIT</div>
             </div>
-            <button type="submit" style={styles.submitBtn}><Save size={18}/> Groep Opslaan</button>
+            <button type="submit" style={styles.submitBtn}><Save size={18} /> Groep Opslaan</button>
           </form>
         </div></div>
       )}
 
+      <style>{`
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
     </div>
   );
 }
 
 const getRoleColor = (role) => {
-  switch(role) {
+  switch (role) {
     case 'superadmin': return '#ef4444';
     case 'clubadmin': return '#f59e0b';
     default: return '#3b82f6';
@@ -391,8 +773,8 @@ const styles = {
   header: { padding: '20px 40px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   title: { fontSize: '20px', display: 'flex', alignItems: 'center', gap: '12px', margin: 0 },
   tabBar: { display: 'flex', gap: '10px' },
-  tab: { padding: '8px 16px', borderRadius: '6px', border: 'none', backgroundColor: 'transparent', color: '#94a3b8', cursor: 'pointer' },
-  activeTab: { padding: '8px 16px', borderRadius: '6px', border: 'none', backgroundColor: '#3b82f6', color: 'white', fontWeight: 'bold' },
+  tab: { padding: '8px 16px', borderRadius: '6px', border: 'none', backgroundColor: 'transparent', color: '#94a3b8', cursor: 'pointer', position: 'relative' },
+  activeTab: { padding: '8px 16px', borderRadius: '6px', border: 'none', backgroundColor: '#3b82f6', color: 'white', fontWeight: 'bold', position: 'relative' },
   content: { padding: '30px 40px' },
   actionBar: { display: 'flex', justifyContent: 'space-between', marginBottom: '20px', gap: '20px' },
   searchWrapper: { position: 'relative', width: '400px' },
@@ -425,7 +807,6 @@ const styles = {
   hrmBadge: { fontSize: '10px', padding: '4px 8px', borderRadius: '4px', color: 'white', display: 'flex', alignItems: 'center', gap: '4px' },
   switchContainer: { display: 'flex', borderRadius: '8px', overflow: 'hidden', border: '1px solid #334155', cursor: 'pointer', marginTop: '5px' },
   switchHalf: { flex: 1, padding: '10px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold' },
-
   memberLayout: { display: 'grid', gridTemplateColumns: '1fr 300px', gap: '30px' },
   memberListPanel: { backgroundColor: '#1e293b', padding: '25px', borderRadius: '12px', border: '1px solid #334155' },
   memberGridDisplay: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' },
@@ -433,7 +814,7 @@ const styles = {
   memberCardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
   memberName: { fontWeight: 'bold', fontSize: '15px' },
   memberEmail: { fontSize: '12px', color: '#64748b' },
-  deleteMemberBtn: { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px', transition: 'color 0.2s' },
+  deleteMemberBtn: { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' },
   memberRoles: { display: 'flex', gap: '8px' },
   roleToggle: { flex: 1, padding: '6px', borderRadius: '6px', border: 'none', color: 'white', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' },
   memberDates: { backgroundColor: '#1e293b', borderRadius: '8px', padding: '10px', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '5px' },
@@ -442,17 +823,15 @@ const styles = {
   memberCardFooter: { marginTop: '5px' },
   editMemberBtn: { width: '100%', background: 'none', border: '1px solid #334155', color: '#94a3b8', padding: '6px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px' },
   saveMemberBtn: { width: '100%', backgroundColor: '#22c55e', border: 'none', color: 'white', padding: '6px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' },
-
   userPickerPanel: { backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', border: '1px solid #334155', height: 'fit-content' },
   miniInput: { width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', marginBottom: '15px' },
   pickerScroll: { maxHeight: '500px', overflowY: 'auto' },
   pickerRow: { padding: '12px', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' },
-
   modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
   modalContent: { backgroundColor: '#1e293b', width: '400px', padding: '30px', borderRadius: '16px', border: '1px solid #334155' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
   form: { display: 'flex', flexDirection: 'column', gap: '15px' },
   input: { width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white' },
   submitBtn: { width: '100%', padding: '12px', backgroundColor: '#22c55e', border: 'none', borderRadius: '8px', color: 'white', fontWeight: 'bold', cursor: 'pointer' },
-  closeBtn: { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }
+  closeBtn: { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' },
 };
