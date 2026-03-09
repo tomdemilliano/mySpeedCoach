@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import {
   Heart, Hash, Zap, Timer, Users, CheckCircle2, Trophy,
-  Settings, Building2, ChevronRight, Ghost, ArrowLeft
+  Settings, Building2, ChevronRight, Ghost, ArrowLeft, Target
 } from 'lucide-react';
 
 import { UserFactory, LiveSessionFactory, ClubFactory, GroupFactory } from '../constants/dbSchema';
@@ -73,19 +73,27 @@ const buildGhostCurve = (recordTelemetry) => {
 };
 
 /**
- * Calculate expected final score based on current pace over remaining time.
+ * Calculate expected final score.
+ * - While active: currentSteps + (remainingSeconds × stepsPerSecond)
+ * - When finished or not started: return currentSteps as-is
+ * Uses the RTDB telemetry array directly for the most accurate rolling tempo.
  */
-const calcExpected = (session, history) => {
-  if (!session?.isActive) return session?.steps || 0;
-  if (session.isFinished) return session.steps || 0;
+const calcExpected = (session) => {
+  const steps = session?.steps || 0;
+  if (!session?.isActive || session?.isFinished) return steps;
+  if (!session.startTime) return steps;
+
   const duration = DISCIPLINE_DURATION[session.discipline] || 30;
-  const elapsed = (Date.now() - session.startTime) / 1000;
-  const remaining = Math.max(0, duration - elapsed);
-  const tempo = history.length > 1
-    ? computeRollingTempo(history.map((h, i) => ({ time: i * 1000, heartRate: h.bpm, steps: h.steps })))
-    : 0;
-  const stepsPerSec = tempo / 30; // tempo is steps/30sec
-  return Math.round((session.steps || 0) + remaining * stepsPerSec);
+  const elapsedSec = (Date.now() - session.startTime) / 1000;
+  const remaining = Math.max(0, duration - elapsedSec);
+
+  // Get tempo directly from RTDB telemetry
+  const telemetry = normaliseTelemetry(session.telemetry);
+  const tempo = computeRollingTempo(telemetry); // steps / 30 sec
+  if (tempo === 0) return steps; // can't project without pace data
+
+  const stepsPerSec = tempo / 30;
+  return Math.round(steps + remaining * stepsPerSec);
 };
 
 // ─── Custom Tooltip ───────────────────────────────────────────────────────────
@@ -117,10 +125,10 @@ function SkipperCard({ uid, user, liveData, history, personalBest, ghostCurve, s
   const pb = personalBest;
   const ghostVisible = showGhost && ghostCurve && Object.keys(ghostCurve).length > 0;
   const chartData = buildChartData(uid);
-  const expectedScore = calcExpected(session, hist);
   const ghostAtNow = ghostVisible ? (ghostCurve[latestPoint.elapsed] || null) : null;
   const stepDiff = ghostAtNow ? (session.steps || 0) - (ghostAtNow.ghostSteps || 0) : null;
   const disciplineDuration = DISCIPLINE_DURATION[session.discipline] || 30;
+  const expectedScore = calcExpected(session);
 
   // ── Timer: counts only while isActive, freezes on finish ──
   const [timerDisplay, setTimerDisplay] = useState('0:00');
@@ -207,10 +215,10 @@ function SkipperCard({ uid, user, liveData, history, personalBest, ghostCurve, s
             <div style={{ fontSize: '9px', color: '#475569' }}>stps/30s</div>
           </div>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingLeft: '6px' }}>
-            <div style={css.statLabel}><Trophy size={11} color="#facc15" /> Verwacht</div>
-            <div style={{ ...css.statValue, color: '#facc15', fontSize: '20px' }}>{expectedScore}</div>
-            <div style={{ fontSize: '9px', fontWeight: '600', color: pb ? (expectedScore > pb.score ? '#22c55e' : expectedScore < pb.score ? '#ef4444' : '#475569') : '#475569' }}>
-              {pb ? (expectedScore > pb.score ? `+${expectedScore - pb.score} 🔥` : expectedScore < pb.score ? `${expectedScore - pb.score}` : '= PB') : 'stappen'}
+            <div style={css.statLabel}><Target size={11} color="#22c55e" /> Verwacht</div>
+            <div style={{ ...css.statValue, color: '#34d399', fontSize: '20px' }}>{session.isActive ? expectedScore : '--'}</div>
+            <div style={{ fontSize: '9px', fontWeight: '600', color: pb && session.isActive ? (expectedScore > pb.score ? '#22c55e' : expectedScore < pb.score ? '#ef4444' : '#475569') : '#475569' }}>
+              {pb && session.isActive ? (expectedScore > pb.score ? `+${expectedScore - pb.score} 🔥` : expectedScore < pb.score ? `${expectedScore - pb.score}` : '= PB') : 'stappen'}
             </div>
           </div>
         </div>
@@ -411,6 +419,9 @@ export default function Dashboard() {
   }, [liveSessions, selectedSkipperIds, loadPersonalBest]);
 
   // ── Build history tick every second
+  // Track last-known startTime per uid so we can reset history on new session
+  const sessionStartRef = useRef({}); // uid → last known startTime
+
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
@@ -420,6 +431,13 @@ export default function Dashboard() {
           const liveData = liveRef.current[uid] || {};
           const session = liveData.session;
           if (!session?.isActive && !session?.isFinished) return;
+
+          // ── Reset history when a new session starts (startTime changed) ──
+          const lastStartTime = sessionStartRef.current[uid];
+          if (session.startTime && session.startTime !== lastStartTime) {
+            sessionStartRef.current[uid] = session.startTime;
+            next[uid] = []; // clear old session data
+          }
 
           // Elapsed seconds from session start
           const elapsed = session.startTime
@@ -431,15 +449,14 @@ export default function Dashboard() {
           const tempo = computeRollingTempo(rtdbTelemetry);
 
           const point = {
-            elapsed,                         // x-axis: seconds from start
+            elapsed,
             bpm: liveData.bpm || 0,
             steps: session.steps || 0,
             tempo,
-            label: elapsed + 's',
           };
 
           if (!next[uid]) next[uid] = [];
-          // Avoid duplicate elapsed entries
+          // Update existing entry for this elapsed second, or append
           const last = next[uid][next[uid].length - 1];
           if (last && last.elapsed === elapsed) {
             next[uid][next[uid].length - 1] = point;
