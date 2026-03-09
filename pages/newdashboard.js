@@ -28,9 +28,8 @@ const getZoneColor = (bpm, zones) => {
 };
 
 /**
- * Compute a rolling tempo (steps/min) from the RTDB telemetry array.
- * We look at the last N steps and compute steps-per-second over that window.
- * Falls back to the last known value if no recent activity.
+ * Compute a rolling tempo in steps per 30 seconds (rope-skipping convention).
+ * Uses a 5-second sliding window over RTDB telemetry for responsiveness.
  */
 const computeRollingTempo = (telemetry, windowMs = 5000) => {
   if (!telemetry || telemetry.length < 2) return 0;
@@ -38,16 +37,12 @@ const computeRollingTempo = (telemetry, windowMs = 5000) => {
   const sorted = [...arr].sort((a, b) => a.time - b.time);
   const now = sorted[sorted.length - 1].time;
   const cutoff = now - windowMs;
-  const window = sorted.filter(p => p.time >= cutoff);
-  if (window.length < 2) {
-    // Use full array but cap at last 10 points
-    const tail = sorted.slice(-10);
-    if (tail.length < 2) return 0;
-    const dt = (tail[tail.length - 1].time - tail[0].time) / 1000;
-    return dt > 0 ? Math.round(((tail.length - 1) / dt) * 60) : 0;
-  }
-  const dt = (window[window.length - 1].time - window[0].time) / 1000;
-  return dt > 0 ? Math.round(((window.length - 1) / dt) * 60) : 0;
+  const win = sorted.filter(p => p.time >= cutoff);
+  const sample = win.length >= 2 ? win : sorted.slice(-10);
+  if (sample.length < 2) return 0;
+  const dt = (sample[sample.length - 1].time - sample[0].time) / 1000; // seconds
+  // steps/sec → steps/30sec
+  return dt > 0 ? Math.round(((sample.length - 1) / dt) * 30) : 0;
 };
 
 /**
@@ -89,7 +84,7 @@ const calcExpected = (session, history) => {
   const tempo = history.length > 1
     ? computeRollingTempo(history.map((h, i) => ({ time: i * 1000, heartRate: h.bpm, steps: h.steps })))
     : 0;
-  const stepsPerSec = tempo / 60;
+  const stepsPerSec = tempo / 30; // tempo is steps/30sec
   return Math.round((session.steps || 0) + remaining * stepsPerSec);
 };
 
@@ -98,9 +93,9 @@ const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
     <div style={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', padding: '10px 14px', fontSize: '12px' }}>
-      <div style={{ color: '#64748b', marginBottom: '6px' }}>{label}</div>
+      <div style={{ color: '#64748b', marginBottom: '6px' }}>{label}s</div>
       {payload.map((p, i) => (
-        <div key={i} style={{ color: p.color, display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '2px' }}>
           <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: p.color, display: 'inline-block', flexShrink: 0 }} />
           <span style={{ color: '#94a3b8' }}>{p.name}:</span>
           <strong style={{ color: 'white' }}>{typeof p.value === 'number' ? Math.round(p.value) : p.value}</strong>
@@ -109,6 +104,218 @@ const CustomTooltip = ({ active, payload, label }) => {
     </div>
   );
 };
+
+// ─── Skipper Card (own component so hooks are valid) ─────────────────────────
+function SkipperCard({ uid, user, liveData, history, personalBest, ghostCurve, showGhost, onToggleGhost, buildChartData }) {
+  const session = liveData?.session || {};
+  const currentBpm = liveData?.bpm || 0;
+  const zones = user?.heartrateZones || DEFAULT_ZONES;
+  const bpmColor = getZoneColor(currentBpm, zones);
+  const hist = history || [];
+  const latestPoint = hist[hist.length - 1] || {};
+  const currentTempo = latestPoint.tempo || 0;
+  const pb = personalBest;
+  const ghostVisible = showGhost && ghostCurve && Object.keys(ghostCurve).length > 0;
+  const chartData = buildChartData(uid);
+  const expectedScore = calcExpected(session, hist);
+  const ghostAtNow = ghostVisible ? (ghostCurve[latestPoint.elapsed] || null) : null;
+  const stepDiff = ghostAtNow ? (session.steps || 0) - (ghostAtNow.ghostSteps || 0) : null;
+  const disciplineDuration = DISCIPLINE_DURATION[session.discipline] || 30;
+
+  // ── Timer: counts only while isActive, freezes on finish ──
+  const [timerDisplay, setTimerDisplay] = useState('0:00');
+  const timerRef = useRef(null);
+  useEffect(() => {
+    clearInterval(timerRef.current);
+    if (session.isActive && session.startTime) {
+      const tick = () => {
+        const elapsed = Math.floor((Date.now() - session.startTime) / 1000);
+        const remaining = disciplineDuration - elapsed;
+        const abs = Math.abs(remaining);
+        const m = Math.floor(abs / 60);
+        const s = abs % 60;
+        setTimerDisplay(`${remaining < 0 ? '+' : ''}${m}:${s.toString().padStart(2, '0')}`);
+      };
+      tick();
+      timerRef.current = setInterval(tick, 200);
+    } else if (session.isFinished && session.startTime && session.lastStepTime) {
+      const elapsed = Math.floor((session.lastStepTime - session.startTime) / 1000);
+      const remaining = disciplineDuration - elapsed;
+      const abs = Math.abs(remaining);
+      const m = Math.floor(abs / 60);
+      const s = abs % 60;
+      setTimerDisplay(`${remaining < 0 ? '+' : ''}${m}:${s.toString().padStart(2, '0')}`);
+    } else {
+      setTimerDisplay('0:00');
+    }
+    return () => clearInterval(timerRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.isActive, session.isFinished, session.startTime, session.lastStepTime, session.discipline]);
+
+  return (
+    <div style={css.card}>
+      {/* Header: avatar + name + discipline + PB | timer + status */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ ...css.avatar, width: '40px', height: '40px', fontSize: '14px', backgroundColor: bpmColor + '33', border: `1px solid ${bpmColor}66` }}>
+            {(user?.firstName?.[0] || '?')}{user?.lastName?.[0] || ''}
+          </div>
+          <div>
+            <div style={{ fontWeight: '800', fontSize: '18px' }}>{user?.firstName} {user?.lastName}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '11px', color: '#facc15', fontWeight: '600' }}>
+                {session.discipline || '---'} · {session.sessionType || 'Training'}
+              </span>
+              {pb && (
+                <span style={{ fontSize: '11px', color: '#a78bfa', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                  <Trophy size={10} color="#a78bfa" /> PB {pb.score} stps
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#60a5fa', fontWeight: '700', fontSize: '18px', fontFamily: 'monospace' }}>
+            <Timer size={14} color="#60a5fa" /> {timerDisplay}
+          </div>
+          <div style={{ fontSize: '10px', marginTop: '2px', fontWeight: '700', color: session.isActive ? '#22c55e' : session.isFinished ? '#60a5fa' : '#475569' }}>
+            {session.isActive ? '● LIVE' : session.isFinished ? '✓ KLAAR' : '○ WACHT'}
+          </div>
+        </div>
+      </div>
+
+      {/* Stats: BPM | Steps | Tempo + Verwacht */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.6fr', gap: '8px', marginBottom: '12px' }}>
+        <div style={css.statBox}>
+          <div style={css.statLabel}><Heart size={11} fill={bpmColor} color={bpmColor} /> Hartslag</div>
+          <div style={{ ...css.statValue, color: bpmColor }}>{currentBpm || '--'}</div>
+          <div style={{ fontSize: '9px', color: '#475569' }}>BPM</div>
+        </div>
+
+        <div style={css.statBox}>
+          <div style={css.statLabel}><Hash size={11} /> Stappen</div>
+          <div style={{ ...css.statValue, color: '#60a5fa' }}>{session.steps || 0}</div>
+          <div style={{ fontSize: '9px', fontWeight: stepDiff !== null ? '700' : '400', color: stepDiff !== null ? (stepDiff >= 0 ? '#22c55e' : '#ef4444') : '#475569' }}>
+            {stepDiff !== null ? `${stepDiff >= 0 ? '+' : ''}${stepDiff} vs ghost` : 'totaal'}
+          </div>
+        </div>
+
+        <div style={{ ...css.statBox, flexDirection: 'row', padding: '8px', alignItems: 'stretch' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid #1e293b', paddingRight: '6px' }}>
+            <div style={css.statLabel}><Zap size={11} color="#22c55e" /> Tempo</div>
+            <div style={{ ...css.statValue, color: '#22c55e', fontSize: '20px' }}>{currentTempo || '--'}</div>
+            <div style={{ fontSize: '9px', color: '#475569' }}>stps/30s</div>
+          </div>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingLeft: '6px' }}>
+            <div style={css.statLabel}><Trophy size={11} color="#facc15" /> Verwacht</div>
+            <div style={{ ...css.statValue, color: '#facc15', fontSize: '20px' }}>{expectedScore}</div>
+            <div style={{ fontSize: '9px', fontWeight: '600', color: pb ? (expectedScore > pb.score ? '#22c55e' : expectedScore < pb.score ? '#ef4444' : '#475569') : '#475569' }}>
+              {pb ? (expectedScore > pb.score ? `+${expectedScore - pb.score} 🔥` : expectedScore < pb.score ? `${expectedScore - pb.score}` : '= PB') : 'stappen'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Ghost toggle */}
+      {pb?.telemetry && Object.keys(ghostCurve || {}).length > 1 && (
+        <button
+          style={{
+            ...css.ghostToggle,
+            backgroundColor: ghostVisible ? '#7c3aed22' : '#0f172a',
+            borderColor: ghostVisible ? '#7c3aed' : '#334155',
+            color: ghostVisible ? '#a78bfa' : '#475569',
+          }}
+          onClick={onToggleGhost}
+        >
+          <Ghost size={13} />
+          {ghostVisible ? 'Ghost actief' : 'Ghost tonen'}
+          {ghostVisible && pb && <span style={{ fontSize: '10px', color: '#64748b', marginLeft: '4px' }}>({pb.score} stps record)</span>}
+        </button>
+      )}
+
+      {/* Chart */}
+      <div style={{ height: '260px', marginTop: '10px', backgroundColor: '#0f172a', borderRadius: '12px', padding: '10px 10px 6px' }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+            <CartesianGrid stroke="#1e293b" vertical={true} strokeDasharray="3 3" />
+            <XAxis
+              dataKey="elapsed"
+              stroke="#334155"
+              fontSize={9}
+              type="number"
+              domain={[0, disciplineDuration]}
+              tickCount={disciplineDuration <= 30 ? 7 : disciplineDuration <= 120 ? 9 : 10}
+              tickFormatter={v => `${v}s`}
+              allowDataOverflow
+            />
+            {/* Left Y: BPM */}
+            <YAxis yAxisId="bpm" domain={[40, 210]} stroke="#475569" fontSize={9} tickCount={5} width={28} />
+            {/* Right Y: Steps */}
+            <YAxis
+              yAxisId="steps"
+              orientation="right"
+              domain={[0, pb ? Math.max(pb.score + 10, (session.steps || 0) + 10) : 'auto']}
+              stroke="#334155"
+              fontSize={9}
+              tickCount={5}
+              width={30}
+            />
+            <Tooltip content={<CustomTooltip />} />
+
+            {/* HR zone bands */}
+            {zones.map(zone => (
+              <ReferenceArea key={zone.name} yAxisId="bpm" y1={zone.min} y2={Math.min(zone.max, 210)} fill={zone.color} fillOpacity={0.04} stroke="none" />
+            ))}
+
+            {/* Ghost steps (behind live) */}
+            {ghostVisible && (
+              <Line yAxisId="steps" type="monotone" dataKey="ghostSteps" name="Ghost Stappen"
+                stroke="#7c3aed" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls strokeDasharray="5 3" strokeOpacity={0.75} />
+            )}
+
+            {/* Live steps */}
+            <Line yAxisId="steps" type="monotone" dataKey="steps" name="Stappen"
+              stroke="#60a5fa" strokeWidth={2.5} dot={false} isAnimationActive={false} connectNulls />
+
+            {/* Ghost BPM */}
+            {ghostVisible && (
+              <Line yAxisId="bpm" type="monotone" dataKey="ghostBpm" name="Ghost BPM"
+                stroke="#a78bfa" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls strokeDasharray="6 3" strokeOpacity={0.65} />
+            )}
+
+            {/* Live BPM */}
+            <Line yAxisId="bpm" type="monotone" dataKey="bpm" name="Hartslag"
+              stroke={bpmColor} strokeWidth={2.5} dot={false} isAnimationActive={false} connectNulls />
+
+            {/* Tempo (steps/30s) on steps axis for scale context */}
+            <Line yAxisId="steps" type="monotone" dataKey="tempo" name="Tempo/30s"
+              stroke="#22c55e" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls strokeDasharray="3 3" strokeOpacity={0.7} />
+          </LineChart>
+        </ResponsiveContainer>
+
+        {/* Legend */}
+        <div style={{ display: 'flex', gap: '10px', marginTop: '4px', flexWrap: 'wrap', paddingLeft: '2px' }}>
+          {[
+            { color: bpmColor,  label: 'BPM',           dash: false },
+            { color: '#60a5fa', label: 'Stappen',        dash: false },
+            { color: '#22c55e', label: 'Tempo/30s',      dash: true  },
+            ...(ghostVisible ? [
+              { color: '#a78bfa', label: 'Ghost BPM',     dash: true },
+              { color: '#7c3aed', label: 'Ghost Stappen', dash: true },
+            ] : []),
+          ].map(item => (
+            <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: '#64748b' }}>
+              <svg width="18" height="6">
+                <line x1="0" y1="3" x2="18" y2="3" stroke={item.color} strokeWidth="2" strokeDasharray={item.dash ? '4 2' : 'none'} />
+              </svg>
+              {item.label}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN DASHBOARD
@@ -264,7 +471,6 @@ export default function Dashboard() {
 
   // ── Skipper helpers
   const getUser = (uid) => allUsers.find(u => u.id === uid) || {};
-  const getZones = (uid) => getUser(uid)?.heartrateZones || DEFAULT_ZONES;
 
   // ── Skippers available in the selected group (only skippers)
   const availableSkippers = groupMembers
@@ -422,254 +628,20 @@ export default function Dashboard() {
 
       {/* Skipper cards */}
       <div style={css.monitorGrid}>
-        {selectedSkipperIds.map(uid => {
-          const user = getUser(uid);
-          const liveData = liveSessions[uid] || {};
-          const session = liveData.session || {};
-          const currentBpm = liveData.bpm || 0;
-          const zones = getZones(uid);
-          const bpmColor = getZoneColor(currentBpm, zones);
-          const hist = history[uid] || [];
-          const latestPoint = hist[hist.length - 1] || {};
-          const currentTempo = latestPoint.tempo || 0;
-          const pb = personalBests[uid];
-          const ghostVisible = showGhost[uid] && ghostCurves[uid] && Object.keys(ghostCurves[uid]).length > 0;
-          const chartData = buildChartData(uid);
-          const expectedScore = calcExpected(session, hist);
-
-          // Ghost steps at current elapsed (for "behind/ahead" indicator)
-          const ghostAtNow = ghostVisible && ghostCurves[uid][latestPoint.elapsed];
-          const stepDiff = ghostAtNow ? (session.steps || 0) - (ghostAtNow.ghostSteps || 0) : null;
-
-          // Timer display
-          const getTimer = () => {
-            if (!session.startTime) return '0:00';
-            const duration = DISCIPLINE_DURATION[session.discipline] || 30;
-            const elapsed = Math.floor((Date.now() - session.startTime) / 1000);
-            const remaining = duration - elapsed;
-            const abs = Math.abs(remaining);
-            const m = Math.floor(abs / 60);
-            const s = abs % 60;
-            return `${remaining < 0 ? '+' : ''}${m}:${s.toString().padStart(2, '0')}`;
-          };
-
-          return (
-            <div key={uid} style={css.card}>
-              {/* Card header: name + status + timer */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ ...css.avatar, width: '40px', height: '40px', fontSize: '14px', backgroundColor: bpmColor + '33', border: `1px solid ${bpmColor}66` }}>
-                      {(user.firstName?.[0] || '?')}{user.lastName?.[0] || ''}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: '800', fontSize: '18px' }}>{user.firstName} {user.lastName}</div>
-                      <div style={{ fontSize: '11px', color: '#facc15', fontWeight: '600' }}>
-                        {session.discipline || '---'} · {session.sessionType || 'Training'}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#60a5fa', fontWeight: '700', fontSize: '16px' }}>
-                    <Timer size={15} /> {getTimer()}
-                  </div>
-                  <div style={{ fontSize: '10px', marginTop: '2px', color: session.isActive ? '#22c55e' : session.isFinished ? '#60a5fa' : '#475569', fontWeight: '700' }}>
-                    {session.isActive ? '● LIVE' : session.isFinished ? '✓ KLAAR' : '○ WACHT'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Stats row */}
-              <div style={css.statsGrid}>
-                {/* BPM */}
-                <div style={css.statBox}>
-                  <div style={css.statLabel}><Heart size={11} fill={bpmColor} color={bpmColor} /> Hartslag</div>
-                  <div style={{ ...css.statValue, color: bpmColor }}>{currentBpm || '--'}</div>
-                  <div style={{ fontSize: '9px', color: '#475569' }}>BPM</div>
-                </div>
-
-                {/* Steps */}
-                <div style={css.statBox}>
-                  <div style={css.statLabel}><Hash size={11} /> Stappen</div>
-                  <div style={{ ...css.statValue, color: '#60a5fa' }}>{session.steps || 0}</div>
-                  <div style={{ fontSize: '9px', color: '#475569' }}>
-                    {stepDiff !== null ? (
-                      <span style={{ color: stepDiff >= 0 ? '#22c55e' : '#ef4444', fontWeight: '700' }}>
-                        {stepDiff >= 0 ? '+' : ''}{stepDiff} vs ghost
-                      </span>
-                    ) : 'totaal'}
-                  </div>
-                </div>
-
-                {/* Tempo */}
-                <div style={css.statBox}>
-                  <div style={css.statLabel}><Zap size={11} /> Tempo</div>
-                  <div style={{ ...css.statValue, color: '#22c55e' }}>{currentTempo || '--'}</div>
-                  <div style={{ fontSize: '9px', color: '#475569' }}>spr/min</div>
-                </div>
-
-                {/* Personal Best */}
-                <div style={{ ...css.statBox, borderColor: pb ? '#facc1544' : '#334155' }}>
-                  <div style={css.statLabel}><Trophy size={11} color="#facc15" /> Record</div>
-                  <div style={{ ...css.statValue, color: '#facc15' }}>{pb?.score ?? '--'}</div>
-                  <div style={{ fontSize: '9px', color: '#475569' }}>stappen</div>
-                </div>
-              </div>
-
-              {/* Expected final score */}
-              <div style={css.expectedBox}>
-                <div style={{ fontSize: '10px', color: '#22c55e', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Verwachte Eindscore
-                </div>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
-                  <span style={{ fontSize: '36px', fontWeight: '900', color: '#22c55e', lineHeight: 1 }}>{expectedScore}</span>
-                  {pb && (
-                    <span style={{ fontSize: '12px', color: expectedScore > pb.score ? '#22c55e' : expectedScore < pb.score ? '#ef4444' : '#475569', fontWeight: '700' }}>
-                      {expectedScore > pb.score ? `+${expectedScore - pb.score} vs PB 🔥` :
-                       expectedScore < pb.score ? `${expectedScore - pb.score} vs PB` :
-                       '= PB'}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Ghost toggle */}
-              {pb?.telemetry && Object.keys(ghostCurves[uid] || {}).length > 1 && (
-                <button
-                  style={{
-                    ...css.ghostToggle,
-                    backgroundColor: ghostVisible ? '#7c3aed22' : '#0f172a',
-                    borderColor: ghostVisible ? '#7c3aed' : '#334155',
-                    color: ghostVisible ? '#a78bfa' : '#475569',
-                  }}
-                  onClick={() => setShowGhost(prev => ({ ...prev, [uid]: !prev[uid] }))}
-                >
-                  <Ghost size={13} />
-                  {ghostVisible ? 'Ghost-sessie aan' : 'Ghost-sessie tonen'}
-                  {ghostVisible && <span style={{ fontSize: '10px', color: '#64748b', marginLeft: '4px' }}>({pb.score} stps record)</span>}
-                </button>
-              )}
-
-              {/* Chart */}
-              <div style={{ height: '240px', marginTop: '12px', backgroundColor: '#0f172a', borderRadius: '12px', padding: '10px' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData.slice(-120)} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
-                    <CartesianGrid stroke="#1e293b" vertical={false} strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="elapsed"
-                      stroke="#334155"
-                      fontSize={9}
-                      tickFormatter={v => `${v}s`}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis yAxisId="bpm" domain={[40, 210]} stroke="#475569" fontSize={9} tickCount={5} />
-                    <YAxis yAxisId="tempo" orientation="right" domain={[0, 300]} stroke="#334155" fontSize={9} tickCount={4} />
-                    <Tooltip content={<CustomTooltip />} />
-
-                    {/* HR zones as reference areas */}
-                    {zones.map(zone => (
-                      <ReferenceArea
-                        key={zone.name}
-                        yAxisId="bpm"
-                        y1={zone.min}
-                        y2={Math.min(zone.max, 210)}
-                        fill={zone.color}
-                        fillOpacity={0.04}
-                        stroke="none"
-                      />
-                    ))}
-
-                    {/* Live BPM */}
-                    <Line
-                      yAxisId="bpm"
-                      type="monotone"
-                      dataKey="bpm"
-                      name="Hartslag"
-                      stroke={bpmColor}
-                      strokeWidth={2.5}
-                      dot={false}
-                      isAnimationActive={false}
-                      connectNulls
-                    />
-
-                    {/* Live Tempo */}
-                    <Line
-                      yAxisId="tempo"
-                      type="monotone"
-                      dataKey="tempo"
-                      name="Tempo"
-                      stroke="#60a5fa"
-                      strokeWidth={2}
-                      dot={false}
-                      isAnimationActive={false}
-                      connectNulls
-                      strokeDasharray="4 2"
-                    />
-
-                    {/* Ghost BPM */}
-                    {ghostVisible && (
-                      <Line
-                        yAxisId="bpm"
-                        type="monotone"
-                        dataKey="ghostBpm"
-                        name="Ghost BPM"
-                        stroke="#a78bfa"
-                        strokeWidth={1.5}
-                        dot={false}
-                        isAnimationActive={false}
-                        connectNulls
-                        strokeDasharray="6 3"
-                        strokeOpacity={0.7}
-                      />
-                    )}
-
-                    {/* Ghost Steps (mapped to tempo axis so scale is comparable) */}
-                    {ghostVisible && (
-                      <Line
-                        yAxisId="tempo"
-                        type="monotone"
-                        dataKey="ghostSteps"
-                        name="Ghost Stappen"
-                        stroke="#c084fc"
-                        strokeWidth={1.5}
-                        dot={false}
-                        isAnimationActive={false}
-                        connectNulls
-                        strokeDasharray="2 4"
-                        strokeOpacity={0.6}
-                      />
-                    )}
-                  </LineChart>
-                </ResponsiveContainer>
-
-                {/* Legend */}
-                <div style={{ display: 'flex', gap: '12px', marginTop: '6px', flexWrap: 'wrap', paddingLeft: '4px' }}>
-                  {[
-                    { color: bpmColor, label: 'Hartslag', dash: false },
-                    { color: '#60a5fa', label: 'Tempo (spr/min)', dash: true },
-                    ...(ghostVisible ? [
-                      { color: '#a78bfa', label: 'Ghost BPM', dash: true },
-                      { color: '#c084fc', label: 'Ghost Stappen', dash: true },
-                    ] : []),
-                  ].map(item => (
-                    <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: '#64748b' }}>
-                      <svg width="20" height="6">
-                        <line
-                          x1="0" y1="3" x2="20" y2="3"
-                          stroke={item.color}
-                          strokeWidth="2"
-                          strokeDasharray={item.dash ? '4 2' : 'none'}
-                        />
-                      </svg>
-                      {item.label}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+        {selectedSkipperIds.map(uid => (
+          <SkipperCard
+            key={uid}
+            uid={uid}
+            user={getUser(uid)}
+            liveData={liveSessions[uid] || {}}
+            history={history[uid] || []}
+            personalBest={personalBests[uid] || null}
+            ghostCurve={ghostCurves[uid] || {}}
+            showGhost={showGhost[uid] || false}
+            onToggleGhost={() => setShowGhost(prev => ({ ...prev, [uid]: !prev[uid] }))}
+            buildChartData={buildChartData}
+          />
+        ))}
       </div>
     </div>
   );
