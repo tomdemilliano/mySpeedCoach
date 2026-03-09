@@ -362,6 +362,18 @@ export default function AppLayout({ children }) {
 const layoutCSS = `
   * { box-sizing: border-box; }
 
+  .app-sidebar, .app-sidebar * {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .bottom-nav, .bottom-nav * {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .mobile-topbar, .mobile-topbar * {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
   /* Hover effects for nav items */
   .nav-item:hover {
     background-color: rgba(255,255,255,0.04) !important;
