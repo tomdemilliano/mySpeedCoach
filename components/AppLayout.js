@@ -37,7 +37,7 @@ const NAV_ITEMS = [
   },
 ];
 
-// ─── Sidebar (desktop) ────────────────────────────────────────────────────────
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
 function Sidebar({ currentPath, mobileOpen, onClose }) {
   return (
     <>
@@ -45,13 +45,12 @@ function Sidebar({ currentPath, mobileOpen, onClose }) {
       {mobileOpen && (
         <div
           onClick={onClose}
+          className="mobile-backdrop"
           style={{
             position: 'fixed', inset: 0,
             backgroundColor: 'rgba(0,0,0,0.7)',
             zIndex: 200,
-            display: 'none',
           }}
-          className="mobile-backdrop"
         />
       )}
 
@@ -69,7 +68,7 @@ function Sidebar({ currentPath, mobileOpen, onClose }) {
           transition: 'transform 0.28s cubic-bezier(0.4, 0, 0.2, 1)',
         }}
       >
-        {/* Logo */}
+        {/* Logo row */}
         <div style={{
           padding: '20px 20px 16px',
           borderBottom: '1px solid #1e293b',
@@ -98,21 +97,21 @@ function Sidebar({ currentPath, mobileOpen, onClose }) {
             </div>
           </div>
 
-          {/* Mobile close button */}
+          {/* Close button — shown on mobile only via CSS */}
           <button
             className="sidebar-close-btn"
             onClick={onClose}
             style={{
               background: 'none', border: 'none',
               color: '#64748b', cursor: 'pointer',
-              padding: '4px', display: 'none',
+              padding: '4px',
             }}
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Nav items */}
+        {/* Nav links */}
         <nav style={{ flex: 1, padding: '12px 10px', overflowY: 'auto' }}>
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
@@ -122,6 +121,7 @@ function Sidebar({ currentPath, mobileOpen, onClose }) {
                 key={item.href}
                 href={item.href}
                 onClick={onClose}
+                className="nav-item"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -137,9 +137,7 @@ function Sidebar({ currentPath, mobileOpen, onClose }) {
                   position: 'relative',
                   overflow: 'hidden',
                 }}
-                className="nav-item"
               >
-                {/* Active indicator bar */}
                 {isActive && (
                   <div style={{
                     position: 'absolute', left: 0, top: '20%', bottom: '20%',
@@ -202,113 +200,35 @@ function Sidebar({ currentPath, mobileOpen, onClose }) {
   );
 }
 
-// ─── Mobile bottom nav ────────────────────────────────────────────────────────
-function BottomNav({ currentPath }) {
+// ─── Floating hamburger button (mobile only) ─────────────────────────────────
+// A small floating button in the top-right corner — never conflicts with
+// any page's own header or bottom navigation.
+function HamburgerButton({ onMenuOpen }) {
   return (
-    <nav
-      className="bottom-nav"
+    <button
+      className="hamburger-btn"
+      onClick={onMenuOpen}
+      title="Menu"
       style={{
-        position: 'fixed', bottom: 0, left: 0, right: 0,
-        backgroundColor: '#0d1526',
-        borderTop: '1px solid #1e293b',
-        display: 'none',
+        position: 'fixed',
+        top: '12px',
+        right: '14px',
         zIndex: 150,
-        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-      }}
-    >
-      {NAV_ITEMS.map((item) => {
-        const Icon = item.icon;
-        const isActive = currentPath === item.href;
-        return (
-          <a
-            key={item.href}
-            href={item.href}
-            style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '10px 4px 8px',
-              textDecoration: 'none',
-              color: isActive ? item.color : '#475569',
-              position: 'relative',
-              transition: 'color 0.15s',
-            }}
-          >
-            {/* Active top bar */}
-            {isActive && (
-              <div style={{
-                position: 'absolute', top: 0, left: '20%', right: '20%',
-                height: '2px', borderRadius: '0 0 3px 3px',
-                backgroundColor: item.color,
-              }} />
-            )}
-
-            <div style={{
-              width: '36px', height: '36px',
-              borderRadius: '10px',
-              backgroundColor: isActive ? `${item.color}1a` : 'transparent',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              marginBottom: '3px',
-              transition: 'background-color 0.15s',
-            }}>
-              <Icon size={20} color={isActive ? item.color : '#475569'} />
-            </div>
-
-            <span style={{
-              fontSize: '9px',
-              fontWeight: isActive ? '700' : '400',
-              letterSpacing: '0.3px',
-              textTransform: 'uppercase',
-            }}>
-              {item.label}
-            </span>
-          </a>
-        );
-      })}
-    </nav>
-  );
-}
-
-// ─── Mobile top bar ───────────────────────────────────────────────────────────
-function MobileTopBar({ currentPath, onMenuOpen }) {
-  const current = NAV_ITEMS.find(i => i.href === currentPath) || NAV_ITEMS[0];
-  return (
-    <header
-      className="mobile-topbar"
-      style={{
+        background: '#1e293b',
+        border: '1px solid #334155',
+        borderRadius: '10px',
+        color: '#94a3b8',
+        cursor: 'pointer',
+        width: '38px',
+        height: '38px',
         display: 'none',
-        position: 'fixed', top: 0, left: 0, right: 0,
-        backgroundColor: '#0d1526',
-        borderBottom: '1px solid #1e293b',
-        padding: '12px 16px',
         alignItems: 'center',
-        gap: '12px',
-        zIndex: 150,
+        justifyContent: 'center',
+        boxShadow: '0 2px 12px rgba(0,0,0,0.4)',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-        <div style={{
-          width: '28px', height: '28px',
-          borderRadius: '7px',
-          backgroundColor: '#1e293b',
-          border: '1px solid #334155',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Zap size={14} color="#3b82f6" />
-        </div>
-        <span style={{ fontWeight: '800', fontSize: '14px', color: '#f1f5f9' }}>
-          MySpeedCoach
-        </span>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <span style={{ fontSize: '11px', color: current.color, fontWeight: '600' }}>
-          {current.label}
-        </span>
-      </div>
-    </header>
+      <Menu size={18} />
+    </button>
   );
 }
 
@@ -318,7 +238,6 @@ export default function AppLayout({ children }) {
   const currentPath = router.pathname;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Close sidebar on route change
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [currentPath]);
@@ -327,20 +246,15 @@ export default function AppLayout({ children }) {
     <>
       <style>{layoutCSS}</style>
 
-      {/* Desktop sidebar */}
       <Sidebar
         currentPath={currentPath}
         mobileOpen={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
       />
 
-      {/* Mobile top bar */}
-      <MobileTopBar
-        currentPath={currentPath}
-        onMenuOpen={() => setMobileMenuOpen(true)}
-      />
+      {/* Floating hamburger — only visible on mobile via CSS */}
+      <HamburgerButton onMenuOpen={() => setMobileMenuOpen(true)} />
 
-      {/* Page content */}
       <main
         className="app-content"
         style={{
@@ -351,9 +265,6 @@ export default function AppLayout({ children }) {
       >
         {children}
       </main>
-
-      {/* Mobile bottom navigation */}
-      <BottomNav currentPath={currentPath} />
     </>
   );
 }
@@ -366,63 +277,50 @@ const layoutCSS = `
     font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
 
-  .bottom-nav, .bottom-nav * {
+  .hamburger-btn {
     font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
 
-  .mobile-topbar, .mobile-topbar * {
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  }
-
-  /* Hover effects for nav items */
   .nav-item:hover {
-    background-color: rgba(255,255,255,0.04) !important;
+    background-color: rgba(255, 255, 255, 0.04) !important;
     border-color: #1e293b !important;
   }
 
-  /* Desktop: sidebar visible, bottom nav hidden */
+  /* ── Desktop: sidebar always visible, hamburger hidden ── */
   .app-sidebar {
     transform: translateX(0);
   }
 
-  /* Mobile layout */
+  .sidebar-close-btn {
+    display: none;
+  }
+
+  /* ── Mobile (≤768px) ── */
   @media (max-width: 768px) {
-    /* Hide desktop sidebar by default */
+    /* Slide sidebar off-screen */
     .app-sidebar {
       transform: translateX(-100%);
     }
 
-    /* Show sidebar when open */
+    /* Slide in when open */
     .app-sidebar.sidebar-open {
       transform: translateX(0);
-      box-shadow: 4px 0 40px rgba(0,0,0,0.6);
+      box-shadow: 4px 0 40px rgba(0, 0, 0, 0.6);
     }
 
-    /* Show close button inside sidebar on mobile */
+    /* Show close button inside sidebar */
     .sidebar-close-btn {
       display: flex !important;
     }
 
-    /* Show backdrop */
-    .mobile-backdrop {
-      display: block !important;
-    }
-
-    /* Show mobile top bar */
-    .mobile-topbar {
+    /* Show floating hamburger button */
+    .hamburger-btn {
       display: flex !important;
     }
 
-    /* Show bottom nav */
-    .bottom-nav {
-      display: flex !important;
-    }
-
-    /* Remove sidebar offset, add top/bottom padding */
+    /* Remove sidebar margin — pages handle their own spacing */
     .app-content {
       margin-left: 0 !important;
-      padding-top: 56px;
-      padding-bottom: 72px;
     }
   }
 `;
