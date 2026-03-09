@@ -16,7 +16,7 @@
     "recharts": "^2.12.0",
     "lucide-react": "latest",
     "clsx": "latest",
-    "tailwind-merge": "latest"
+    "tailwind-merge": "latest",
     "next-pwa": "latest"
   },
   "devDependencies": {
