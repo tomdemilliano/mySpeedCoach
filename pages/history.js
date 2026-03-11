@@ -200,21 +200,17 @@ Geef een gestructureerde analyse met:
 Antwoord in het Nederlands. Wees concreet, motiverend en data-gedreven. Gebruik max 250 woorden.`;
 
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch('/api/ai-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{ role: 'user', content: prompt }],
-        }),
+        body: JSON.stringify({ prompt }),
       });
 
       const data = await response.json();
-      if (data.content?.[0]?.text) {
-        setAnalysis(data.content[0].text);
+      if (data.text) {
+        setAnalysis(data.text);
       } else {
-        setError('Kon geen analyse genereren. Probeer het opnieuw.');
+        setError(data.error || 'Kon geen analyse genereren. Probeer het opnieuw.');
       }
     } catch (err) {
       console.error('AI analysis error:', err);
