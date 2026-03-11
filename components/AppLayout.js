@@ -2,7 +2,7 @@ import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import {
   Zap, User, Hash, LayoutDashboard, ShieldAlert,
-  Menu, X, ChevronRight
+  Menu, X, ChevronRight, Clock
 } from 'lucide-react';
 
 // ─── Nav items ────────────────────────────────────────────────────────────────
@@ -20,6 +20,13 @@ const NAV_ITEMS = [
     icon: Hash,
     description: 'Sessie tellen',
     color: '#22c55e',
+  },
+  {
+    href: '/history',
+    label: 'Geschiedenis',
+    icon: Clock,
+    description: 'Sessies & AI analyse',
+    color: '#60a5fa',
   },
   {
     href: '/dashboard',
