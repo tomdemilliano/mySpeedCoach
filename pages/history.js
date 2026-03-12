@@ -169,35 +169,118 @@ function AiAnalysis({ session, user, onClose }) {
     const maxBpm = session.maxBpm || (bpmValues.length > 0 ? Math.max(...bpmValues) : 0);
     const zones = user?.heartrateZones || DEFAULT_ZONES;
 
+    // ── Zone time breakdown ──
     const zoneTime = {};
     zones.forEach(z => { zoneTime[z.name] = 0; });
     bpmValues.forEach(bpm => {
       const z = zones.find(z => bpm >= z.min && bpm < z.max);
       if (z) zoneTime[z.name] = (zoneTime[z.name] || 0) + 1;
     });
-
     const zoneBreakdown = Object.entries(zoneTime)
       .filter(([, count]) => count > 0)
       .map(([name, count]) => `${name}: ${Math.round((count / bpmValues.length) * 100)}%`)
       .join(', ');
 
-    const prompt = `Je bent een professionele sportcoach gespecialiseerd in speed onderdelen van ropeskipping. Analyseer de volgende trainingssessie van een sporter en geef concrete, gepersonaliseerde feedback.
+    // ── Detailed telemetry analysis ──
+    const duration = DISCIPLINE_DURATION[session.discipline] || 30;
+    const totalPoints = telemetry.length;
 
-**Sporter:** ${user?.firstName || 'Onbekend'} ${user?.lastName || ''}
-**Sessie type:** ${session.discipline ? DISC_LABELS[session.discipline] : 'Onbekend'} - ${session.sessionType || 'Training'}
-**Score (stappen):** ${session.score || 0}
-**Gemiddelde hartslag:** ${avgBpm} BPM
-**Max hartslag:** ${maxBpm} BPM
-**Hartslagzone-verdeling:** ${zoneBreakdown || 'Niet beschikbaar'}
-**Duur discipline:** ${DISCIPLINE_DURATION[session.discipline] || '?'} seconden
+    // Split session into thirds for phase analysis
+    const third = Math.floor(totalPoints / 3);
+    const firstThird = telemetry.slice(0, third);
+    const middleThird = telemetry.slice(third, third * 2);
+    const lastThird = telemetry.slice(third * 2);
+
+    const avgStepsPhase = (points) => {
+      if (points.length < 2) return 0;
+      const first = points[0].steps || 0;
+      const last = points[points.length - 1].steps || 0;
+      const timeSpan = ((points[points.length - 1].time - points[0].time) / 1000) || 1;
+      return Math.round(((last - first) / timeSpan) * 30); // steps per 30s
+    };
+
+    const avgBpmPhase = (points) => {
+      const vals = points.map(p => p.heartRate).filter(Boolean);
+      return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+    };
+
+    const phase1Steps = avgStepsPhase(firstThird);
+    const phase2Steps = avgStepsPhase(middleThird);
+    const phase3Steps = avgStepsPhase(lastThird);
+    const phase1Bpm = avgBpmPhase(firstThird);
+    const phase2Bpm = avgBpmPhase(middleThird);
+    const phase3Bpm = avgBpmPhase(lastThird);
+
+    // Detect biggest drop and recovery in tempo
+    const tempoDrops = [];
+    for (let i = 1; i < telemetry.length; i++) {
+      const prev = telemetry[i - 1];
+      const curr = telemetry[i];
+      const timeDiff = (curr.time - prev.time) / 1000;
+      if (timeDiff > 0) {
+        const stepDiff = (curr.steps || 0) - (prev.steps || 0);
+        const tempo = Math.round((stepDiff / timeDiff) * 30);
+        const elapsed = Math.round((curr.time - telemetry[0].time) / 1000);
+        tempoDrops.push({ elapsed, tempo, bpm: curr.heartRate || 0 });
+      }
+    }
+
+    // Find slowest and fastest moments
+    const sorted = [...tempoDrops].sort((a, b) => a.tempo - b.tempo);
+    const slowestMoment = sorted[0];
+    const fastestMoment = sorted[sorted.length - 1];
+
+    // BPM trend: rising, stable, or spiking
+    const bpmTrend = phase3Bpm > phase1Bpm + 15
+      ? 'sterk stijgend (vermoeidheid)'
+      : phase3Bpm > phase1Bpm + 5
+      ? 'licht stijgend'
+      : 'stabiel';
+
+    // Consistency score: lower stddev = more consistent
+    const tempoValues = tempoDrops.map(t => t.tempo).filter(t => t >= 0);
+    const tempoAvg = tempoValues.reduce((a, b) => a + b, 0) / (tempoValues.length || 1);
+    const tempoStdDev = Math.round(
+      Math.sqrt(tempoValues.reduce((sum, t) => sum + Math.pow(t - tempoAvg, 2), 0) / (tempoValues.length || 1))
+    );
+
+    const prompt = `Je bent een professionele sportcoach gespecialiseerd in rope skipping (MySpeedCoach). Analyseer de volgende gedetailleerde trainingssessie en geef concrete, gepersonaliseerde coaching.
+
+**SPORTER:** ${user?.firstName || 'Onbekend'} ${user?.lastName || ''}
+**SESSIE:** ${session.discipline ? DISC_LABELS[session.discipline] : '?'} — ${session.sessionType || 'Training'}
+**TOTAAL STAPPEN:** ${session.score || 0}
+**DUUR:** ${duration} seconden
+
+**HARTSLAG:**
+- Gemiddeld: ${avgBpm} BPM
+- Maximum: ${maxBpm} BPM  
+- Trend: ${bpmTrend}
+- Zone-verdeling: ${zoneBreakdown || 'niet beschikbaar'}
+
+**TEMPO-ANALYSE PER FASE (stappen/30sec):**
+- Fase 1 (begin, 0-${Math.round(duration/3)}s): ${phase1Steps} stps/30s @ gem. ${phase1Bpm} BPM
+- Fase 2 (midden, ${Math.round(duration/3)}-${Math.round(duration*2/3)}s): ${phase2Steps} stps/30s @ gem. ${phase2Bpm} BPM
+- Fase 3 (einde, ${Math.round(duration*2/3)}-${duration}s): ${phase3Steps} stps/30s @ gem. ${phase3Bpm} BPM
+
+**TEMPO-CONSISTENTIE:**
+- Gemiddeld tempo: ${Math.round(tempoAvg)} stps/30s
+- Standaardafwijking: ${tempoStdDev} (lager = consistenter)
+- Traagste moment: ${slowestMoment ? `${slowestMoment.elapsed}s (${slowestMoment.tempo} stps/30s @ ${slowestMoment.bpm} BPM)` : 'onbekend'}
+- Snelste moment: ${fastestMoment ? `${fastestMoment.elapsed}s (${fastestMoment.tempo} stps/30s @ ${fastestMoment.bpm} BPM)` : 'onbekend'}
+
+**FASE-VERGELIJKING:**
+- Begin vs midden: ${phase2Steps - phase1Steps > 0 ? `+${phase2Steps - phase1Steps}` : phase2Steps - phase1Steps} stps/30s
+- Midden vs einde: ${phase3Steps - phase2Steps > 0 ? `+${phase3Steps - phase2Steps}` : phase3Steps - phase2Steps} stps/30s
+- Begin vs einde: ${phase3Steps - phase1Steps > 0 ? `+${phase3Steps - phase1Steps}` : phase3Steps - phase1Steps} stps/30s
 
 Geef een gestructureerde analyse met:
-1. **Prestatiebeoordeling** – Hoe was deze sessie? Sterke punten.
-2. **Verbeterpunten** – Specifieke aandachtspunten op basis van de data.
-3. **Aanbevolen trainingen** – 2-3 concrete oefeningen of trainingsvormen die de sporter kan doen om te verbeteren. Wees specifiek.
-4. **Volgende stap** – Eén prioriteit voor de volgende sessie.
+1. **Prestatiebeoordeling** – Hoe was deze sessie? Wat ging goed?
+2. **Fase-analyse** – Bespreek concreet wat er in elke fase gebeurde op basis van tempo en hartslag. Wees specifiek over het traagste/snelste moment.
+3. **Verbeterpunten** – Waar verloor de sporter tempo en waarom (vermoeidheid, hartslag te hoog)?
+4. **Concrete oefeningen** – 2-3 specifieke trainingsoefeningen om de zwakke punten aan te pakken.
+5. **Volgende sessie** – Één duidelijke prioriteit.
 
-Antwoord in het Nederlands. Wees concreet, motiverend en data-gedreven. Gebruik max 250 woorden.`;
+Antwoord in het Nederlands. Wees data-gedreven, motiverend en concreet. Max 350 woorden.`;
 
     try {
       const response = await fetch('/api/ai-analysis', {
@@ -224,7 +307,6 @@ Antwoord in het Nederlands. Wees concreet, motiverend en data-gedreven. Gebruik 
     runAnalysis();
   }, [runAnalysis]);
 
-  // Parse analysis text into sections
   const renderAnalysis = (text) => {
     const sections = text.split(/\n(?=\d\.|##|\*\*)/).filter(Boolean);
     return sections.map((section, i) => {
@@ -237,7 +319,7 @@ Antwoord in het Nederlands. Wees concreet, motiverend en data-gedreven. Gebruik 
             return (
               <p key={j} style={{
                 margin: '0 0 6px',
-                fontSize: isBold && j === 0 ? '13px' : '13px',
+                fontSize: '13px',
                 fontWeight: isBold && j === 0 ? '700' : '400',
                 color: isBold && j === 0 ? '#f1f5f9' : '#94a3b8',
                 lineHeight: 1.6,
@@ -290,7 +372,6 @@ Antwoord in het Nederlands. Wees concreet, motiverend en data-gedreven. Gebruik 
     </div>
   );
 }
-
 // ─── Session Row ──────────────────────────────────────────────────────────────
 function SessionRow({ session, user, index }) {
   const [expanded, setExpanded] = useState(false);
