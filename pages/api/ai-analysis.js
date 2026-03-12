@@ -10,8 +10,19 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set in environment variables.' });
   }
 
-  const { prompt } = req.body;
+  // Handle body parsing — could be string or already parsed object
+  let body = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      return res.status(400).json({ error: 'Invalid JSON in request body.' });
+    }
+  }
+
+  const prompt = body?.prompt;
   if (!prompt || typeof prompt !== 'string') {
+    console.error('Missing prompt. Received body:', body);
     return res.status(400).json({ error: 'Missing or invalid prompt.' });
   }
 
@@ -45,3 +56,12 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Internal server error.' });
   }
 }
+
+// Ensure Next.js parses the request body
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '1mb',
+    },
+  },
+};
