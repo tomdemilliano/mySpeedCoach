@@ -887,7 +887,7 @@ export default function IndexPage() {
           <div style={{ flex: 1, minWidth: 0 }}><RecordsPanel /></div>
         </div>
         <div className="desktop-row" style={s.row}>
-          <div style={{ flex: 1, minWidth: 0 }}><MyBadgesPanel uid={currentUserUid} /></div> 
+          <div style={{ flex: 1, minWidth: 0 }}><MyBadgesPanel uid={currentUser} /></div> 
           <div style={{ flex: 1, minWidth: 0 }}><GoalsPanel /></div>
           <div style={{ flex: 1, minWidth: 0 }}><ClubsPanel /></div>
         </div>
@@ -899,7 +899,7 @@ export default function IndexPage() {
         <div style={{ padding: '16px', paddingBottom: '80px' }}>
           {mobileTab === 'hrm' && <HrmPanel />}
           {mobileTab === 'records' && <RecordsPanel />}
-          {mobileTab === 'badges' && <MyBadgesPanel uid={currentUserUid} />}
+          {mobileTab === 'badges' && <MyBadgesPanel uid={currentUser} />}
           {mobileTab === 'goals' && <GoalsPanel />}
           {mobileTab === 'clubs' && <ClubsPanel />}
         </div>
