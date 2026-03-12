@@ -181,7 +181,7 @@ function AiAnalysis({ session, user, onClose }) {
       .map(([name, count]) => `${name}: ${Math.round((count / bpmValues.length) * 100)}%`)
       .join(', ');
 
-    const prompt = `Je bent een professionele sportcoach gespecialiseerd in roeien en skippybal-sporten (SpringCoach / MySpeedCoach). Analyseer de volgende trainingssessie van een sporter en geef concrete, gepersonaliseerde feedback.
+    const prompt = `Je bent een professionele sportcoach gespecialiseerd in speed onderdelen van ropeskipping. Analyseer de volgende trainingssessie van een sporter en geef concrete, gepersonaliseerde feedback.
 
 **Sporter:** ${user?.firstName || 'Onbekend'} ${user?.lastName || ''}
 **Sessie type:** ${session.discipline ? DISC_LABELS[session.discipline] : 'Onbekend'} - ${session.sessionType || 'Training'}
