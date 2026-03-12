@@ -1,81 +1,46 @@
 import { useState, useEffect, useRef, memo, useCallback } from 'react';
-import { LiveSessionFactory, GroupFactory, ClubFactory, UserFactory } from '../constants/dbSchema';
-import { 
+import { LiveSessionFactory, GroupFactory, ClubFactory, UserFactory, BadgeFactory } from '../constants/dbSchema';
+import {
   Hash, ChevronRight, Timer, Square, History as HistoryIcon,
   Play, Clock, Users, Building2, Trophy, ArrowLeft,
-  Award, Check, X, Target, Star, Zap
+  Award, Check, X, Target, Star, Zap, Medal
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DISCIPLINE_DURATION = { '30sec': 30, '2min': 120, '3min': 180 };
-const AUTO_STOP_IDLE_MS = 15000; // 15 seconds of no taps → auto-stop
+const AUTO_STOP_IDLE_MS = 15000;
 
-// ─── Sparks / Celebration Overlay ─────────────────────────────────────────────
-function CelebrationSparks() {
-  return (
-    <div style={sparkStyles.overlay} aria-hidden="true">
-      {Array.from({ length: 30 }).map((_, i) => (
-        <div
-          key={i}
-          style={{
-            ...sparkStyles.spark,
-            left: `${Math.random() * 100}%`,
-            top: `${Math.random() * 100}%`,
-            animationDelay: `${Math.random() * 1.5}s`,
-            animationDuration: `${0.8 + Math.random() * 1.2}s`,
-            backgroundColor: ['#facc15', '#f97316', '#ef4444', '#22c55e', '#60a5fa', '#a78bfa'][i % 6],
-            width: `${4 + Math.random() * 8}px`,
-            height: `${4 + Math.random() * 8}px`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-const sparkStyles = {
-  overlay: {
-    position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 3000, overflow: 'hidden'
-  },
-  spark: {
-    position: 'absolute',
-    borderRadius: '50%',
-    animation: 'sparkFly 1s ease-out forwards',
-  }
-};
-
-// ─── CSS Keyframes injected once ──────────────────────────────────────────────
+// ─── CSS Keyframes ─────────────────────────────────────────────────────────────
 if (typeof document !== 'undefined') {
   const styleId = 'newcounter-keyframes';
   if (!document.getElementById(styleId)) {
     const style = document.createElement('style');
     style.id = styleId;
     style.textContent = `
-      @keyframes sparkFly {
-        0%   { transform: translate(0, 0) scale(1); opacity: 1; }
-        100% { transform: translate(${() => (Math.random()-0.5)*300}px, -${Math.random()*300}px) scale(0); opacity: 0; }
-      }
-      @keyframes sparkFlyA { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(-120px,-200px) scale(0); opacity:0; } }
-      @keyframes sparkFlyB { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(80px,-250px) scale(0); opacity:0; } }
-      @keyframes sparkFlyC { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(150px,-180px) scale(0); opacity:0; } }
-      @keyframes sparkFlyD { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(-80px,-220px) scale(0); opacity:0; } }
-      @keyframes sparkFlyE { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(30px,-300px) scale(0); opacity:0; } }
-      @keyframes sparkFlyF { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(-200px,-150px) scale(0); opacity:0; } }
-      @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+      @keyframes sparkFlyA { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(-120px,-200px) scale(0); opacity:0; } }
+      @keyframes sparkFlyB { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(80px,-250px) scale(0); opacity:0; } }
+      @keyframes sparkFlyC { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(150px,-180px) scale(0); opacity:0; } }
+      @keyframes sparkFlyD { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(-80px,-220px) scale(0); opacity:0; } }
+      @keyframes sparkFlyE { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(30px,-300px) scale(0); opacity:0; } }
+      @keyframes sparkFlyF { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(-200px,-150px) scale(0); opacity:0; } }
+      @keyframes pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.08); } }
       @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
-      @keyframes counterPop { 0% { transform: scale(1); } 50% { transform: scale(1.15); } 100% { transform: scale(1); } }
+      @keyframes counterPop { 0% { transform:scale(1); } 50% { transform:scale(1.15); } 100% { transform:scale(1); } }
     `;
     document.head.appendChild(style);
   }
 }
 
-// Map spark index to a named animation so no inline random
 const SPARK_ANIMS = ['sparkFlyA','sparkFlyB','sparkFlyC','sparkFlyD','sparkFlyE','sparkFlyF'];
 
+// ─── Celebration Overlay (records, goals, badges) ─────────────────────────────
 function CelebrationOverlay({ type, data, onAccept, onDecline }) {
+  const isBadge  = type === 'badge';
   const isRecord = type === 'record';
-  const accentColor = isRecord ? '#facc15' : '#22c55e';
-  const Icon = isRecord ? Award : Target;
+  const isGoal   = type === 'goal';
+
+  const accentColor = isBadge ? '#f59e0b' : isRecord ? '#facc15' : '#22c55e';
+  const Icon = isBadge ? Medal : isRecord ? Award : Target;
 
   return (
     <>
@@ -97,68 +62,101 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
 
       {/* Modal */}
       <div style={styles.modalOverlay}>
-        <div style={{
-          ...styles.modalContent,
-          borderColor: accentColor,
-          animation: 'fadeInUp 0.4s ease-out',
-        }}>
-          <div style={{ 
-            width: '80px', height: '80px', borderRadius: '50%',
-            backgroundColor: `${accentColor}22`, border: `2px solid ${accentColor}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 20px', animation: 'pulse 1.5s ease-in-out infinite'
-          }}>
-            <Icon size={40} color={accentColor} />
-          </div>
+        <div style={{ ...styles.modalContent, borderColor: accentColor, animation: 'fadeInUp 0.4s ease-out' }}>
 
-          <h2 style={{ color: accentColor, fontSize: '26px', margin: '0 0 8px', textAlign: 'center' }}>
-            {isRecord ? '🏆 NIEUW RECORD!' : '🎯 DOEL BEREIKT!'}
+          {/* Badge image or icon */}
+          {isBadge && data.badgeImageUrl ? (
+            <img
+              src={data.badgeImageUrl}
+              alt={data.badgeName}
+              style={{ width: '90px', height: '90px', borderRadius: '50%', objectFit: 'cover', margin: '0 auto 16px', display: 'block', border: `3px solid ${accentColor}` }}
+            />
+          ) : (
+            <div style={{
+              width: '80px', height: '80px', borderRadius: '50%',
+              backgroundColor: `${accentColor}22`, border: `2px solid ${accentColor}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 20px', animation: 'pulse 1.5s ease-in-out infinite',
+              fontSize: isBadge ? '40px' : undefined,
+            }}>
+              {isBadge ? (data.badgeEmoji || '🏅') : <Icon size={40} color={accentColor} />}
+            </div>
+          )}
+
+          <h2 style={{ color: accentColor, fontSize: '24px', margin: '0 0 8px', textAlign: 'center' }}>
+            {isBadge ? '🎖️ BADGE VERDIEND!' : isRecord ? '🏆 NIEUW RECORD!' : '🎯 DOEL BEREIKT!'}
           </h2>
 
-          <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-            <div style={{ fontSize: '42px', fontWeight: '900', color: 'white', lineHeight: 1 }}>
-              {data.score}
-            </div>
-            <div style={{ color: '#94a3b8', fontSize: '14px', marginTop: '4px' }}>
-              steps · {data.discipline} · {data.sessionType}
-            </div>
-            {isRecord && data.previousBest > 0 && (
-              <div style={{ color: '#22c55e', fontSize: '13px', marginTop: '8px' }}>
-                +{data.score - data.previousBest} steps beter dan vorig record ({data.previousBest})
-              </div>
-            )}
-            {!isRecord && (
-              <div style={{ color: '#94a3b8', fontSize: '13px', marginTop: '8px' }}>
-                Doel was: {data.targetScore} steps
-              </div>
+          <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+            {isBadge ? (
+              <>
+                <div style={{ fontSize: '22px', fontWeight: '900', color: 'white', lineHeight: 1 }}>
+                  {data.badgeName}
+                </div>
+                <div style={{ color: '#94a3b8', fontSize: '13px', marginTop: '8px', lineHeight: 1.5 }}>
+                  {data.badgeDescription || ''}
+                </div>
+                <div style={{ color: '#64748b', fontSize: '11px', marginTop: '4px' }}>
+                  Uitgereikt door: {data.awardedByName || 'Systeem'}
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: '42px', fontWeight: '900', color: 'white', lineHeight: 1 }}>
+                  {data.score}
+                </div>
+                <div style={{ color: '#94a3b8', fontSize: '14px', marginTop: '4px' }}>
+                  steps · {data.discipline} · {data.sessionType}
+                </div>
+                {isRecord && data.previousBest > 0 && (
+                  <div style={{ color: '#22c55e', fontSize: '13px', marginTop: '8px' }}>
+                    +{data.score - data.previousBest} beter dan vorig record ({data.previousBest})
+                  </div>
+                )}
+                {isGoal && (
+                  <div style={{ color: '#94a3b8', fontSize: '13px', marginTop: '8px' }}>
+                    Doel was: {data.targetScore} steps
+                  </div>
+                )}
+              </>
             )}
           </div>
 
-          <p style={{ color: '#cbd5e1', textAlign: 'center', fontSize: '14px', marginBottom: '24px' }}>
-            {isRecord
-              ? 'Wil je dit als officieel record registreren?'
-              : 'Wil je dit als doelbereiking vastleggen?'
-            }
-          </p>
-
-          <div style={{ display: 'flex', gap: '12px' }}>
+          {/* Badges are auto-saved, no accept/decline needed */}
+          {isBadge ? (
             <button onClick={onAccept} style={{
-              flex: 1, padding: '14px', backgroundColor: '#22c55e',
+              width: '100%', padding: '14px', backgroundColor: accentColor,
               border: 'none', borderRadius: '10px', color: 'white',
               fontWeight: 'bold', fontSize: '16px', cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
             }}>
-              <Check size={20} /> JA
+              <Check size={20} /> GEWELDIG!
             </button>
-            <button onClick={onDecline} style={{
-              flex: 1, padding: '14px', backgroundColor: '#475569',
-              border: 'none', borderRadius: '10px', color: 'white',
-              fontWeight: 'bold', fontSize: '16px', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
-            }}>
-              <X size={20} /> NEE
-            </button>
-          </div>
+          ) : (
+            <>
+              <p style={{ color: '#cbd5e1', textAlign: 'center', fontSize: '14px', marginBottom: '20px' }}>
+                {isRecord ? 'Wil je dit als officieel record registreren?' : 'Wil je dit als doelbereiking vastleggen?'}
+              </p>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button onClick={onAccept} style={{
+                  flex: 1, padding: '14px', backgroundColor: '#22c55e',
+                  border: 'none', borderRadius: '10px', color: 'white',
+                  fontWeight: 'bold', fontSize: '16px', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                }}>
+                  <Check size={20} /> JA
+                </button>
+                <button onClick={onDecline} style={{
+                  flex: 1, padding: '14px', backgroundColor: '#475569',
+                  border: 'none', borderRadius: '10px', color: 'white',
+                  fontWeight: 'bold', fontSize: '16px', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                }}>
+                  <X size={20} /> NEE
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </>
@@ -187,7 +185,7 @@ const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished })
   }, [startTime, durationSeconds, isRecording, isFinished]);
 
   return (
-    <div style={{ 
+    <div style={{
       fontSize: '28px', fontWeight: 'bold', fontFamily: 'monospace',
       color: isOvertime ? '#f97316' : '#60a5fa',
       display: 'flex', alignItems: 'center', gap: '8px'
@@ -200,7 +198,6 @@ const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished })
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 export default function CounterPage() {
-  // Selection flow
   const [clubs, setClubs] = useState([]);
   const [groups, setGroups] = useState([]);
   const [skippers, setSkippers] = useState([]);
@@ -209,27 +206,21 @@ export default function CounterPage() {
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [selectedSkipper, setSelectedSkipper] = useState(null);
 
-  // Session config
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [sessionType, setSessionType] = useState('Training');
   const [discipline, setDiscipline] = useState('30sec');
 
-  // Live data
   const [currentData, setCurrentData] = useState(null);
   const [liveBpm, setLiveBpm] = useState(0);
   const [sessionHistory, setSessionHistory] = useState([]);
   const [bestRecord, setBestRecord] = useState(null);
 
-  // Post-session flow
-  // pendingQueue: array of { type: 'record'|'goal', data: {...} }
   const [pendingQueue, setPendingQueue] = useState([]);
   const [isProcessingQueue, setIsProcessingQueue] = useState(false);
 
-  // Telemetry buffer (local, built during session)
   const telemetryRef = useRef([]);
   const sessionStartRef = useRef(null);
   const autoStopTimerRef = useRef(null);
-  const lastStepCountRef = useRef(0);
 
   // ── Load clubs & users ──
   useEffect(() => {
@@ -238,18 +229,14 @@ export default function CounterPage() {
     return () => { unsubClubs(); unsubUsers(); };
   }, []);
 
-  // ── Load groups when club changes ──
   useEffect(() => {
     if (!selectedClubId) return;
     const unsub = GroupFactory.getGroupsByClub(selectedClubId, (data) => {
-      setGroups(data);
-      setSelectedGroupId('');
-      setSkippers([]);
+      setGroups(data); setSelectedGroupId(''); setSkippers([]);
     });
     return () => unsub();
   }, [selectedClubId]);
 
-  // ── Load skippers when group changes ──
   useEffect(() => {
     if (!selectedClubId || !selectedGroupId) return;
     const unsub = GroupFactory.getMembersByGroup(selectedClubId, selectedGroupId, (data) => {
@@ -258,20 +245,16 @@ export default function CounterPage() {
     return () => unsub();
   }, [selectedClubId, selectedGroupId]);
 
-  // ── Subscribe to live session + BPM when skipper selected ──
   useEffect(() => {
     if (!selectedSkipper) return;
-
     const unsubLive = LiveSessionFactory.subscribeToLive(selectedSkipper.id, (data) => {
       if (!data) return;
       setLiveBpm(data.bpm || 0);
       setCurrentData(data.session || null);
     });
-
     return () => unsubLive();
   }, [selectedSkipper]);
 
-  // ── Load session history + best record when skipper + discipline/type set ──
   useEffect(() => {
     if (!selectedSkipper) return;
     const unsubHistory = UserFactory.getSessionHistory(selectedSkipper.id, setSessionHistory);
@@ -281,59 +264,37 @@ export default function CounterPage() {
   useEffect(() => {
     if (!selectedSkipper) return;
     const unsubRecord = UserFactory.subscribeToRecords(
-      selectedSkipper.id, discipline, sessionType,
-      (rec) => setBestRecord(rec)
+      selectedSkipper.id, discipline, sessionType, (rec) => setBestRecord(rec)
     );
     return () => unsubRecord();
   }, [selectedSkipper, discipline, sessionType]);
 
-  // ── Auto-stop: watch lastStepTime ──
   useEffect(() => {
-    if (!currentData?.isActive) {
-      clearTimeout(autoStopTimerRef.current);
-      return;
-    }
-
-    // Reset auto-stop timer whenever lastStepTime changes
+    if (!currentData?.isActive) { clearTimeout(autoStopTimerRef.current); return; }
     clearTimeout(autoStopTimerRef.current);
-    autoStopTimerRef.current = setTimeout(() => {
-      handleStopSession();
-    }, AUTO_STOP_IDLE_MS);
-
+    autoStopTimerRef.current = setTimeout(() => handleStopSession(), AUTO_STOP_IDLE_MS);
     return () => clearTimeout(autoStopTimerRef.current);
   }, [currentData?.lastStepTime, currentData?.isActive]);
 
-  // ── Detect session finish (auto or manual) and trigger post-session flow ──
   useEffect(() => {
     if (currentData?.isFinished && !isProcessingQueue && pendingQueue.length === 0) {
-      // Only trigger once when session just finished
       triggerPostSessionFlow();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentData?.isFinished]);
 
   // ─── Handlers ────────────────────────────────────────────────────────────────
 
   const handleStartSession = async () => {
     telemetryRef.current = [];
-    lastStepCountRef.current = 0;
-    sessionStartRef.current = null; // Will be set on first tap
+    sessionStartRef.current = null;
     await LiveSessionFactory.startCounter(selectedSkipper.id, discipline, sessionType);
     setShowConfigModal(false);
   };
 
   const handleCountStep = () => {
     if (!currentData || currentData?.isFinished) return;
-
-    // Record start time on the very first tap
-    if (!sessionStartRef.current) {
-      sessionStartRef.current = Date.now();
-    }
-
-    // Pass current BPM so telemetry is attached; also pass startTime for RTDB if first tap
+    if (!sessionStartRef.current) sessionStartRef.current = Date.now();
     LiveSessionFactory.incrementSteps(selectedSkipper.id, liveBpm, sessionStartRef.current);
-
-    // Also maintain a local telemetry buffer for reliable final save
     telemetryRef.current.push({
       time: Date.now() - sessionStartRef.current,
       steps: (currentData?.steps || 0) + 1,
@@ -345,82 +306,81 @@ export default function CounterPage() {
     if (!selectedSkipper || !currentData?.isActive) return;
     clearTimeout(autoStopTimerRef.current);
     await LiveSessionFactory.stopCounter(selectedSkipper.id);
-    // triggerPostSessionFlow fires via useEffect on isFinished
   }, [selectedSkipper, currentData]);
 
   const triggerPostSessionFlow = async () => {
     if (!selectedSkipper || !currentData) return;
 
     const score = currentData.steps || 0;
-    const disc = currentData.discipline || discipline;
+    const disc  = currentData.discipline || discipline;
     const sType = currentData.sessionType || sessionType;
-
-    // Calculate BPM stats from local telemetry
     const telemetry = telemetryRef.current;
     const bpmValues = telemetry.map(t => t.heartRate).filter(b => b > 0);
     const avgBpm = bpmValues.length ? Math.round(bpmValues.reduce((a, b) => a + b, 0) / bpmValues.length) : liveBpm;
     const maxBpm = bpmValues.length ? Math.max(...bpmValues) : liveBpm;
 
     // 1. Save session history
+    let savedSessionId = null;
     try {
-      await UserFactory.saveSessionHistory(selectedSkipper.id, {
-        discipline: disc,
-        sessionType: sType,
-        score,
-        avgBpm,
-        maxBpm,
+      const ref = await UserFactory.saveSessionHistory(selectedSkipper.id, {
+        discipline: disc, sessionType: sType, score, avgBpm, maxBpm,
         sessionStart: currentData.startTime || sessionStartRef.current,
         telemetry
       });
-    } catch (e) {
-      console.error('Failed to save session history:', e);
-    }
+      savedSessionId = ref?.id || null;
+    } catch (e) { console.error('Failed to save session history:', e); }
 
-    // 2. Build post-session queue
+    // Fetch fresh history for badge checks
+    const freshHistory = await UserFactory.getSessionHistoryOnce(selectedSkipper.id);
+
     const queue = [];
 
-    // Check record
+    // 2. Check automatic badges
+    try {
+      const newBadges = await BadgeFactory.checkAndAward(
+        selectedSkipper.id,
+        { score, discipline: disc, sessionType: sType },
+        freshHistory
+      );
+      newBadges.forEach(badge => {
+        queue.push({
+          type: 'badge',
+          data: {
+            badgeId: badge.id,
+            badgeName: badge.name,
+            badgeEmoji: badge.emoji,
+            badgeImageUrl: badge.imageUrl || '',
+            badgeDescription: badge.description,
+            awardedByName: 'Systeem',
+          }
+        });
+      });
+    } catch (e) { console.error('Badge check failed:', e); }
+
+    // 3. Check record
     const previousBest = bestRecord?.score || 0;
     if (score > previousBest) {
       queue.push({
         type: 'record',
-        data: {
-          score,
-          discipline: disc,
-          sessionType: sType,
-          previousBest,
-          telemetry
-        }
+        data: { score, discipline: disc, sessionType: sType, previousBest, telemetry }
       });
     }
 
-    // Check goals
+    // 4. Check goals
     try {
       await new Promise((resolve) => {
         UserFactory.getGoals(selectedSkipper.id, (goals) => {
-          const matchingGoals = goals.filter(g =>
-            g.discipline === disc &&
-            !g.achievedAt &&
-            score >= g.targetScore
-          );
-          matchingGoals.forEach(g => {
-            queue.push({
-              type: 'goal',
-              data: {
-                goalId: g.id,
-                score,
-                discipline: disc,
-                sessionType: sType,
-                targetScore: g.targetScore
-              }
+          goals.filter(g => g.discipline === disc && !g.achievedAt && score >= g.targetScore)
+            .forEach(g => {
+              queue.push({
+                type: 'goal',
+                data: { goalId: g.id, score, discipline: disc, sessionType: sType, targetScore: g.targetScore }
+              });
             });
-          });
           resolve();
         });
       });
-    } catch (e) {
-      console.error('Failed to check goals:', e);
-    }
+    } catch (e) { console.error('Failed to check goals:', e); }
 
     if (queue.length > 0) {
       setIsProcessingQueue(true);
@@ -433,32 +393,22 @@ export default function CounterPage() {
     if (!current) return;
 
     if (current.type === 'record') {
-      try {
-        await UserFactory.addRecord(selectedSkipper.id, current.data);
-      } catch (e) {
-        console.error('Failed to save record:', e);
-      }
+      try { await UserFactory.addRecord(selectedSkipper.id, current.data); }
+      catch (e) { console.error('Failed to save record:', e); }
     } else if (current.type === 'goal') {
-      try {
-        await UserFactory.markGoalAchieved(selectedSkipper.id, current.data.goalId);
-      } catch (e) {
-        console.error('Failed to mark goal:', e);
-      }
+      try { await UserFactory.markGoalAchieved(selectedSkipper.id, current.data.goalId); }
+      catch (e) { console.error('Failed to mark goal:', e); }
     }
-
+    // Badges are already saved in triggerPostSessionFlow — just dismiss
     advanceQueue();
   };
 
-  const handleQueueDecline = () => {
-    advanceQueue();
-  };
+  const handleQueueDecline = () => advanceQueue();
 
   const advanceQueue = () => {
     setPendingQueue(prev => {
       const next = prev.slice(1);
-      if (next.length === 0) {
-        setIsProcessingQueue(false);
-      }
+      if (next.length === 0) setIsProcessingQueue(false);
       return next;
     });
   };
@@ -466,7 +416,6 @@ export default function CounterPage() {
   const handleReset = async () => {
     clearTimeout(autoStopTimerRef.current);
     telemetryRef.current = [];
-    lastStepCountRef.current = 0;
     await LiveSessionFactory.resetSession(selectedSkipper.id);
     setSelectedSkipper(null);
     setShowConfigModal(false);
@@ -477,7 +426,6 @@ export default function CounterPage() {
   const handleNewSession = async () => {
     clearTimeout(autoStopTimerRef.current);
     telemetryRef.current = [];
-    lastStepCountRef.current = 0;
     await LiveSessionFactory.resetSession(selectedSkipper.id);
     setIsProcessingQueue(false);
     setPendingQueue([]);
@@ -485,21 +433,8 @@ export default function CounterPage() {
   };
 
   // ─── Render helpers ───────────────────────────────────────────────────────────
-
-  const getUserName = (id) => {
-    const u = users.find(u => u.id === id);
-    return u ? `${u.firstName} ${u.lastName}` : '?';
-  };
-
-  const getInitials = (id) => {
-    const u = users.find(u => u.id === id);
-    if (!u) return '?';
-    return `${(u.firstName || '?')[0]}${(u.lastName || '')[0] || ''}`;
-  };
-
-  const isRecording = currentData?.isActive === true;
-  const isFinished = currentData?.isFinished === true && !currentData?.isActive;
-  // "Startklaar": session created (currentData exists), not yet recording, not finished
+  const isRecording  = currentData?.isActive === true;
+  const isFinished   = currentData?.isFinished === true && !currentData?.isActive;
   const isStartklaar = currentData !== null && currentData !== undefined && !isRecording && !isFinished;
 
   // ─── Screen 1: Skipper Selection ──────────────────────────────────────────────
@@ -511,42 +446,27 @@ export default function CounterPage() {
             <Users size={24} color="#3b82f6" /> Skipper Selectie
           </h1>
         </div>
-
         <div style={styles.selectionPanel}>
-          {/* Club Dropdown */}
           <div style={styles.field}>
             <label style={styles.label}>
               <Building2 size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
               1. Selecteer Club
             </label>
-            <select
-              style={styles.select}
-              value={selectedClubId}
-              onChange={(e) => setSelectedClubId(e.target.value)}
-            >
+            <select style={styles.select} value={selectedClubId} onChange={(e) => setSelectedClubId(e.target.value)}>
               <option value="">-- Kies een club --</option>
               {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
-
-          {/* Group Dropdown */}
           <div style={styles.field}>
             <label style={styles.label}>
               <Users size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
               2. Selecteer Groep
             </label>
-            <select
-              style={styles.select}
-              value={selectedGroupId}
-              onChange={(e) => setSelectedGroupId(e.target.value)}
-              disabled={!selectedClubId}
-            >
+            <select style={styles.select} value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)} disabled={!selectedClubId}>
               <option value="">-- Kies een groep --</option>
               {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
           </div>
-
-          {/* Skipper Grid */}
           <div style={{ marginTop: '30px' }}>
             <label style={styles.label}>
               <Hash size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
@@ -558,16 +478,13 @@ export default function CounterPage() {
                   {skippers.map(s => {
                     const userProfile = users.find(u => u.id === s.id);
                     const firstName = userProfile?.firstName || '?';
-                    const lastName = userProfile?.lastName || '';
-                    const initials = `${firstName[0] || '?'}${lastName[0] || ''}`;
+                    const lastName  = userProfile?.lastName  || '';
+                    const initials  = `${firstName[0] || '?'}${lastName[0] || ''}`;
                     return (
                       <button
                         key={s.id}
                         style={styles.card}
-                        onClick={() => {
-                          setSelectedSkipper({ ...s, firstName, lastName });
-                          setShowConfigModal(true);
-                        }}
+                        onClick={() => { setSelectedSkipper({ ...s, firstName, lastName }); setShowConfigModal(true); }}
                       >
                         <div style={styles.avatar}>{initials.toUpperCase()}</div>
                         <div style={{ marginTop: '10px', fontSize: '14px', fontWeight: '600' }}>
@@ -607,42 +524,29 @@ export default function CounterPage() {
           <label style={{ ...styles.label, fontFamily: 'sans-serif' }}>Type sessie</label>
           <div style={styles.toggleGroup}>
             {['Training', 'Wedstrijd'].map(t => (
-              <button
-                key={t}
-                onClick={() => setSessionType(t)}
-                style={{
-                  ...styles.toggleBtn,
-                  backgroundColor: sessionType === t
-                    ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6')
-                    : '#0f172a',
-                  borderColor: sessionType === t
-                    ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6')
-                    : '#334155'
-                }}
-              >{t}</button>
+              <button key={t} onClick={() => setSessionType(t)} style={{
+                ...styles.toggleBtn,
+                backgroundColor: sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#0f172a',
+                borderColor: sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#334155'
+              }}>{t}</button>
             ))}
           </div>
 
           <label style={{ ...styles.label, fontFamily: 'sans-serif' }}>Onderdeel</label>
           <div style={styles.toggleGroup}>
             {['30sec', '2min', '3min'].map(d => (
-              <button
-                key={d}
-                onClick={() => setDiscipline(d)}
-                style={{
-                  ...styles.toggleBtn,
-                  backgroundColor: discipline === d ? '#3b82f6' : '#0f172a',
-                  borderColor: discipline === d ? '#3b82f6' : '#334155'
-                }}
-              >{d}</button>
+              <button key={d} onClick={() => setDiscipline(d)} style={{
+                ...styles.toggleBtn,
+                backgroundColor: discipline === d ? '#3b82f6' : '#0f172a',
+                borderColor: discipline === d ? '#3b82f6' : '#334155'
+              }}>{d}</button>
             ))}
           </div>
 
           {bestRecord && (
             <div style={{
               backgroundColor: '#0f172a', borderRadius: '8px', padding: '12px',
-              marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px',
-              fontFamily: 'sans-serif'
+              marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px'
             }}>
               <Trophy size={18} color="#facc15" />
               <div style={{ fontSize: '13px', color: '#94a3b8' }}>
@@ -668,7 +572,6 @@ export default function CounterPage() {
   // ─── Screen 3: Counter ────────────────────────────────────────────────────────
   return (
     <div style={styles.container}>
-      {/* Celebration overlays — rendered on top of everything */}
       {isProcessingQueue && pendingQueue.length > 0 && (
         <CelebrationOverlay
           type={pendingQueue[0].type}
@@ -680,13 +583,9 @@ export default function CounterPage() {
 
       {/* Header */}
       <div style={styles.activeHeader}>
-        <button
-          style={styles.backBtn}
-          onClick={handleReset}
-        >
+        <button style={styles.backBtn} onClick={handleReset}>
           <ArrowLeft size={18} /> Andere skipper
         </button>
-
         <div style={styles.userInfo}>
           <div style={{ ...styles.avatar, width: '44px', height: '44px', fontSize: '15px' }}>
             {selectedSkipper.firstName[0]}{selectedSkipper.lastName[0]}
@@ -703,8 +602,6 @@ export default function CounterPage() {
               <span style={{ color: '#94a3b8' }}>{discipline}</span>
             </div>
           </div>
-
-          {/* BPM Badge */}
           <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
             <div style={{ fontSize: '22px', fontWeight: '900', color: '#ef4444' }}>
               {liveBpm > 0 ? liveBpm : '--'}
@@ -712,8 +609,6 @@ export default function CounterPage() {
             <div style={{ fontSize: '10px', color: '#94a3b8' }}>BPM</div>
           </div>
         </div>
-
-        {/* Status row */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
           <LiveTimer
             startTime={currentData?.startTime}
@@ -723,14 +618,11 @@ export default function CounterPage() {
           />
           <div style={{ fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
             {isRecording ? (
-              <>
-              <span style={{width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'pulse 1s ease-in-out infinite', display: 'inline-block' }} />
-                <span style={{ color: '#ef4444' }}>OPNAME</span>
-              </>
+              <><span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'pulse 1s ease-in-out infinite', display: 'inline-block' }} /><span style={{ color: '#ef4444' }}>OPNAME</span></>
             ) : isFinished ? (
-                <span style={{ color: '#22c55e' }}>KLAAR</span>
+              <span style={{ color: '#22c55e' }}>KLAAR</span>
             ) : isStartklaar ? (
-                <span style={{ color: '#facc15' }}>STARTKLAAR</span>
+              <span style={{ color: '#facc15' }}>STARTKLAAR</span>
             ) : (
               <span style={{ color: '#64748b' }}>WACHT</span>
             )}
@@ -738,7 +630,6 @@ export default function CounterPage() {
         </div>
       </div>
 
-      {/* Record badge */}
       {bestRecord && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
@@ -753,29 +644,13 @@ export default function CounterPage() {
       <button
         style={{
           ...styles.counterButton,
-          backgroundColor: isFinished
-            ? '#1e293b'
-            : isRecording
-              ? '#1e3a5f'
-              : '#1e293b',
-          border: isRecording
-            ? '3px solid #3b82f6'
-            : isFinished
-              ? '3px solid #22c55e'
-              : '3px solid #334155',
-          boxShadow: isRecording
-            ? '0 0 60px rgba(59, 130, 246, 0.25)'
-            : 'none',
+          backgroundColor: isFinished ? '#1e293b' : isRecording ? '#1e3a5f' : '#1e293b',
+          border: isRecording ? '3px solid #3b82f6' : isFinished ? '3px solid #22c55e' : '3px solid #334155',
+          boxShadow: isRecording ? '0 0 60px rgba(59, 130, 246, 0.25)' : 'none',
           cursor: isFinished ? 'default' : 'pointer',
-          animation: isRecording ? undefined : undefined,
         }}
         disabled={isFinished || !selectedSkipper}
-        onPointerDown={(e) => {
-          if (!isFinished) {
-            e.currentTarget.style.transform = 'scale(0.96)';
-            handleCountStep();
-          }
-        }}
+        onPointerDown={(e) => { if (!isFinished) { e.currentTarget.style.transform = 'scale(0.96)'; handleCountStep(); } }}
         onPointerUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
         onPointerLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
       >
@@ -784,9 +659,7 @@ export default function CounterPage() {
           {currentData?.steps ?? 0}
         </span>
         {!isRecording && !isFinished && (
-          <span style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>
-            Tik om te starten
-          </span>
+          <span style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>Tik om te starten</span>
         )}
       </button>
 
@@ -797,10 +670,7 @@ export default function CounterPage() {
             <Square size={18} fill="white" /> STOP
           </button>
         ) : isFinished ? (
-          <button
-            style={{ ...styles.stopButton, backgroundColor: '#3b82f6' }}
-            onClick={handleNewSession}
-          >
+          <button style={{ ...styles.stopButton, backgroundColor: '#3b82f6' }} onClick={handleNewSession}>
             <Play size={18} fill="white" /> NIEUWE SESSIE
           </button>
         ) : isStartklaar ? (
@@ -808,10 +678,7 @@ export default function CounterPage() {
             <div style={{ color: '#facc15', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
               <Zap size={16} /> Eerste tik start de opname
             </div>
-            <button
-              style={{ ...styles.stopButton, backgroundColor: '#3b82f6' }}
-              onClick={handleNewSession}
-            >
+            <button style={{ ...styles.stopButton, backgroundColor: '#3b82f6' }} onClick={handleNewSession}>
               <Play size={18} fill="white" /> NIEUWE SESSIE
             </button>
           </>
@@ -885,8 +752,6 @@ const styles = {
     justifyContent: 'center', fontWeight: 'bold', fontSize: '16px'
   },
   infoText: { textAlign: 'center', color: '#64748b', fontSize: '14px', marginTop: '20px' },
-
-  // Modal
   modalOverlay: {
     position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.92)',
     display: 'flex', justifyContent: 'center', alignItems: 'center',
@@ -894,14 +759,12 @@ const styles = {
   },
   modalContent: {
     backgroundColor: '#1e293b', padding: '30px', borderRadius: '20px',
-    width: '100%', maxWidth: '400px',
-    border: '1px solid #334155'
+    width: '100%', maxWidth: '400px', border: '1px solid #334155'
   },
   toggleGroup: { display: 'flex', gap: '10px', marginBottom: '20px' },
   toggleBtn: {
     flex: 1, padding: '12px', border: '1px solid #334155',
-    borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold',
-    fontFamily: 'sans-serif'
+    borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'sans-serif'
   },
   mainStartBtn: {
     width: '100%', padding: '15px', backgroundColor: '#3b82f6',
@@ -910,12 +773,9 @@ const styles = {
     display: 'flex', justifyContent: 'center', gap: '10px', alignItems: 'center',
     cursor: 'pointer', fontSize: '16px', fontFamily: 'sans-serif'
   },
-
-  // Active counter screen
   activeHeader: {
     backgroundColor: '#1e293b', padding: '16px', borderRadius: '14px',
-    marginBottom: '16px', width: '100%', maxWidth: '440px',
-    border: '1px solid #334155'
+    marginBottom: '16px', width: '100%', maxWidth: '440px', border: '1px solid #334155'
   },
   backBtn: {
     background: 'none', border: 'none', color: '#64748b',
@@ -928,15 +788,14 @@ const styles = {
     color: 'white', display: 'flex', flexDirection: 'column',
     justifyContent: 'center', alignItems: 'center',
     touchAction: 'manipulation', userSelect: 'none',
-    transition: 'transform 0.08s, box-shadow 0.2s',
-    margin: '10px 0',
+    transition: 'transform 0.08s, box-shadow 0.2s', margin: '10px 0',
   },
   stepLabel: {
     fontSize: '13px', letterSpacing: '4px',
     color: 'rgba(255,255,255,0.35)', fontWeight: '700'
   },
   controls: {
-    display: 'flex', justifyContent: 'center',
+    display: 'flex', flexDirection: 'column', justifyContent: 'center',
     alignItems: 'center', marginTop: '16px', marginBottom: '24px'
   },
   stopButton: {
@@ -946,13 +805,11 @@ const styles = {
     cursor: 'pointer', fontSize: '15px'
   },
   historySection: {
-    width: '100%', maxWidth: '440px',
-    borderTop: '1px solid #1e293b', paddingTop: '16px'
+    width: '100%', maxWidth: '440px', borderTop: '1px solid #1e293b', paddingTop: '16px'
   },
   historyItem: {
     backgroundColor: '#1e293b', padding: '12px 16px', borderRadius: '10px',
-    marginBottom: '8px', display: 'flex',
-    justifyContent: 'space-between', alignItems: 'center',
-    borderLeft: '3px solid #3b82f6'
+    marginBottom: '8px', display: 'flex', justifyContent: 'space-between',
+    alignItems: 'center', borderLeft: '3px solid #3b82f6'
   },
 };
