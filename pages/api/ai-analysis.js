@@ -1,6 +1,12 @@
 // pages/api/ai-analysis.js
 
 export default async function handler(req, res) {
+  // Log everything so we can see what's arriving
+  console.log('METHOD:', req.method);
+  console.log('HEADERS:', JSON.stringify(req.headers));
+  console.log('BODY TYPE:', typeof req.body);
+  console.log('BODY:', JSON.stringify(req.body));
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -10,7 +16,6 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set in environment variables.' });
   }
 
-  // Handle body parsing — could be string or already parsed object
   let body = req.body;
   if (typeof body === 'string') {
     try {
@@ -21,9 +26,10 @@ export default async function handler(req, res) {
   }
 
   const prompt = body?.prompt;
+  console.log('PROMPT:', prompt);
+
   if (!prompt || typeof prompt !== 'string') {
-    console.error('Missing prompt. Received body:', body);
-    return res.status(400).json({ error: 'Missing or invalid prompt.' });
+    return res.status(400).json({ error: `Missing or invalid prompt. Body was: ${JSON.stringify(body)}` });
   }
 
   try {
@@ -57,7 +63,6 @@ export default async function handler(req, res) {
   }
 }
 
-// Ensure Next.js parses the request body
 export const config = {
   api: {
     bodyParser: {
