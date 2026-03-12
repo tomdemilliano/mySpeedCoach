@@ -8,6 +8,7 @@ import {
   UserPlus, Send, EyeOff, Eye, Bell, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, MessageSquare, ArrowLeft
 } from 'lucide-react';
+import { MyBadgesPanel } from './badges';
 
 // ─── Cookie helpers ──────────────────────────────────────────────────────────
 const COOKIE_KEY = 'msc_uid';
@@ -325,7 +326,7 @@ export default function IndexPage() {
     if (!editingRecord || !currentUser) return;
     const { db: firestoreDb } = await import('../firebaseConfig');
     const { updateDoc, doc } = await import('firebase/firestore');
-    await updateDoc(doc(firestoreDb, `users/${currentUser.id}/records`, editingRecord.id), {
+    await updateDoc(doc(firestoreDb, `users/${currentUser.id}/`, editingRecord.id), {
       score: parseInt(editingRecord.score),
     });
     setEditingRecord(null);
@@ -335,7 +336,7 @@ export default function IndexPage() {
     if (!currentUser || !window.confirm('Record verwijderen?')) return;
     const { db: firestoreDb } = await import('../firebaseConfig');
     const { deleteDoc, doc } = await import('firebase/firestore');
-    await deleteDoc(doc(firestoreDb, `users/${currentUser.id}/records`, record.id));
+    await deleteDoc(doc(firestoreDb, `users/${currentUser.id}/`, record.id));
   };
 
   const deleteGoal = async (goal) => {
@@ -389,7 +390,7 @@ export default function IndexPage() {
     setHeartRate(0);
     setHrmConnected(false);
     setHrmHistory([]);
-    setRecords([]);
+    set([]);
     setGoals([]);
     setMemberships([]);
     setJoinRequests([]);
@@ -886,6 +887,7 @@ export default function IndexPage() {
           <div style={{ flex: 1, minWidth: 0 }}><RecordsPanel /></div>
         </div>
         <div className="desktop-row" style={s.row}>
+          <div style={{ flex: 1, minWidth: 0 }}><MyBadgesPanel uid={currentUserUid} /></div> 
           <div style={{ flex: 1, minWidth: 0 }}><GoalsPanel /></div>
           <div style={{ flex: 1, minWidth: 0 }}><ClubsPanel /></div>
         </div>
@@ -897,6 +899,7 @@ export default function IndexPage() {
         <div style={{ padding: '16px', paddingBottom: '80px' }}>
           {mobileTab === 'hrm' && <HrmPanel />}
           {mobileTab === 'records' && <RecordsPanel />}
+          {mobileTab === 'badges' && <MyBadgesPanel uid={currentUserUid} />}
           {mobileTab === 'goals' && <GoalsPanel />}
           {mobileTab === 'clubs' && <ClubsPanel />}
         </div>
@@ -906,6 +909,7 @@ export default function IndexPage() {
           {[
             { key: 'hrm',     icon: Heart,     label: 'Hartslag',  color: '#ef4444', active: hrmConnected },
             { key: 'records', icon: Trophy,    label: 'Records',   color: '#facc15' },
+            { key: 'badges',  icon: Award,     label: 'Badgess',   color: '#facc15' },
             { key: 'goals',   icon: Target,    label: 'Doelen',    color: '#22c55e' },
             { key: 'clubs',   icon: Building2, label: 'Clubs',     color: '#a78bfa', badge: newRejections },
           ].map(tab => {
