@@ -106,6 +106,7 @@ export function MyBadgesPanel({ uid }) {
   const [activeCategory, setActiveCategory] = useState('all');
 
   useEffect(() => {
+    const uid = getCookie();
     if (!uid) return;
     const u1 = BadgeFactory.getEarned(uid, setEarnedBadges);
     const u2 = BadgeFactory.getGlobal(setAllBadges);
