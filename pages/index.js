@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { UserFactory, ClubFactory, GroupFactory, LiveSessionFactory, ClubJoinRequestFactory } from '../constants/dbSchema';
+import { UserFactory, ClubFactory, GroupFactory, LiveSessionFactory, ClubJoinRequestFactory, BadgeFactory } from '../constants/dbSchema';
 import {
   Bluetooth, BluetoothOff, Heart, User, Settings, Trophy,
   Target, Plus, Edit2, Trash2, Check, X, ChevronRight,
   Building2, Users, Save, LogOut, Award, Zap, AlertCircle,
   Clock, TrendingUp, Star, ShieldCheck, Dumbbell,
   UserPlus, Send, EyeOff, Eye, Bell, CheckCircle2, XCircle,
-  ChevronDown, ChevronUp, MessageSquare, ArrowLeft
+  ChevronDown, ChevronUp, MessageSquare, ArrowLeft, Medal
 } from 'lucide-react';
 import { MyBadgesPanel } from './badges';
 
@@ -56,6 +56,138 @@ const STATUS_CONFIG = {
   rejected: { label: 'Afgewezen',      color: '#ef4444', bg: '#ef444422', icon: XCircle },
 };
 
+const SPARK_ANIMS = ['sparkFlyA','sparkFlyB','sparkFlyC','sparkFlyD','sparkFlyE','sparkFlyF'];
+
+// ─── Celebration Overlay (records, goals, badges) ─────────────────────────────
+function CelebrationOverlay({ type, data, onAccept, onDecline }) {
+  const isBadge  = type === 'badge';
+  const isRecord = type === 'record';
+  const isGoal   = type === 'goal';
+
+  const accentColor = isBadge ? '#f59e0b' : isRecord ? '#facc15' : '#22c55e';
+  const Icon = isBadge ? Medal : isRecord ? Award : Target;
+
+  return (
+    <>
+      {/* Sparks */}
+      <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 3000, overflow: 'hidden' }}>
+        {Array.from({ length: 24 }).map((_, i) => (
+          <div key={i} style={{
+            position: 'absolute',
+            left: `${10 + (i * 3.5) % 80}%`,
+            top: `${15 + (i * 7) % 70}%`,
+            width: `${5 + (i % 4) * 3}px`,
+            height: `${5 + (i % 4) * 3}px`,
+            borderRadius: '50%',
+            backgroundColor: ['#facc15','#f97316','#ef4444','#22c55e','#60a5fa','#a78bfa'][i % 6],
+            animation: `${SPARK_ANIMS[i % 6]} ${0.9 + (i % 5) * 0.2}s ease-out ${(i % 8) * 0.12}s forwards`,
+          }} />
+        ))}
+      </div>
+
+      {/* Modal */}
+      <div style={styles.modalOverlay}>
+        <div style={{ ...styles.modalContent, borderColor: accentColor, animation: 'fadeInUp 0.4s ease-out' }}>
+
+          {/* Badge image or icon */}
+          {isBadge && data.badgeImageUrl ? (
+            <img
+              src={data.badgeImageUrl}
+              alt={data.badgeName}
+              style={{ width: '90px', height: '90px', borderRadius: '50%', objectFit: 'cover', margin: '0 auto 16px', display: 'block', border: `3px solid ${accentColor}` }}
+            />
+          ) : (
+            <div style={{
+              width: '80px', height: '80px', borderRadius: '50%',
+              backgroundColor: `${accentColor}22`, border: `2px solid ${accentColor}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 20px', animation: 'pulse 1.5s ease-in-out infinite',
+              fontSize: isBadge ? '40px' : undefined,
+            }}>
+              {isBadge ? (data.badgeEmoji || '🏅') : <Icon size={40} color={accentColor} />}
+            </div>
+          )}
+
+          <h2 style={{ color: accentColor, fontSize: '24px', margin: '0 0 8px', textAlign: 'center' }}>
+            {isBadge ? '🎖️ BADGE VERDIEND!' : isRecord ? '🏆 NIEUW RECORD!' : '🎯 DOEL BEREIKT!'}
+          </h2>
+
+          <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+            {isBadge ? (
+              <>
+                <div style={{ fontSize: '22px', fontWeight: '900', color: 'white', lineHeight: 1 }}>
+                  {data.badgeName}
+                </div>
+                <div style={{ color: '#94a3b8', fontSize: '13px', marginTop: '8px', lineHeight: 1.5 }}>
+                  {data.badgeDescription || ''}
+                </div>
+                <div style={{ color: '#64748b', fontSize: '11px', marginTop: '4px' }}>
+                  Uitgereikt door: {data.awardedByName || 'Systeem'}
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: '42px', fontWeight: '900', color: 'white', lineHeight: 1 }}>
+                  {data.score}
+                </div>
+                <div style={{ color: '#94a3b8', fontSize: '14px', marginTop: '4px' }}>
+                  steps · {data.discipline} · {data.sessionType}
+                </div>
+                {isRecord && data.previousBest > 0 && (
+                  <div style={{ color: '#22c55e', fontSize: '13px', marginTop: '8px' }}>
+                    +{data.score - data.previousBest} beter dan vorig record ({data.previousBest})
+                  </div>
+                )}
+                {isGoal && (
+                  <div style={{ color: '#94a3b8', fontSize: '13px', marginTop: '8px' }}>
+                    Doel was: {data.targetScore} steps
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Badges are auto-saved, no accept/decline needed */}
+          {isBadge ? (
+            <button onClick={onAccept} style={{
+              width: '100%', padding: '14px', backgroundColor: accentColor,
+              border: 'none', borderRadius: '10px', color: 'white',
+              fontWeight: 'bold', fontSize: '16px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+            }}>
+              <Check size={20} /> GEWELDIG!
+            </button>
+          ) : (
+            <>
+              <p style={{ color: '#cbd5e1', textAlign: 'center', fontSize: '14px', marginBottom: '20px' }}>
+                {isRecord ? 'Wil je dit als officieel record registreren?' : 'Wil je dit als doelbereiking vastleggen?'}
+              </p>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button onClick={onAccept} style={{
+                  flex: 1, padding: '14px', backgroundColor: '#22c55e',
+                  border: 'none', borderRadius: '10px', color: 'white',
+                  fontWeight: 'bold', fontSize: '16px', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                }}>
+                  <Check size={20} /> JA
+                </button>
+                <button onClick={onDecline} style={{
+                  flex: 1, padding: '14px', backgroundColor: '#475569',
+                  border: 'none', borderRadius: '10px', color: 'white',
+                  fontWeight: 'bold', fontSize: '16px', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                }}>
+                  <X size={20} /> NEE
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════════════════
@@ -91,6 +223,10 @@ export default function IndexPage() {
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [goalForm, setGoalForm] = useState({ discipline: '30sec', targetScore: '', targetDate: '' });
 
+  // ── Achievements
+  const [achievementQueue, setAchievementQueue] = useState([]);
+  const [isProcessingAchievements, setIsProcessingAchievements] = useState(false);
+  
   // ── Club memberships
   const [memberships, setMemberships] = useState([]);
 
@@ -150,6 +286,7 @@ export default function IndexPage() {
     setSettingsForm({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email || '' });
     setZonesForm(user.heartrateZones || DEFAULT_ZONES);
     setPhase('app');
+    checkNewAchievements(user);
   }, []);
 
   // ── Subscribe to records + goals
@@ -397,6 +534,97 @@ export default function IndexPage() {
     setPhase('identify');
   };
 
+  const checkNewAchievements = async (user) => {
+    const lastVisitedRaw = await UserFactory.getLastVisited(user.id);
+    const lastVisitedMs = lastVisitedRaw?.seconds ? lastVisitedRaw.seconds * 1000 : 0;
+
+    // Update last visited to now
+    await UserFactory.updateLastVisited(user.id);
+
+    if (!lastVisitedMs) return; // First visit, nothing to show
+
+    const queue = [];
+
+    // 1. Check for new badges since last visit
+    await new Promise(resolve => {
+      BadgeFactory.getEarned(user.id, (earned) => {
+        earned
+          .filter(b => {
+            const earnedMs = b.earnedAt?.seconds ? b.earnedAt.seconds * 1000 : 0;
+            return earnedMs > lastVisitedMs;
+          })
+          .forEach(b => queue.push({ type: 'badge', data: b }));
+        resolve();
+      });
+    });
+
+    // 2. Get recent sessions to check records and goals
+    const history = await UserFactory.getSessionHistoryOnce(user.id);
+    const recentSessions = history.filter(s => {
+      const endMs = s.sessionEnd?.seconds ? s.sessionEnd.seconds * 1000 : 0;
+      return endMs > lastVisitedMs;
+    });
+
+    // 3. Check for new records in recent sessions
+    for (const session of recentSessions) {
+      if (!session.score) continue;
+      const best = await UserFactory.getBestRecord(user.id, session.discipline, session.sessionType);
+      if (best) {
+        const recordMs = best.achievedAt?.seconds ? best.achievedAt.seconds * 1000 : 0;
+        if (recordMs > lastVisitedMs && best.score === session.score) {
+          queue.push({
+            type: 'record',
+            data: {
+              score: session.score,
+              discipline: session.discipline,
+              sessionType: session.sessionType,
+              countedByName: session.countedByName || null,
+            }
+          });
+        }
+      }
+    }
+
+    // 4. Check for newly achieved goals
+    await new Promise(resolve => {
+      UserFactory.getGoals(user.id, (goals) => {
+        goals
+          .filter(g => {
+            const achievedMs = g.achievedAt?.seconds ? g.achievedAt.seconds * 1000 : 0;
+            return achievedMs > lastVisitedMs;
+          })
+          .forEach(g => {
+            const matchingSession = recentSessions.find(s =>
+              s.discipline === g.discipline && (s.score || 0) >= g.targetScore
+            );
+            queue.push({
+              type: 'goal',
+              data: {
+                score: matchingSession?.score || g.targetScore,
+                discipline: g.discipline,
+                sessionType: matchingSession?.sessionType || 'Training',
+                targetScore: g.targetScore,
+              }
+            });
+          });
+        resolve();
+      });
+    });
+
+    if (queue.length > 0) {
+      setAchievementQueue(queue);
+      setIsProcessingAchievements(true);
+    }
+  };
+
+  const advanceAchievementQueue = () => {
+    setAchievementQueue(prev => {
+      const next = prev.slice(1);
+      if (next.length === 0) setIsProcessingAchievements(false);
+      return next;
+    });
+  };
+  
   // ── Derived data
   const visibleRequests = joinRequests.filter(r => !r.hidden);
   const hiddenRequests = joinRequests.filter(r => r.hidden);
@@ -851,6 +1079,14 @@ export default function IndexPage() {
   return (
     <div style={s.page}>
       <style>{globalCSS}</style>
+      {/* Achievement celebrations for the logged-in user */}
+      {isProcessingAchievements && achievementQueue.length > 0 && (
+        <CelebrationOverlay
+          type={achievementQueue[0].type}
+          data={achievementQueue[0].data}
+          onDismiss={advanceAchievementQueue}
+        />
+      )}
 
       {/* ── HEADER ── */}
       <header style={s.header}>
@@ -1060,6 +1296,14 @@ const globalCSS = `
 
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  @keyframes sparkFlyA { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(-120px,-200px) scale(0); opacity:0; } }
+  @keyframes sparkFlyB { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(80px,-250px) scale(0); opacity:0; } }
+  @keyframes sparkFlyC { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(150px,-180px) scale(0); opacity:0; } }
+  @keyframes sparkFlyD { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(-80px,-220px) scale(0); opacity:0; } }
+  @keyframes sparkFlyE { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(30px,-300px) scale(0); opacity:0; } }
+  @keyframes sparkFlyF { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(-200px,-150px) scale(0); opacity:0; } }
+  @keyframes pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.08); } }
 
   /* Desktop: show desktop layout, hide mobile */
   .desktop-main { display: flex; flex-direction: column; gap: 20px; padding: 24px; max-width: 1400px; margin: 0 auto; }
