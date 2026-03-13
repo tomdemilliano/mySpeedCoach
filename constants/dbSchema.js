@@ -12,6 +12,7 @@ export const SCHEMA = {
       lastName: "string",
       email: "string",
       role: "superadmin|clubadmin|user",
+      lastVisited: "timestamp",
       assignedDevice: {
         deviceId: "string",
         deviceName: "string",
@@ -35,6 +36,8 @@ export const SCHEMA = {
         score: "number",
         avgBpm: "number",
         maxBpm: "number",
+        countedBy: "string|null",
+        countedByName: "string|null",
         telemetry: [{ time: "number", steps: "number", heartRate: "number" }]
       },
       earnedBadges: {
@@ -99,6 +102,15 @@ export const SCHEMA = {
       createdAt: "timestamp",
       resolvedAt: "timestamp|null",
       hidden: "boolean"
+    },
+    countedSessions: {
+      counterUid: "string",
+      counterName: "string",
+      skipperUid: "string",
+      discipline: "string",
+      sessionType: "string",
+      score: "number",
+      sessionEnd: "timestamp",
     }
   },
   rtdb: {
@@ -172,8 +184,8 @@ export const UserFactory = {
     }),
 
   // ── SESSION HISTORY ──
-  saveSessionHistory: (uid, sessionData) =>
-    addDoc(collection(db, `users/${uid}/sessionHistory`), {
+  saveSessionHistory: (uid, sessionData) => {
+    const historyPromise = addDoc(collection(db, `users/${uid}/sessionHistory`), {
       discipline: sessionData.discipline,
       sessionType: sessionData.sessionType,
       score: sessionData.score,
@@ -181,8 +193,26 @@ export const UserFactory = {
       maxBpm: sessionData.maxBpm,
       sessionStart: sessionData.sessionStart,
       sessionEnd: serverTimestamp(),
+      countedBy: sessionData.countedBy || null,
+      countedByName: sessionData.countedByName || null,
       telemetry: sessionData.telemetry || []
-    }),
+    });
+    
+    // Mirror to countedSessions for counter badge queries
+    if (sessionData.countedBy) {
+      addDoc(collection(db, 'countedSessions'), {
+        counterUid: sessionData.countedBy,
+        counterName: sessionData.countedByName || '',
+        skipperUid: uid,
+        discipline: sessionData.discipline,
+        sessionType: sessionData.sessionType,
+        score: sessionData.score,
+        sessionEnd: serverTimestamp(),
+      });
+    }
+    return historyPromise;
+  },
+    
 
   getSessionHistory: (uid, callback) =>
     onSnapshot(collection(db, `users/${uid}/sessionHistory`), (snap) => {
@@ -242,6 +272,16 @@ export const UserFactory = {
 
   markGoalAchieved: (uid, goalId) =>
     updateDoc(doc(db, `users/${uid}/goals`, goalId), { achievedAt: serverTimestamp() }),
+
+  getLastVisited: async (uid) => {
+    const snap = await getDoc(doc(db, 'users', uid));
+    return snap.exists() ? (snap.data().lastVisited || null) : null;
+  },
+
+  updateLastVisited: (uid) =>
+    updateDoc(doc(db, 'users', uid), {
+      lastVisited: serverTimestamp(),
+    }),    
 };
 
 // ==========================================
@@ -634,5 +674,58 @@ export const BadgeFactory = {
         createdAt: serverTimestamp(),
       });
     }
+  },
+};
+
+export const CounterBadgeFactory = {
+  getCountedSessions: async (counterUid) => {
+    const q = query(
+      collection(db, 'countedSessions'),
+      where('counterUid', '==', counterUid)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  checkAndAward: async (counterUid, newSession) => {
+    const allCounted = await CounterBadgeFactory.getCountedSessions(counterUid);
+    const awarded = [];
+
+    const badgesSnap = await getDocs(query(
+      collection(db, 'badges'),
+      where('isActive', '==', true),
+      where('type', '==', 'automatic'),
+      where('scope', '==', 'counter')
+    ));
+    const counterBadges = badgesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    for (const badge of counterBadges) {
+      const alreadyHas = await BadgeFactory.hasEarned(counterUid, badge.id);
+      if (alreadyHas) continue;
+
+      const t = badge.trigger;
+      let earned = false;
+
+      // Total sessions counted milestone
+      if (t?.totalSessionsCounted != null) {
+        if (allCounted.length >= t.totalSessionsCounted) earned = true;
+      }
+
+      // First session counted of a specific discipline
+      if (!earned && t?.firstSessionCounted) {
+        const discCounted = allCounted.filter(s => s.discipline === t.discipline);
+        if (discCounted.length <= 1 && newSession.discipline === t.discipline) earned = true;
+      }
+
+      if (earned) {
+        try {
+          await BadgeFactory.award(counterUid, badge, 'system', 'Systeem', null);
+          awarded.push(badge);
+        } catch (e) {
+          console.error('Failed to award counter badge:', badge.name, e);
+        }
+      }
+    }
+    return awarded;
   },
 };
