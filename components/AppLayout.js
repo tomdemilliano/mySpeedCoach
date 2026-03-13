@@ -219,7 +219,7 @@ function HamburgerButton({ onMenuOpen }) {
       style={{
         position: 'fixed',
         top: '12px',
-        right: '14px',
+        left: '14px',
         zIndex: 150,
         background: '#1e293b',
         border: '1px solid #334155',
