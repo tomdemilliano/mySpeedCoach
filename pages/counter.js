@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, memo, useCallback } from 'react';
-import { LiveSessionFactory, GroupFactory, ClubFactory, UserFactory, BadgeFactory } from '../constants/dbSchema';
+import { LiveSessionFactory, GroupFactory, ClubFactory, UserFactory, BadgeFactory, CounterBadgeFactory } from '../constants/dbSchema';
 import {
   Hash, ChevronRight, Timer, Square, History as HistoryIcon,
   Play, Clock, Users, Building2, Trophy, ArrowLeft,
@@ -9,6 +9,14 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DISCIPLINE_DURATION = { '30sec': 30, '2min': 120, '3min': 180 };
 const AUTO_STOP_IDLE_MS = 15000;
+
+// ─── Cookie helper (same as index.js) ────────────────────────────────────────
+const COOKIE_KEY = 'msc_uid';
+const getCookie = () => {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${COOKIE_KEY}=([^;]*)`));
+  return match ? match[1] : null;
+};
 
 // ─── CSS Keyframes ─────────────────────────────────────────────────────────────
 if (typeof document !== 'undefined') {
@@ -218,6 +226,9 @@ export default function CounterPage() {
   const [pendingQueue, setPendingQueue] = useState([]);
   const [isProcessingQueue, setIsProcessingQueue] = useState(false);
 
+  const [counterUser, setCounterUser] = useState(null);
+  const [newlyEarnedBadges, setNewlyEarnedBadges] = useState([]);
+
   const telemetryRef = useRef([]);
   const sessionStartRef = useRef(null);
   const autoStopTimerRef = useRef(null);
@@ -282,6 +293,14 @@ export default function CounterPage() {
     }
   }, [currentData?.isFinished]);
 
+  useEffect(() => {
+    if (!users.length) return;
+    const uid = getCookie();
+    if (!uid) return;
+    const u = users.find(x => x.id === uid);
+    if (u) setCounterUser(u);
+  }, [users]);
+
   // ─── Handlers ────────────────────────────────────────────────────────────────
 
   const handleStartSession = async () => {
@@ -319,45 +338,45 @@ export default function CounterPage() {
     const avgBpm = bpmValues.length ? Math.round(bpmValues.reduce((a, b) => a + b, 0) / bpmValues.length) : liveBpm;
     const maxBpm = bpmValues.length ? Math.max(...bpmValues) : liveBpm;
 
-    // 1. Save session history
-    let savedSessionId = null;
+    // 1. Save session history — including counter info
     try {
-      const ref = await UserFactory.saveSessionHistory(selectedSkipper.id, {
+      await UserFactory.saveSessionHistory(selectedSkipper.id, {
         discipline: disc, sessionType: sType, score, avgBpm, maxBpm,
         sessionStart: currentData.startTime || sessionStartRef.current,
-        telemetry
+        telemetry,
+        countedBy: counterUser?.id || null,
+        countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
       });
-      savedSessionId = ref?.id || null;
     } catch (e) { console.error('Failed to save session history:', e); }
 
     // Fetch fresh history for badge checks
     const freshHistory = await UserFactory.getSessionHistoryOnce(selectedSkipper.id);
-
+    
     const queue = [];
-
-    // 2. Check automatic badges
+    
+    // 2. Check automatic badges for the skipper — show as simple list, not celebration
     try {
       const newBadges = await BadgeFactory.checkAndAward(
         selectedSkipper.id,
         { score, discipline: disc, sessionType: sType },
         freshHistory
       );
-      newBadges.forEach(badge => {
-        queue.push({
-          type: 'badge',
-          data: {
-            badgeId: badge.id,
-            badgeName: badge.name,
-            badgeEmoji: badge.emoji,
-            badgeImageUrl: badge.imageUrl || '',
-            badgeDescription: badge.description,
-            awardedByName: 'Systeem',
-          }
-        });
-      });
+      if (newBadges.length > 0) {
+        setNewlyEarnedBadges(newBadges);
+      }
     } catch (e) { console.error('Badge check failed:', e); }
-
-    // 3. Check record
+    
+    // 3. Check counter badges
+    if (counterUser) {
+      try {
+        await CounterBadgeFactory.checkAndAward(
+          counterUser.id,
+          { discipline: disc, sessionType: sType, score }
+        );
+      } catch (e) { console.error('Counter badge check failed:', e); }
+    }
+    
+    // 4. Check record — keep as celebration (counter can tell the skipper)
     const previousBest = bestRecord?.score || 0;
     if (score > previousBest) {
       queue.push({
@@ -365,39 +384,23 @@ export default function CounterPage() {
         data: { score, discipline: disc, sessionType: sType, previousBest, telemetry }
       });
     }
-
-    // 4. Check goals
-    try {
-      await new Promise((resolve) => {
-        UserFactory.getGoals(selectedSkipper.id, (goals) => {
-          goals.filter(g => g.discipline === disc && !g.achievedAt && score >= g.targetScore)
-            .forEach(g => {
-              queue.push({
-                type: 'goal',
-                data: { goalId: g.id, score, discipline: disc, sessionType: sType, targetScore: g.targetScore }
-              });
-            });
-          resolve();
-        });
-      });
-    } catch (e) { console.error('Failed to check goals:', e); }
-
+    
+    // Goals are no longer shown here — skipper sees them on the index page
+    
     if (queue.length > 0) {
       setIsProcessingQueue(true);
       setPendingQueue(queue);
     }
   };
+  
 
   const handleQueueAccept = async () => {
     const current = pendingQueue[0];
     if (!current) return;
-
+    
     if (current.type === 'record') {
       try { await UserFactory.addRecord(selectedSkipper.id, current.data); }
       catch (e) { console.error('Failed to save record:', e); }
-    } else if (current.type === 'goal') {
-      try { await UserFactory.markGoalAchieved(selectedSkipper.id, current.data.goalId); }
-      catch (e) { console.error('Failed to mark goal:', e); }
     }
     // Badges are already saved in triggerPostSessionFlow — just dismiss
     advanceQueue();
@@ -421,6 +424,7 @@ export default function CounterPage() {
     setShowConfigModal(false);
     setIsProcessingQueue(false);
     setPendingQueue([]);
+    setNewlyEarnedBadges([]);
   };
 
   const handleNewSession = async () => {
@@ -430,6 +434,7 @@ export default function CounterPage() {
     setIsProcessingQueue(false);
     setPendingQueue([]);
     setShowConfigModal(true);
+    setNewlyEarnedBadges([]);
   };
 
   // ─── Render helpers ───────────────────────────────────────────────────────────
@@ -629,6 +634,39 @@ export default function CounterPage() {
           </div>
         </div>
       </div>
+
+      {/* New badges earned — simple list */}
+      {newlyEarnedBadges.length > 0 && (
+        <div style={{width: '100%', maxWidth: '440px', backgroundColor: '#1a1a2e', border: '1px solid #f59e0b44', borderRadius: '12px', padding: '12px 16px', marginBottom: '12px' }}>
+          <div style={{
+            fontSize: '13px', fontWeight: '700', color: '#f59e0b',
+            marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px'
+          }}>
+            🎖️ Nieuwe badges verdiend door {selectedSkipper?.firstName}!
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {newlyEarnedBadges.map(b => (
+              <div key={b.id} style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                backgroundColor: '#0f172a', borderRadius: '8px',
+                padding: '6px 10px', border: '1px solid #334155'
+              }}>
+                {b.imageUrl
+                  ? <img src={b.imageUrl} style={{ width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover' }} alt={b.name} />
+                  : <span style={{ fontSize: '20px' }}>{b.emoji}</span>
+                }
+                <span style={{ fontSize: '12px', color: '#f1f5f9', fontWeight: '600' }}>{b.name}</span>
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={() => setNewlyEarnedBadges([])}
+            style={{ marginTop: '10px', background: 'none', border: 'none', color: '#64748b', fontSize: '11px', cursor: 'pointer', padding: 0 }}
+          >
+            Sluiten
+          </button>
+        </div>
+      )}
 
       {bestRecord && (
         <div style={{
