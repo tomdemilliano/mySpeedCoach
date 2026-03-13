@@ -854,13 +854,13 @@ export default function IndexPage() {
 
       {/* ── HEADER ── */}
       <header style={s.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
           <div style={{ ...s.appLogo, width: '32px', height: '32px', borderRadius: '8px', marginBottom: 0 }}>
             <Zap size={18} color="#3b82f6" />
           </div>
           <span style={{ fontWeight: '700', fontSize: '15px', color: '#f1f5f9', fontFamily: 'sans-serif' }}>MySpeedCoach</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0}}>
           {newRejections > 0 && (
             <div style={{ position: 'relative', cursor: 'pointer' }} title={`${newRejections} aanvraag(en) afgewezen`} onClick={() => setMobileTab('clubs')}>
               <Bell size={18} color="#f59e0b" />
