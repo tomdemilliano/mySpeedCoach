@@ -86,7 +86,7 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
       </div>
 
       {/* Modal */}
-      <div style={s.modalOverlay}>
+      <div style={{ ...s.modalOverlay, alignItems: 'center', padding: '16px' }}>
         <div style={{ ...s.modalContent, borderColor: accentColor, animation: 'fadeInUp 0.4s ease-out' }}>
 
           {/* Badge image or icon */}
@@ -149,7 +149,7 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
 
           {/* Badges are auto-saved, no accept/decline needed */}
           {isBadge ? (
-            <button onClick={onAccept} style={{
+            <button onClick={onDismiss} style={{
               width: '100%', padding: '14px', backgroundColor: accentColor,
               border: 'none', borderRadius: '10px', color: 'white',
               fontWeight: 'bold', fontSize: '16px', cursor: 'pointer',
