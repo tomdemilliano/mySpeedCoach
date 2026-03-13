@@ -86,8 +86,8 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
       </div>
 
       {/* Modal */}
-      <div style={styles.modalOverlay}>
-        <div style={{ ...styles.modalContent, borderColor: accentColor, animation: 'fadeInUp 0.4s ease-out' }}>
+      <div style={s.modalOverlay}>
+        <div style={{ ...s.modalContent, borderColor: accentColor, animation: 'fadeInUp 0.4s ease-out' }}>
 
           {/* Badge image or icon */}
           {isBadge && data.badgeImageUrl ? (
