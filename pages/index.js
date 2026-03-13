@@ -59,7 +59,7 @@ const STATUS_CONFIG = {
 const SPARK_ANIMS = ['sparkFlyA','sparkFlyB','sparkFlyC','sparkFlyD','sparkFlyE','sparkFlyF'];
 
 // ─── Celebration Overlay (records, goals, badges) ─────────────────────────────
-function CelebrationOverlay({ type, data, onAccept, onDecline }) {
+function CelebrationOverlay({ type, data, onDismiss }) {
   const isBadge  = type === 'badge';
   const isRecord = type === 'record';
   const isGoal   = type === 'goal';
