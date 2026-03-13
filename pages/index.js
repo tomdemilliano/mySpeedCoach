@@ -390,7 +390,7 @@ export default function IndexPage() {
     setHeartRate(0);
     setHrmConnected(false);
     setHrmHistory([]);
-    set([]);
+    setRecords([]);
     setGoals([]);
     setMemberships([]);
     setJoinRequests([]);
