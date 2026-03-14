@@ -546,6 +546,103 @@ export default function IndexPage() {
     return () => unsub();
   }, [selectedClubFilter, allUsers]);
 
+  // ── Achievement check (defined early so loginUser's useEffect can reference it) ──
+  const achievementCheckedRef = useRef(false);
+
+  // Run once when the user first lands on the page (after login).
+  // Uses one-shot reads so we don't leave dangling listeners.
+  const checkNewAchievements = useCallback(async (user) => {
+    try {
+      const lastVisitedRaw = await UserFactory.getLastVisited(user.id);
+      const lastVisitedMs = lastVisitedRaw?.seconds ? lastVisitedRaw.seconds * 1000 : 0;
+
+      // Update last visited timestamp immediately so next visit has a fresh baseline
+      await UserFactory.updateLastVisited(user.id);
+
+      // First visit ever — nothing to show yet
+      if (!lastVisitedMs) return;
+
+      const queue = [];
+
+      // ── 1. New badges since last visit ──
+      const { getDocs, collection } = await import('firebase/firestore');
+      const { db: firestoreDb } = await import('../firebaseConfig');
+      const badgesSnap = await getDocs(collection(firestoreDb, `users/${user.id}/earnedBadges`));
+      const earnedBadges = badgesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      earnedBadges
+        .filter(b => {
+          const ms = b.earnedAt?.seconds ? b.earnedAt.seconds * 1000 : 0;
+          return ms > lastVisitedMs;
+        })
+        .sort((a, b) => (a.earnedAt?.seconds || 0) - (b.earnedAt?.seconds || 0))
+        .forEach(b => queue.push({ type: 'badge', data: b }));
+
+      // ── 2. New records since last visit ──
+      const history = await UserFactory.getSessionHistoryOnce(user.id);
+      const recentSessions = history.filter(s => {
+        const ms = s.sessionEnd?.seconds ? s.sessionEnd.seconds * 1000 : 0;
+        return ms > lastVisitedMs;
+      });
+
+      for (const session of recentSessions) {
+        if (!session.score) continue;
+        const best = await UserFactory.getBestRecord(user.id, session.discipline, session.sessionType);
+        if (best) {
+          const recMs = best.achievedAt?.seconds ? best.achievedAt.seconds * 1000 : 0;
+          if (recMs > lastVisitedMs && best.score === session.score) {
+            queue.push({
+              type: 'record',
+              data: {
+                score: session.score,
+                discipline: session.discipline,
+                sessionType: session.sessionType,
+                previousBest: 0,
+                telemetry: session.telemetry || [],
+              },
+            });
+          }
+        }
+      }
+
+      // ── 3. Newly achieved goals since last visit ──
+      const goalsSnap = await getDocs(collection(firestoreDb, `users/${user.id}/goals`));
+      const allGoals = goalsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      allGoals
+        .filter(g => {
+          const achievedMs = g.achievedAt?.seconds ? g.achievedAt.seconds * 1000 : 0;
+          return achievedMs > lastVisitedMs;
+        })
+        .forEach(g => {
+          const matchingSession = recentSessions.find(s =>
+            s.discipline === g.discipline && (s.score || 0) >= g.targetScore
+          );
+          queue.push({
+            type: 'goal',
+            data: {
+              score: matchingSession?.score || g.targetScore,
+              discipline: g.discipline,
+              sessionType: matchingSession?.sessionType || 'Training',
+              targetScore: g.targetScore,
+            },
+          });
+        });
+
+      if (queue.length > 0) {
+        setAchievementQueue(queue);
+        setIsProcessingAchievements(true);
+      }
+    } catch (err) {
+      console.error('checkNewAchievements error:', err);
+    }
+  }, []);
+
+  // Run achievement check exactly once per login session
+  useEffect(() => {
+    if (!currentUser || achievementCheckedRef.current) return;
+    achievementCheckedRef.current = true;
+    checkNewAchievements(currentUser);
+  }, [currentUser, checkNewAchievements]);
+
   const loginUser = useCallback((user) => {
     setCurrentUser(user);
     setCookie(user.id);
@@ -554,14 +651,6 @@ export default function IndexPage() {
     setPhase('app');
     // Achievement check fires via useEffect once currentUser is in state
   }, []);
-
-  // Run achievement check exactly once per login session
-  const achievementCheckedRef = useRef(false);
-  useEffect(() => {
-    if (!currentUser || achievementCheckedRef.current) return;
-    achievementCheckedRef.current = true;
-    checkNewAchievements(currentUser);
-  }, [currentUser, checkNewAchievements]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -641,95 +730,6 @@ export default function IndexPage() {
     } catch (err) { setNewUserError('Er ging iets mis. Probeer opnieuw.'); }
     finally { setNewUserSaving(false); }
   };
-
-  // Run once when the user first lands on the page (after login).
-  // Uses one-shot reads so we don't leave dangling listeners.
-  const checkNewAchievements = useCallback(async (user) => {
-    try {
-      const lastVisitedRaw = await UserFactory.getLastVisited(user.id);
-      const lastVisitedMs = lastVisitedRaw?.seconds ? lastVisitedRaw.seconds * 1000 : 0;
-
-      // Update last visited timestamp immediately so next visit has a fresh baseline
-      await UserFactory.updateLastVisited(user.id);
-
-      // First visit ever — nothing to show yet
-      if (!lastVisitedMs) return;
-
-      const queue = [];
-
-      // ── 1. New badges since last visit ──
-      // Use getDocs (one-shot) instead of the real-time listener to avoid
-      // leaving a subscription open and the stale-closure problem.
-      const { getDocs, collection } = await import('firebase/firestore');
-      const { db: firestoreDb } = await import('../firebaseConfig');
-      const badgesSnap = await getDocs(collection(firestoreDb, `users/${user.id}/earnedBadges`));
-      const earnedBadges = badgesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      earnedBadges
-        .filter(b => {
-          const ms = b.earnedAt?.seconds ? b.earnedAt.seconds * 1000 : 0;
-          return ms > lastVisitedMs;
-        })
-        .sort((a, b) => (a.earnedAt?.seconds || 0) - (b.earnedAt?.seconds || 0))
-        .forEach(b => queue.push({ type: 'badge', data: b }));
-
-      // ── 2. New records since last visit ──
-      const history = await UserFactory.getSessionHistoryOnce(user.id);
-      const recentSessions = history.filter(s => {
-        const ms = s.sessionEnd?.seconds ? s.sessionEnd.seconds * 1000 : 0;
-        return ms > lastVisitedMs;
-      });
-
-      for (const session of recentSessions) {
-        if (!session.score) continue;
-        const best = await UserFactory.getBestRecord(user.id, session.discipline, session.sessionType);
-        if (best) {
-          const recMs = best.achievedAt?.seconds ? best.achievedAt.seconds * 1000 : 0;
-          if (recMs > lastVisitedMs && best.score === session.score) {
-            queue.push({
-              type: 'record',
-              data: {
-                score: session.score,
-                discipline: session.discipline,
-                sessionType: session.sessionType,
-                previousBest: 0,
-                telemetry: session.telemetry || [],
-              },
-            });
-          }
-        }
-      }
-
-      // ── 3. Newly achieved goals since last visit ──
-      const goalsSnap = await getDocs(collection(firestoreDb, `users/${user.id}/goals`));
-      const allGoals = goalsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      allGoals
-        .filter(g => {
-          const achievedMs = g.achievedAt?.seconds ? g.achievedAt.seconds * 1000 : 0;
-          return achievedMs > lastVisitedMs;
-        })
-        .forEach(g => {
-          const matchingSession = recentSessions.find(s =>
-            s.discipline === g.discipline && (s.score || 0) >= g.targetScore
-          );
-          queue.push({
-            type: 'goal',
-            data: {
-              score: matchingSession?.score || g.targetScore,
-              discipline: g.discipline,
-              sessionType: matchingSession?.sessionType || 'Training',
-              targetScore: g.targetScore,
-            },
-          });
-        });
-
-      if (queue.length > 0) {
-        setAchievementQueue(queue);
-        setIsProcessingAchievements(true);
-      }
-    } catch (err) {
-      console.error('checkNewAchievements error:', err);
-    }
-  }, []);
 
   const advanceAchievementQueue = () => {
     setAchievementQueue(prev => {
