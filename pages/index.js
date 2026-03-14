@@ -518,6 +518,10 @@ export default function IndexPage() {
   // Notification badge for rejected requests
   const [newRejections, setNewRejections] = useState(0);
 
+  // View mode toggle — users who are both skipper and coach can switch
+  const [viewMode, setViewMode] = useState('skipper'); // 'skipper' | 'coach'
+  const [isCoachInGroup, setIsCoachInGroup] = useState(false);
+
   useEffect(() => {
     const u1 = UserFactory.getAll(setAllUsers);
     const u2 = ClubFactory.getAll(setAllClubs);
@@ -667,6 +671,29 @@ export default function IndexPage() {
     const u4 = BadgeFactory.getEarned(currentUser.id, setEarnedBadges);
     return () => { unsubs.forEach(u => u && u()); u2(); u3(); u4(); };
   }, [currentUser]);
+
+  // Detect if user is a coach in any group (for view toggle)
+  useEffect(() => {
+    if (!currentUser || allClubs.length === 0) return;
+    const unsubs = [];
+    let foundCoach = false;
+    allClubs.forEach(club => {
+      const u = GroupFactory.getGroupsByClub(club.id, (groups) => {
+        groups.forEach(group => {
+          const u2 = GroupFactory.getMembersByGroup(club.id, group.id, (members) => {
+            const mine = members.find(m => m.id === currentUser.id);
+            if (mine?.isCoach) {
+              foundCoach = true;
+              setIsCoachInGroup(true);
+            }
+          });
+          unsubs.push(u2);
+        });
+      });
+      unsubs.push(u);
+    });
+    return () => unsubs.forEach(u => u && u());
+  }, [currentUser, allClubs]);
 
   // Track rejected requests for notification dot
   useEffect(() => {
@@ -857,7 +884,9 @@ export default function IndexPage() {
   }
 
   // ─── App ───────────────────────────────────────────────────────────────────
-  const isCoach = currentUser?.role === 'clubadmin' || currentUser?.role === 'superadmin';
+  // User is eligible for coach view if they have an admin role OR are a coach in any group
+  const hasCoachAccess = currentUser?.role === 'clubadmin' || currentUser?.role === 'superadmin' || isCoachInGroup;
+  const isCoach = viewMode === 'coach' && hasCoachAccess;
 
   return (
     <div style={s.page}>
@@ -882,10 +911,31 @@ export default function IndexPage() {
             <div style={{ fontWeight: '700', fontSize: '15px', color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {currentUser.firstName} {currentUser.lastName}
             </div>
-            {isCoach && (
-              <div style={{ fontSize: '10px', color: '#f59e0b', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                Coach
-              </div>
+            {hasCoachAccess && (
+              <button
+                onClick={() => setViewMode(v => {
+                  const next = v === 'coach' ? 'skipper' : 'coach';
+                  sessionStorage.setItem('msc_viewmode', next);
+                  // Notify _app.js via storage event (same-tab workaround)
+                  window.dispatchEvent(new StorageEvent('storage', { key: 'msc_viewmode', newValue: next }));
+                  return next;
+                })}
+                title={viewMode === 'coach' ? 'Overschakelen naar skipper-weergave' : 'Overschakelen naar coach-weergave'}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '4px',
+                  marginTop: '2px', padding: '2px 8px', borderRadius: '10px',
+                  fontSize: '10px', fontWeight: '700', cursor: 'pointer',
+                  border: '1px solid',
+                  backgroundColor: viewMode === 'coach' ? '#f59e0b22' : '#3b82f622',
+                  borderColor: viewMode === 'coach' ? '#f59e0b55' : '#3b82f655',
+                  color: viewMode === 'coach' ? '#f59e0b' : '#60a5fa',
+                  textTransform: 'uppercase', letterSpacing: '0.4px',
+                  transition: 'all 0.2s',
+                }}
+              >
+                {viewMode === 'coach' ? '⚑ Coach' : '⚐ Skipper'}
+                <span style={{ opacity: 0.6, fontSize: '9px' }}>↕</span>
+              </button>
             )}
           </div>
         </div>
