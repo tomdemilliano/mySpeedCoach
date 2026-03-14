@@ -5,6 +5,8 @@ import { db } from '../firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
 
 const COOKIE_KEY = 'msc_uid';
+const VIEW_MODE_KEY = 'msc_viewmode';
+
 const getCookie = () => {
   if (typeof document === 'undefined') return null;
   const match = document.cookie.match(new RegExp(`(?:^|; )${COOKIE_KEY}=([^;]*)`));
@@ -13,6 +15,7 @@ const getCookie = () => {
 
 export default function MyApp({ Component, pageProps }) {
   const [userRole, setUserRole] = useState('user');
+  const [coachView, setCoachView] = useState(false);
 
   useEffect(() => {
     const uid = getCookie();
@@ -22,6 +25,17 @@ export default function MyApp({ Component, pageProps }) {
         setUserRole(snap.data().role || 'user');
       }
     }).catch(() => {});
+
+    // Sync viewMode from sessionStorage so bottom nav matches the toggle on index
+    const stored = sessionStorage.getItem(VIEW_MODE_KEY);
+    if (stored) setCoachView(stored === 'coach');
+
+    // Listen for viewMode changes broadcast from the index page
+    const handler = (e) => {
+      if (e.key === VIEW_MODE_KEY) setCoachView(e.newValue === 'coach');
+    };
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
   }, []);
 
   return (
@@ -40,7 +54,7 @@ export default function MyApp({ Component, pageProps }) {
           }
         `}</style>
       </Head>
-      <AppLayout userRole={userRole}>
+      <AppLayout userRole={userRole} coachView={coachView}>
         <Component {...pageProps} />
       </AppLayout>
     </>
