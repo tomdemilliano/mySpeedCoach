@@ -263,7 +263,7 @@ function SidebarDrawer({ currentPath, open, onClose, userRole }) {
 
 // ─── Bottom Navigation Bar ────────────────────────────────────────────────────
 function BottomNav({ currentPath, userRole, onMoreClick }) {
-  const items = getBottomNav(userRole || 'user');
+  const items = getBottomNav(effectiveRole);
 
   return (
     <nav style={{
@@ -367,10 +367,12 @@ function BottomNav({ currentPath, userRole, onMoreClick }) {
 }
 
 // ─── Main layout wrapper ──────────────────────────────────────────────────────
-export default function AppLayout({ children, userRole }) {
+export default function AppLayout({ children, userRole, coachView }) {
   const router = useRouter();
   const currentPath = router.pathname;
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // coachView overrides role-based detection when explicitly set
+  const effectiveRole = coachView ? 'clubadmin' : (userRole || 'user');
 
   useEffect(() => {
     setDrawerOpen(false);
@@ -412,7 +414,7 @@ export default function AppLayout({ children, userRole }) {
 
         <nav style={{ flex: 1, padding: '12px 10px', overflowY: 'auto' }}>
           {/* Primary nav items based on role */}
-          {getBottomNav(userRole || 'user').filter(i => !i.key).map((item) => {
+          {getBottomNav(effectiveRole).filter(i => !i.key).map((item) => {
             const Icon = item.icon;
             const isActive = currentPath === item.href;
             return (
@@ -454,7 +456,7 @@ export default function AppLayout({ children, userRole }) {
           <div style={{ margin: '8px 12px', borderTop: '1px solid #1e293b' }} />
 
           {/* More items */}
-          {SIDEBAR_ITEMS.filter(i => i.roles.includes(userRole || 'user')).map((item) => {
+          {SIDEBAR_ITEMS.filter(i => i.roles.includes(effectiveRole)).map((item) => {
             const Icon = item.icon;
             const isActive = currentPath === item.href;
             return (
