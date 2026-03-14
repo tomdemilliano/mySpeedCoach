@@ -263,7 +263,7 @@ function SidebarDrawer({ currentPath, open, onClose, userRole }) {
 
 // ─── Bottom Navigation Bar ────────────────────────────────────────────────────
 function BottomNav({ currentPath, userRole, onMoreClick }) {
-  const items = getBottomNav(effectiveRole);
+  const items = getBottomNav(userRole || 'user');
 
   return (
     <nav style={{
@@ -531,7 +531,7 @@ export default function AppLayout({ children, userRole, coachView }) {
       <div className="mobile-bottom-nav">
         <BottomNav
           currentPath={currentPath}
-          userRole={userRole}
+          userRole={effectiveRole}
           onMoreClick={() => setDrawerOpen(true)}
         />
       </div>
