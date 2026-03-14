@@ -142,14 +142,17 @@ function HrmHeaderWidget({ connected, bpm, deviceName, zones, onConnect, onDisco
 }
 
 // ─── Celebration Overlay ──────────────────────────────────────────────────────
-function CelebrationOverlay({ type, data, onDismiss }) {
+// onAccept = save record / mark goal; onDecline = skip saving; badges auto-saved so onAccept = dismiss
+function CelebrationOverlay({ type, data, onAccept, onDecline }) {
   const isBadge  = type === 'badge';
   const isRecord = type === 'record';
+  const isGoal   = type === 'goal';
   const accentColor = isBadge ? '#f59e0b' : isRecord ? '#facc15' : '#22c55e';
   const Icon = isBadge ? Medal : isRecord ? Award : Target;
 
   return (
     <>
+      {/* Sparks */}
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 3000, overflow: 'hidden' }}>
         {Array.from({ length: 24 }).map((_, i) => (
           <div key={i} style={{
@@ -162,27 +165,69 @@ function CelebrationOverlay({ type, data, onDismiss }) {
           }} />
         ))}
       </div>
+
+      {/* Modal */}
       <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 500 }}>
         <div style={{ backgroundColor: '#1e293b', padding: '30px', borderRadius: '20px', width: '100%', maxWidth: '400px', border: `1px solid ${accentColor}`, animation: 'fadeInUp 0.4s ease-out' }}>
-          <div style={{ width: '80px', height: '80px', borderRadius: '50%', backgroundColor: `${accentColor}22`, border: `2px solid ${accentColor}`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', fontSize: isBadge ? '40px' : undefined }}>
-            {isBadge ? (data.badgeEmoji || '🏅') : <Icon size={40} color={accentColor} />}
-          </div>
+
+          {/* Icon / badge image */}
+          {isBadge && data.badgeImageUrl ? (
+            <img src={data.badgeImageUrl} alt={data.badgeName} style={{ width: '90px', height: '90px', borderRadius: '50%', objectFit: 'cover', margin: '0 auto 16px', display: 'block', border: `3px solid ${accentColor}` }} />
+          ) : (
+            <div style={{ width: '80px', height: '80px', borderRadius: '50%', backgroundColor: `${accentColor}22`, border: `2px solid ${accentColor}`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', animation: 'pulse 1.5s ease-in-out infinite', fontSize: isBadge ? '40px' : undefined }}>
+              {isBadge ? (data.badgeEmoji || '🏅') : <Icon size={40} color={accentColor} />}
+            </div>
+          )}
+
           <h2 style={{ color: accentColor, fontSize: '22px', margin: '0 0 8px', textAlign: 'center' }}>
             {isBadge ? '🎖️ BADGE VERDIEND!' : isRecord ? '🏆 NIEUW RECORD!' : '🎯 DOEL BEREIKT!'}
           </h2>
+
           <div style={{ textAlign: 'center', marginBottom: '20px' }}>
             {isBadge ? (
-              <div style={{ fontSize: '20px', fontWeight: '900', color: 'white' }}>{data.badgeName}</div>
+              <>
+                <div style={{ fontSize: '22px', fontWeight: '900', color: 'white', lineHeight: 1 }}>{data.badgeName}</div>
+                <div style={{ color: '#94a3b8', fontSize: '13px', marginTop: '8px', lineHeight: 1.5 }}>{data.badgeDescription || ''}</div>
+                <div style={{ color: '#64748b', fontSize: '11px', marginTop: '4px' }}>Uitgereikt door: {data.awardedByName || 'Systeem'}</div>
+              </>
             ) : (
               <>
-                <div style={{ fontSize: '40px', fontWeight: '900', color: 'white', lineHeight: 1 }}>{data.score}</div>
-                <div style={{ color: '#94a3b8', fontSize: '13px', marginTop: '4px' }}>{data.discipline} · {data.sessionType}</div>
+                <div style={{ fontSize: '42px', fontWeight: '900', color: 'white', lineHeight: 1 }}>{data.score}</div>
+                <div style={{ color: '#94a3b8', fontSize: '14px', marginTop: '4px' }}>
+                  {DISC_LABELS[data.discipline] || data.discipline} · {data.sessionType}
+                </div>
+                {isRecord && data.previousBest > 0 && (
+                  <div style={{ color: '#22c55e', fontSize: '13px', marginTop: '8px' }}>
+                    +{data.score - data.previousBest} beter dan vorig record ({data.previousBest})
+                  </div>
+                )}
+                {isGoal && (
+                  <div style={{ color: '#94a3b8', fontSize: '13px', marginTop: '8px' }}>Doel was: {data.targetScore} stappen</div>
+                )}
               </>
             )}
           </div>
-          <button onClick={onDismiss} style={{ width: '100%', padding: '14px', backgroundColor: accentColor, border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '15px', cursor: 'pointer' }}>
-            {isBadge ? '🎉 Geweldig!' : 'Sluiten'}
-          </button>
+
+          {/* Badges: single dismiss button. Records/goals: accept or skip */}
+          {isBadge ? (
+            <button onClick={onAccept} style={{ width: '100%', padding: '14px', backgroundColor: accentColor, border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <Check size={20} /> GEWELDIG!
+            </button>
+          ) : (
+            <>
+              <p style={{ color: '#cbd5e1', textAlign: 'center', fontSize: '14px', marginBottom: '16px' }}>
+                {isRecord ? 'Wil je dit als officieel record registreren?' : 'Wil je dit als doelbereiking vastleggen?'}
+              </p>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button onClick={onAccept} style={{ flex: 1, padding: '14px', backgroundColor: '#22c55e', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                  <Check size={20} /> JA
+                </button>
+                <button onClick={onDecline} style={{ flex: 1, padding: '14px', backgroundColor: '#475569', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                  <X size={20} /> NEE
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </>
@@ -507,8 +552,16 @@ export default function IndexPage() {
     setSettingsForm({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email || '' });
     setZonesForm(user.heartrateZones || DEFAULT_ZONES);
     setPhase('app');
-    checkNewAchievements(user);
+    // Achievement check fires via useEffect once currentUser is in state
   }, []);
+
+  // Run achievement check exactly once per login session
+  const achievementCheckedRef = useRef(false);
+  useEffect(() => {
+    if (!currentUser || achievementCheckedRef.current) return;
+    achievementCheckedRef.current = true;
+    checkNewAchievements(currentUser);
+  }, [currentUser, checkNewAchievements]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -589,33 +642,94 @@ export default function IndexPage() {
     finally { setNewUserSaving(false); }
   };
 
-  const checkNewAchievements = async (user) => {
-    const lastVisitedRaw = await UserFactory.getLastVisited(user.id);
-    const lastVisitedMs = lastVisitedRaw?.seconds ? lastVisitedRaw.seconds * 1000 : 0;
-    await UserFactory.updateLastVisited(user.id);
-    if (!lastVisitedMs) return;
-    const queue = [];
-    await new Promise(resolve => {
-      BadgeFactory.getEarned(user.id, (earned) => {
-        earned.filter(b => { const ms = b.earnedAt?.seconds ? b.earnedAt.seconds * 1000 : 0; return ms > lastVisitedMs; })
-          .forEach(b => queue.push({ type: 'badge', data: b }));
-        resolve();
+  // Run once when the user first lands on the page (after login).
+  // Uses one-shot reads so we don't leave dangling listeners.
+  const checkNewAchievements = useCallback(async (user) => {
+    try {
+      const lastVisitedRaw = await UserFactory.getLastVisited(user.id);
+      const lastVisitedMs = lastVisitedRaw?.seconds ? lastVisitedRaw.seconds * 1000 : 0;
+
+      // Update last visited timestamp immediately so next visit has a fresh baseline
+      await UserFactory.updateLastVisited(user.id);
+
+      // First visit ever — nothing to show yet
+      if (!lastVisitedMs) return;
+
+      const queue = [];
+
+      // ── 1. New badges since last visit ──
+      // Use getDocs (one-shot) instead of the real-time listener to avoid
+      // leaving a subscription open and the stale-closure problem.
+      const { getDocs, collection } = await import('firebase/firestore');
+      const { db: firestoreDb } = await import('../firebaseConfig');
+      const badgesSnap = await getDocs(collection(firestoreDb, `users/${user.id}/earnedBadges`));
+      const earnedBadges = badgesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      earnedBadges
+        .filter(b => {
+          const ms = b.earnedAt?.seconds ? b.earnedAt.seconds * 1000 : 0;
+          return ms > lastVisitedMs;
+        })
+        .sort((a, b) => (a.earnedAt?.seconds || 0) - (b.earnedAt?.seconds || 0))
+        .forEach(b => queue.push({ type: 'badge', data: b }));
+
+      // ── 2. New records since last visit ──
+      const history = await UserFactory.getSessionHistoryOnce(user.id);
+      const recentSessions = history.filter(s => {
+        const ms = s.sessionEnd?.seconds ? s.sessionEnd.seconds * 1000 : 0;
+        return ms > lastVisitedMs;
       });
-    });
-    const history = await UserFactory.getSessionHistoryOnce(user.id);
-    const recent = history.filter(s => { const ms = s.sessionEnd?.seconds ? s.sessionEnd.seconds * 1000 : 0; return ms > lastVisitedMs; });
-    for (const session of recent) {
-      if (!session.score) continue;
-      const best = await UserFactory.getBestRecord(user.id, session.discipline, session.sessionType);
-      if (best) {
-        const recMs = best.achievedAt?.seconds ? best.achievedAt.seconds * 1000 : 0;
-        if (recMs > lastVisitedMs && best.score === session.score) {
-          queue.push({ type: 'record', data: { score: session.score, discipline: session.discipline, sessionType: session.sessionType } });
+
+      for (const session of recentSessions) {
+        if (!session.score) continue;
+        const best = await UserFactory.getBestRecord(user.id, session.discipline, session.sessionType);
+        if (best) {
+          const recMs = best.achievedAt?.seconds ? best.achievedAt.seconds * 1000 : 0;
+          if (recMs > lastVisitedMs && best.score === session.score) {
+            queue.push({
+              type: 'record',
+              data: {
+                score: session.score,
+                discipline: session.discipline,
+                sessionType: session.sessionType,
+                previousBest: 0,
+                telemetry: session.telemetry || [],
+              },
+            });
+          }
         }
       }
+
+      // ── 3. Newly achieved goals since last visit ──
+      const goalsSnap = await getDocs(collection(firestoreDb, `users/${user.id}/goals`));
+      const allGoals = goalsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      allGoals
+        .filter(g => {
+          const achievedMs = g.achievedAt?.seconds ? g.achievedAt.seconds * 1000 : 0;
+          return achievedMs > lastVisitedMs;
+        })
+        .forEach(g => {
+          const matchingSession = recentSessions.find(s =>
+            s.discipline === g.discipline && (s.score || 0) >= g.targetScore
+          );
+          queue.push({
+            type: 'goal',
+            data: {
+              score: matchingSession?.score || g.targetScore,
+              discipline: g.discipline,
+              sessionType: matchingSession?.sessionType || 'Training',
+              targetScore: g.targetScore,
+            },
+          });
+        });
+
+      if (queue.length > 0) {
+        setAchievementQueue(queue);
+        setIsProcessingAchievements(true);
+      }
+    } catch (err) {
+      console.error('checkNewAchievements error:', err);
     }
-    if (queue.length > 0) { setAchievementQueue(queue); setIsProcessingAchievements(true); }
-  };
+  }, []);
 
   const advanceAchievementQueue = () => {
     setAchievementQueue(prev => {
@@ -625,6 +739,20 @@ export default function IndexPage() {
     });
   };
 
+  const handleAchievementAccept = async () => {
+    const current = achievementQueue[0];
+    if (!current || !currentUser) { advanceAchievementQueue(); return; }
+    if (current.type === 'record') {
+      try {
+        await UserFactory.addRecord(currentUser.id, current.data);
+      } catch (e) { console.error('Failed to save record:', e); }
+    }
+    // Badge: already saved automatically, goal: already marked by BadgeFactory — just advance
+    advanceAchievementQueue();
+  };
+
+  const handleAchievementDecline = () => advanceAchievementQueue();
+
   const logout = () => {
     clearCookie();
     setCurrentUser(null);
@@ -632,6 +760,7 @@ export default function IndexPage() {
     setHrmConnected(false);
     setRecords([]);
     setGoals([]);
+    achievementCheckedRef.current = false; // allow re-check on next login
     setPhase('identify');
   };
 
@@ -735,7 +864,12 @@ export default function IndexPage() {
       <style>{globalCSS}</style>
 
       {isProcessingAchievements && achievementQueue.length > 0 && (
-        <CelebrationOverlay type={achievementQueue[0].type} data={achievementQueue[0].data} onDismiss={advanceAchievementQueue} />
+        <CelebrationOverlay
+            type={achievementQueue[0].type}
+            data={achievementQueue[0].data}
+            onAccept={handleAchievementAccept}
+            onDecline={handleAchievementDecline}
+          />
       )}
 
       {/* ── HEADER ── */}
