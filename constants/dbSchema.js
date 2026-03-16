@@ -53,6 +53,35 @@ export const SCHEMA = {
         note: "string",
       }
     },
+
+    // ── NEW (Feature 8.1) ────────────────────────────────────────────────────
+    // A ClubMember is a trackable person within a club.
+    // They may or may not have a Firebase app account.
+    // Training data (sessions, records, badges, goals) lives here from Feature 8.4 onwards.
+    "clubs/{clubId}/members/{memberId}": {
+      firstName: "string",
+      lastName: "string",
+      birthDate: "timestamp|null",
+      notes: "string",
+      createdAt: "timestamp",
+      createdBy: "uid",   // uid of the coach who created the record
+      // NOTE: no uid field — that relationship lives in userMemberLinks (Feature 8.2)
+    },
+
+    // ── NEW (Feature 8.2) ────────────────────────────────────────────────────
+    // Connects a users/{uid} document to one or more ClubMember documents.
+    // Enables one user → many members and one member → many users.
+    userMemberLinks: {
+      uid: "string",
+      clubId: "string",
+      memberId: "string",
+      relationship: "self|parent|guardian|other",
+      canEdit: "boolean",
+      canViewHealth: "boolean",
+      createdAt: "timestamp",
+      approvedBy: "uid|null",  // null = self-linked on registration
+    },
+
     badges: {
       name: "string",
       description: "string",
@@ -212,7 +241,6 @@ export const UserFactory = {
     }
     return historyPromise;
   },
-    
 
   getSessionHistory: (uid, callback) =>
     onSnapshot(collection(db, `users/${uid}/sessionHistory`), (snap) => {
@@ -466,8 +494,6 @@ export const ClubJoinRequestFactory = {
 
 export const BadgeFactory = {
 
-  // ── Badge management (superadmin) ──
-
   create: (badgeData) =>
     addDoc(collection(db, 'badges'), {
       name: badgeData.name || '',
@@ -489,20 +515,17 @@ export const BadgeFactory = {
   delete: (badgeId) =>
     deleteDoc(doc(db, 'badges', badgeId)),
 
-  // All badges (superadmin)
   getAll: (callback) =>
     onSnapshot(collection(db, 'badges'), (snap) => {
       callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }),
 
-  // Global + club-specific badges for a given club
   getForClub: (clubId, callback) =>
     onSnapshot(collection(db, 'badges'), (snap) => {
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       callback(all.filter(b => b.isActive && (b.scope === 'global' || b.clubId === clubId)));
     }),
 
-  // All active global badges only
   getGlobal: (callback) => {
     const q = query(
       collection(db, 'badges'),
@@ -513,8 +536,6 @@ export const BadgeFactory = {
       callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
   },
-
-  // ── Earned badges ──
 
   award: (uid, badgeData, awardedBy = 'system', awardedByName = 'Systeem', sessionId = null, note = '') =>
     addDoc(collection(db, `users/${uid}/earnedBadges`), {
@@ -538,7 +559,6 @@ export const BadgeFactory = {
       callback(sorted);
     }),
 
-  // Get earned badges for multiple users at once (for leaderboard)
   getEarnedForUsers: async (uids) => {
     const results = {};
     await Promise.all(uids.map(async (uid) => {
@@ -560,10 +580,7 @@ export const BadgeFactory = {
   revokeEarned: (uid, earnedBadgeId) =>
     deleteDoc(doc(db, `users/${uid}/earnedBadges`, earnedBadgeId)),
 
-  // ── Automatic badge checking ──
-  // Returns array of newly awarded badges (for celebration UI)
   checkAndAward: async (uid, sessionData, sessionHistory) => {
-    // Load all active badges
     const badgesSnap = await getDocs(query(
       collection(db, 'badges'),
       where('isActive', '==', true),
@@ -581,7 +598,6 @@ export const BadgeFactory = {
       const t = badge.trigger;
       let earned = false;
 
-      // Speed / score trigger
       if (t.minScore != null) {
         const discMatch = !t.discipline || t.discipline === 'any' || t.discipline === sessionData.discipline;
         const typeMatch = !t.sessionType || t.sessionType === 'any' || t.sessionType === sessionData.sessionType;
@@ -590,7 +606,6 @@ export const BadgeFactory = {
         }
       }
 
-      // First session of a discipline
       if (!earned && t.firstSession) {
         const discSessions = sessionHistory.filter(s => s.discipline === t.discipline);
         if (discSessions.length <= 1 && sessionData.discipline === t.discipline) {
@@ -598,12 +613,10 @@ export const BadgeFactory = {
         }
       }
 
-      // Total sessions milestone
       if (!earned && t.totalSessions != null) {
         if (sessionHistory.length >= t.totalSessions) earned = true;
       }
 
-      // Consecutive weeks
       if (!earned && t.consecutiveWeeks != null) {
         const getWeekNumber = (date) => {
           const d = new Date(date);
@@ -642,23 +655,15 @@ export const BadgeFactory = {
     return awarded;
   },
 
-  // Seed default badges (call once from superadmin)
   seedDefaults: async () => {
     const defaults = [
-      // First session badges
       { name: 'Eerste Sprong', description: 'Eerste 30 seconden sessie geregistreerd', emoji: '🌱', category: 'milestone', type: 'automatic', scope: 'global', trigger: { firstSession: true, discipline: '30sec' } },
       { name: 'Eerste Marathon', description: 'Eerste 2 minuten sessie geregistreerd', emoji: '🌿', category: 'milestone', type: 'automatic', scope: 'global', trigger: { firstSession: true, discipline: '2min' } },
       { name: 'Eerste Uithouding', description: 'Eerste 3 minuten sessie geregistreerd', emoji: '🌳', category: 'milestone', type: 'automatic', scope: 'global', trigger: { firstSession: true, discipline: '3min' } },
-
-      // Session milestone badges
       { name: '10 Sessies', description: '10 sessies voltooid', emoji: '🔟', category: 'milestone', type: 'automatic', scope: 'global', trigger: { totalSessions: 10 } },
       { name: '50 Sessies', description: '50 sessies voltooid', emoji: '💪', category: 'milestone', type: 'automatic', scope: 'global', trigger: { totalSessions: 50 } },
       { name: '100 Sessies', description: '100 sessies voltooid', emoji: '🏆', category: 'milestone', type: 'automatic', scope: 'global', trigger: { totalSessions: 100 } },
-
-      // Consistency
       { name: 'Wekelijkse Krijger', description: '5 weken op rij getraind', emoji: '🗓️', category: 'consistency', type: 'automatic', scope: 'global', trigger: { consecutiveWeeks: 5 } },
-
-      // Speed badges — 30sec
       { name: 'Haas', description: '60 stappen in 30 seconden', emoji: '🐇', category: 'speed', type: 'automatic', scope: 'global', trigger: { discipline: '30sec', minScore: 60, sessionType: 'any' } },
       { name: 'Vos', description: '70 stappen in 30 seconden', emoji: '🦊', category: 'speed', type: 'automatic', scope: 'global', trigger: { discipline: '30sec', minScore: 70, sessionType: 'any' } },
       { name: 'Gazelle', description: '80 stappen in 30 seconden', emoji: '🦌', category: 'speed', type: 'automatic', scope: 'global', trigger: { discipline: '30sec', minScore: 80, sessionType: 'any' } },
@@ -706,12 +711,10 @@ export const CounterBadgeFactory = {
       const t = badge.trigger;
       let earned = false;
 
-      // Total sessions counted milestone
       if (t?.totalSessionsCounted != null) {
         if (allCounted.length >= t.totalSessionsCounted) earned = true;
       }
 
-      // First session counted of a specific discipline
       if (!earned && t?.firstSessionCounted) {
         const discCounted = allCounted.filter(s => s.discipline === t.discipline);
         if (discCounted.length <= 1 && newSession.discipline === t.discipline) earned = true;
@@ -728,4 +731,216 @@ export const CounterBadgeFactory = {
     }
     return awarded;
   },
+};
+
+// ==========================================
+// 6. CLUB MEMBER FACTORY  (Feature 8.1)
+// ==========================================
+// A ClubMember is a trackable person within a club.
+// They may or may not have a Firebase app account.
+// NOTE: training data sub-collections (sessionHistory, records, earnedBadges, goals)
+// are migrated to this path in Feature 8.4 — not part of this factory yet.
+
+export const ClubMemberFactory = {
+
+  /**
+   * Create a new ClubMember under a club.
+   * @param {string} clubId
+   * @param {{ firstName, lastName, birthDate?, notes? }} data
+   * @param {string} createdByUid  uid of the coach creating the record
+   * @returns {Promise<DocumentReference>}
+   */
+  create: (clubId, data, createdByUid) =>
+    addDoc(collection(db, `clubs/${clubId}/members`), {
+      firstName: data.firstName || '',
+      lastName: data.lastName || '',
+      birthDate: data.birthDate || null,
+      notes: data.notes || '',
+      createdAt: serverTimestamp(),
+      createdBy: createdByUid || null,
+      // No uid field — that relationship lives in userMemberLinks
+    }),
+
+  /**
+   * Fetch a single ClubMember document.
+   */
+  getById: (clubId, memberId) =>
+    getDoc(doc(db, `clubs/${clubId}/members`, memberId)),
+
+  /**
+   * Real-time subscription to all members of a club.
+   * @param {string} clubId
+   * @param {function} callback  receives array of { id, ...data }
+   * @returns unsubscribe function
+   */
+  getAll: (clubId, callback) =>
+    onSnapshot(collection(db, `clubs/${clubId}/members`), (snap) => {
+      callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }),
+
+  /**
+   * Client-side search helper — filters the realtime stream by name.
+   * Returns an unsubscribe function; calls callback with filtered results.
+   * @param {string} clubId
+   * @param {string} nameQuery  case-insensitive substring match on firstName + lastName
+   * @param {function} callback
+   * @returns unsubscribe function
+   */
+  search: (clubId, nameQuery, callback) => {
+    const lower = nameQuery.toLowerCase().trim();
+    return onSnapshot(collection(db, `clubs/${clubId}/members`), (snap) => {
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const filtered = lower
+        ? all.filter(m =>
+            `${m.firstName} ${m.lastName}`.toLowerCase().includes(lower)
+          )
+        : all;
+      callback(filtered);
+    });
+  },
+
+  /**
+   * Update profile fields on a ClubMember.
+   */
+  update: (clubId, memberId, data) =>
+    updateDoc(doc(db, `clubs/${clubId}/members`, memberId), data),
+
+  /**
+   * Delete a ClubMember.
+   * Removes the member document from all groups in the club,
+   * and removes all UserMemberLinks pointing to this member.
+   * NOTE: sub-collection data (sessions, records, etc.) cleanup is handled
+   * in Feature 8.4 when those sub-collections are introduced.
+   */
+  delete: async (clubId, memberId) => {
+    // Remove from all groups in this club
+    const groupsSnap = await getDocs(collection(db, `clubs/${clubId}/groups`));
+    for (const groupDoc of groupsSnap.docs) {
+      const memberRef = doc(db, `clubs/${clubId}/groups/${groupDoc.id}/members`, memberId);
+      const memberSnap = await getDoc(memberRef);
+      if (memberSnap.exists()) {
+        await deleteDoc(memberRef);
+      }
+    }
+
+    // Remove all UserMemberLinks pointing to this member
+    const linksSnap = await getDocs(
+      query(
+        collection(db, 'userMemberLinks'),
+        where('clubId', '==', clubId),
+        where('memberId', '==', memberId)
+      )
+    );
+    for (const linkDoc of linksSnap.docs) {
+      await deleteDoc(linkDoc.ref);
+    }
+
+    // Delete the ClubMember document itself
+    return deleteDoc(doc(db, `clubs/${clubId}/members`, memberId));
+  },
+};
+
+// ==========================================
+// 7. USER MEMBER LINK FACTORY  (Feature 8.2)
+// ==========================================
+// Connects a users/{uid} document to one or more ClubMember documents.
+// Enables: one user → many members, one member → many users.
+
+export const UserMemberLinkFactory = {
+
+  /**
+   * Create a link between an app user and a ClubMember.
+   *
+   * @param {string} uid            Firebase Auth uid of the app user
+   * @param {string} clubId
+   * @param {string} memberId       ClubMember document id
+   * @param {'self'|'parent'|'guardian'|'other'} relationship
+   * @param {{ canEdit?: boolean, canViewHealth?: boolean }} options
+   *   - canEdit defaults to true only for 'self' links
+   *   - canViewHealth defaults to false (requires explicit coach grant per issue #83)
+   * @param {string|null} approvedByUid  null = self-linked on registration
+   */
+  create: (uid, clubId, memberId, relationship = 'self', options = {}, approvedByUid = null) =>
+    addDoc(collection(db, 'userMemberLinks'), {
+      uid,
+      clubId,
+      memberId,
+      relationship,
+      canEdit: options.canEdit ?? (relationship === 'self'),
+      canViewHealth: options.canViewHealth ?? false,  // false by default, explicit grant required
+      createdAt: serverTimestamp(),
+      approvedBy: approvedByUid,
+    }),
+
+  /**
+   * Delete a link by its document id.
+   */
+  delete: (linkId) =>
+    deleteDoc(doc(db, 'userMemberLinks', linkId)),
+
+  /**
+   * Get all links for a given app user (across all clubs), joined with the
+   * ClubMember data. Calls callback with array of { link, member } objects.
+   *
+   * @param {string} uid
+   * @param {function} callback  receives { link, member }[]
+   * @returns unsubscribe function
+   */
+  getForUser: (uid, callback) => {
+    const q = query(collection(db, 'userMemberLinks'), where('uid', '==', uid));
+    return onSnapshot(q, async (snap) => {
+      const links = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Client-side join: fetch each ClubMember document
+      const joined = await Promise.all(
+        links.map(async (link) => {
+          const memberSnap = await getDoc(
+            doc(db, `clubs/${link.clubId}/members`, link.memberId)
+          );
+          if (!memberSnap.exists()) return null;
+          return {
+            link,
+            member: { id: memberSnap.id, clubId: link.clubId, ...memberSnap.data() },
+          };
+        })
+      );
+      callback(joined.filter(Boolean));
+    });
+  },
+
+  /**
+   * Get all users linked to a specific ClubMember.
+   * Useful for "who has access to this member's data?"
+   *
+   * @param {string} clubId
+   * @param {string} memberId
+   * @param {function} callback  receives link[]
+   * @returns unsubscribe function
+   */
+  getForMember: (clubId, memberId, callback) => {
+    const q = query(
+      collection(db, 'userMemberLinks'),
+      where('clubId', '==', clubId),
+      where('memberId', '==', memberId)
+    );
+    return onSnapshot(q, (snap) => {
+      callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  },
+
+  /**
+   * Update canEdit and/or canViewHealth on an existing link.
+   * @param {string} linkId
+   * @param {{ canEdit?: boolean, canViewHealth?: boolean }} permissions
+   */
+  updatePermissions: (linkId, permissions) =>
+    updateDoc(doc(db, 'userMemberLinks', linkId), permissions),
+
+  /**
+   * Mark a link as approved by a coach or admin.
+   * Sets approvedBy to the given uid.
+   * @param {string} linkId
+   * @param {string} approvedByUid
+   */
+  approve: (linkId, approvedByUid) =>
+    updateDoc(doc(db, 'userMemberLinks', linkId), { approvedBy: approvedByUid }),
 };
