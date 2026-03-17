@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UserFactory, ClubFactory, GroupFactory, ClubJoinRequestFactory, BadgeFactory } from '../constants/dbSchema';
+import {
+  UserFactory, ClubFactory, GroupFactory,
+  ClubJoinRequestFactory, BadgeFactory, ClubMemberFactory,
+} from '../constants/dbSchema';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 import {
@@ -111,11 +114,11 @@ function BadgeFormModal({ badge, clubs, onSave, onClose }) {
   const [form, setForm] = useState(badge ? { ...EMPTY_BADGE, ...badge } : { ...EMPTY_BADGE });
   const [triggerKind, setTriggerKind] = useState(detectTriggerKind(badge?.trigger));
   const [tv, setTv] = useState({
-    discipline: badge?.trigger?.discipline || 'any',
-    sessionType: badge?.trigger?.sessionType || 'any',
-    minScore: badge?.trigger?.minScore ?? '',
-    totalSessions: badge?.trigger?.totalSessions ?? '',
-    consecutiveWeeks: badge?.trigger?.consecutiveWeeks ?? '',
+    discipline:      badge?.trigger?.discipline      || 'any',
+    sessionType:     badge?.trigger?.sessionType     || 'any',
+    minScore:        badge?.trigger?.minScore        ?? '',
+    totalSessions:   badge?.trigger?.totalSessions   ?? '',
+    consecutiveWeeks:badge?.trigger?.consecutiveWeeks ?? '',
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -239,7 +242,9 @@ function BadgeFormModal({ badge, clubs, onSave, onClose }) {
   );
 }
 
-// ─── Award Badge Modal ────────────────────────────────────────────────────────
+// ─── Award Badge Modal ─────────────────────────────────────────────────────────
+// Feature 8.12: skipper now carries { clubId, memberId, firstName, lastName }
+// BadgeFactory.award writes to clubs/{clubId}/members/{memberId}/earnedBadges
 function AwardBadgeModal({ skipper, onClose }) {
   const [badges, setBadges] = useState([]);
   const [selectedId, setSelectedId] = useState('');
@@ -258,11 +263,24 @@ function AwardBadgeModal({ skipper, onClose }) {
     setSaving(true);
     const badge = badges.find(b => b.id === selectedId);
     try {
-      await BadgeFactory.award(skipper.id, badge, coachName, coachName, null, note);
+      // Feature 8.12: award to ClubMember path
+      await BadgeFactory.award(
+        skipper.clubId,
+        skipper.memberId,
+        badge,
+        coachName,
+        coachName,
+        null,
+        note,
+      );
       setDone(true);
       setTimeout(onClose, 1500);
-    } catch (e) { console.error(e); alert('Uitreiken mislukt.'); }
-    finally { setSaving(false); }
+    } catch (e) {
+      console.error(e);
+      alert('Uitreiken mislukt.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -272,7 +290,9 @@ function AwardBadgeModal({ skipper, onClose }) {
           <h3 style={{ margin: 0, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}><Award size={18} color="#f59e0b" /> Badge uitreiken</h3>
           <button style={s.iconBtn} onClick={onClose}><X size={18} /></button>
         </div>
-        <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '14px' }}>Aan: <strong style={{ color: '#f1f5f9' }}>{skipper.firstName} {skipper.lastName}</strong></p>
+        <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '14px' }}>
+          Aan: <strong style={{ color: '#f1f5f9' }}>{skipper.firstName} {skipper.lastName}</strong>
+        </p>
 
         {done ? (
           <div style={{ textAlign: 'center', padding: '20px 0' }}>
@@ -359,11 +379,11 @@ function BadgesTab({ clubs }) {
   ];
 
   const filtered = badges.filter(b => {
-    if (filter === 'global')   return b.scope === 'global';
-    if (filter === 'club')     return b.scope === 'club';
-    if (filter === 'automatic')return b.type === 'automatic';
-    if (filter === 'manual')   return b.type === 'manual';
-    if (filter === 'inactive') return !b.isActive;
+    if (filter === 'global')    return b.scope === 'global';
+    if (filter === 'club')      return b.scope === 'club';
+    if (filter === 'automatic') return b.type === 'automatic';
+    if (filter === 'manual')    return b.type === 'manual';
+    if (filter === 'inactive')  return !b.isActive;
     return true;
   });
 
@@ -423,13 +443,11 @@ function BadgesTab({ clubs }) {
                     <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{badge.description || '—'}</div>
                   </div>
                 </div>
-
                 <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
                   <span style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10px', fontWeight: '600', backgroundColor: catColor + '22', color: catColor, border: `1px solid ${catColor}44` }}>{badge.category}</span>
                   <span style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10px', fontWeight: '600', backgroundColor: '#3b82f622', color: '#60a5fa', border: '1px solid #3b82f644' }}>{badge.type === 'automatic' ? '🤖 Auto' : '👋 Manueel'}</span>
                   <span style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10px', fontWeight: '600', backgroundColor: '#1e293b', color: '#94a3b8', border: '1px solid #334155' }}>{badge.scope === 'global' ? '🌐 Globaal' : `🏟 ${club?.name || 'Club'}`}</span>
                 </div>
-
                 {badge.trigger && badge.type === 'automatic' && (
                   <div style={{ fontSize: '11px', color: '#64748b', backgroundColor: '#0f172a', borderRadius: '6px', padding: '6px 8px' }}>
                     {badge.trigger.minScore != null && `≥ ${badge.trigger.minScore} steps`}
@@ -439,7 +457,6 @@ function BadgesTab({ clubs }) {
                     {badge.trigger.discipline && badge.trigger.discipline !== 'any' && badge.trigger.minScore != null && ` · ${badge.trigger.discipline}`}
                   </div>
                 )}
-
                 <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
                   <button onClick={() => { setEditing(badge); setShowForm(true); }} style={{ ...bs.ghost, flex: 1, justifyContent: 'center' }}><Edit2 size={12} /> Bewerk</button>
                   <button onClick={() => BadgeFactory.update(badge.id, { isActive: !badge.isActive })} style={{ ...bs.ghost, flex: 1, justifyContent: 'center', color: badge.isActive ? '#f97316' : '#22c55e' }}>{badge.isActive ? '⛔ Deactiveer' : '✅ Activeer'}</button>
@@ -471,7 +488,12 @@ export default function SuperAdmin() {
   const [users, setUsers] = useState([]);
   const [clubs, setClubs] = useState([]);
   const [groups, setGroups] = useState([]);
+
+  // Feature 8.12: group members are now memberId-keyed ClubMember refs
   const [members, setMembers] = useState([]);
+  // Feature 8.12: ClubMember profiles for name resolution
+  const [clubMemberProfiles, setClubMemberProfiles] = useState([]);
+
   const [memberCounts, setMemberCounts] = useState({});
   const [selectedClub, setSelectedClub] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
@@ -479,6 +501,8 @@ export default function SuperAdmin() {
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [isClubModalOpen, setIsClubModalOpen] = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+
+  // Feature 8.12: awardTarget now carries { clubId, memberId, firstName, lastName }
   const [awardTarget, setAwardTarget] = useState(null);
 
   const [editingId, setEditingId] = useState(null);
@@ -488,6 +512,12 @@ export default function SuperAdmin() {
   const [groupForm, setGroupForm] = useState({ name: '', useHRM: true });
   const [memberEditForm, setMemberEditForm] = useState({});
   const [showOnlyActive, setShowOnlyActive] = useState(true);
+
+  // Feature 8.12: "Nieuw lid aanmaken" inline form state
+  const [showNewMemberForm, setShowNewMemberForm] = useState(false);
+  const [newMemberForm, setNewMemberForm] = useState({ firstName: '', lastName: '', birthDate: '', notes: '' });
+  const [newMemberSaving, setNewMemberSaving] = useState(false);
+  const [newMemberError, setNewMemberError] = useState('');
 
   const [joinRequests, setJoinRequests] = useState([]);
   const [requestFilter, setRequestFilter] = useState('pending');
@@ -525,14 +555,27 @@ export default function SuperAdmin() {
 
   useEffect(() => {
     if (!selectedGroup || !selectedClub) return;
-    const unsub = GroupFactory.getMembersByGroup(selectedClub.id, selectedGroup.id, setMembers);
-    return () => unsub();
+    // Feature 8.12: load both group membership docs AND ClubMember profiles
+    const u1 = GroupFactory.getMembersByGroup(selectedClub.id, selectedGroup.id, setMembers);
+    const u2 = ClubMemberFactory.getAll(selectedClub.id, setClubMemberProfiles);
+    return () => { u1(); u2(); };
   }, [selectedGroup, selectedClub]);
+
+  // Feature 8.12: resolve ClubMember name — m.id is now memberId
+  const getMemberProfile = (memberId) =>
+    clubMemberProfiles.find(p => p.id === memberId) || null;
 
   const filteredUsers   = users.filter(u => `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredClubs   = clubs.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
   const pendingCount    = joinRequests.filter(r => r.status === 'pending').length;
   const filteredRequests = requestFilter === 'all' ? joinRequests : joinRequests.filter(r => r.status === requestFilter);
+
+  // Feature 8.12: ClubMembers not yet in this group (for the picker)
+  const memberIdsInGroup = new Set(members.map(m => m.memberId || m.id));
+  const availableToAdd = clubMemberProfiles.filter(p => !memberIdsInGroup.has(p.id));
+  const filteredAvailable = availableToAdd.filter(p =>
+    `${p.firstName} ${p.lastName}`.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   const handleUserSubmit = async (e) => {
     e.preventDefault();
@@ -549,13 +592,62 @@ export default function SuperAdmin() {
     editingId ? await GroupFactory.update(selectedClub.id, editingId, groupForm) : await GroupFactory.create(selectedClub.id, groupForm);
     setIsGroupModalOpen(false);
   };
-  const handleAddMember = async (user) => {
-    await GroupFactory.addMember(selectedClub.id, selectedGroup.id, user.id, { isSkipper: true, isCoach: false, startMembership: new Date(), endMembership: null });
+
+  // Feature 8.12: addMember uses memberId from ClubMember profile
+  const handleAddMember = async (memberProfile) => {
+    await GroupFactory.addMember(
+      selectedClub.id,
+      selectedGroup.id,
+      memberProfile.id, // memberId
+      { isSkipper: true, isCoach: false, startMembership: new Date(), endMembership: null }
+    );
   };
-  const handleUpdateMember = async (uid, data) => {
-    await GroupFactory.updateMember(selectedClub.id, selectedGroup.id, uid, data);
+
+  // Feature 8.12: create a brand-new ClubMember and immediately add to group
+  const handleCreateAndAddMember = async () => {
+    setNewMemberError('');
+    if (!newMemberForm.firstName.trim() || !newMemberForm.lastName.trim()) {
+      setNewMemberError('Voornaam en achternaam zijn verplicht.');
+      return;
+    }
+    setNewMemberSaving(true);
+    try {
+      // Get current user uid for createdBy (best-effort from cookie)
+      const uid = typeof document !== 'undefined'
+        ? (document.cookie.match(/msc_uid=([^;]*)/) || [])[1] || null
+        : null;
+
+      const docRef = await ClubMemberFactory.create(
+        selectedClub.id,
+        {
+          firstName: newMemberForm.firstName.trim(),
+          lastName:  newMemberForm.lastName.trim(),
+          birthDate: newMemberForm.birthDate ? new Date(newMemberForm.birthDate) : null,
+          notes:     newMemberForm.notes.trim(),
+        },
+        uid,
+      );
+      await GroupFactory.addMember(
+        selectedClub.id,
+        selectedGroup.id,
+        docRef.id,
+        { isSkipper: true, isCoach: false, startMembership: new Date(), endMembership: null }
+      );
+      setNewMemberForm({ firstName: '', lastName: '', birthDate: '', notes: '' });
+      setShowNewMemberForm(false);
+    } catch (e) {
+      console.error(e);
+      setNewMemberError('Aanmaken mislukt. Probeer opnieuw.');
+    } finally {
+      setNewMemberSaving(false);
+    }
+  };
+
+  const handleUpdateMember = async (memberId, data) => {
+    await GroupFactory.updateMember(selectedClub.id, selectedGroup.id, memberId, data);
     setEditingMemberUid(null);
   };
+
   const handleConfirmReject = async () => {
     if (!rejectReason.trim()) { setRejectError('Een reden is verplicht bij afwijzing.'); return; }
     setRejectSaving(true);
@@ -565,8 +657,9 @@ export default function SuperAdmin() {
     } catch { setRejectError('Er ging iets mis. Probeer opnieuw.'); }
     finally { setRejectSaving(false); }
   };
+
   const handleBack = () => {
-    if (selectedGroup) { setSelectedGroup(null); setSearchTerm(''); }
+    if (selectedGroup) { setSelectedGroup(null); setMembers([]); setClubMemberProfiles([]); setSearchTerm(''); }
     else if (selectedClub) { setSelectedClub(null); setGroups([]); setSearchTerm(''); }
   };
 
@@ -692,7 +785,10 @@ export default function SuperAdmin() {
 
             {selectedClub && selectedGroup && (
               <div>
-                <div style={s.sectionTitle}><Users size={18} color="#3b82f6" /><span>{selectedGroup.name} — Leden ({members.length})</span></div>
+                <div style={s.sectionTitle}>
+                  <Users size={18} color="#3b82f6" />
+                  <span>{selectedGroup.name} — Leden ({members.length})</span>
+                </div>
 
                 <div style={s.filterRow}>
                   <label style={s.filterLabel}>
@@ -701,34 +797,68 @@ export default function SuperAdmin() {
                   </label>
                 </div>
 
+                {/* ── Member list ── */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
                   {members
                     .filter(m => {
                       if (!showOnlyActive) return true;
-                      const nu = new Date();
+                      const nu    = new Date();
                       const start = m.startMembership?.toDate ? m.startMembership.toDate() : new Date(m.startMembership);
-                      const eind  = m.endMembership?.toDate  ? m.endMembership.toDate()  : (m.endMembership ? new Date(m.endMembership) : null);
+                      const eind  = m.endMembership?.toDate  ? m.endMembership.toDate()   : (m.endMembership ? new Date(m.endMembership) : null);
                       return start <= nu && (!eind || eind > nu);
                     })
                     .map(m => {
-                      const user = users.find(u => u.id === m.id);
-                      const isEditing = editingMemberUid === m.id;
+                      // Feature 8.12: m.id is memberId — resolve name from ClubMember profiles
+                      const memberId = m.memberId || m.id;
+                      const profile  = getMemberProfile(memberId);
+                      const isEditing = editingMemberUid === memberId;
+
                       return (
-                        <div key={m.id} style={s.memberCard}>
+                        <div key={memberId} style={s.memberCard}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                             <div>
-                              <div style={s.memberName}>{user ? `${user.firstName} ${user.lastName}` : 'Onbekend'}</div>
-                              <div style={s.memberEmail}>{user?.email || '—'}</div>
+                              <div style={s.memberName}>
+                                {profile
+                                  ? `${profile.firstName} ${profile.lastName}`
+                                  : <span style={{ color: '#475569', fontStyle: 'italic' }}>Onbekend lid ({memberId.slice(0, 8)}…)</span>
+                                }
+                              </div>
+                              {profile?.birthDate && (
+                                <div style={s.memberEmail}>
+                                  {profile.birthDate?.seconds
+                                    ? new Date(profile.birthDate.seconds * 1000).toLocaleDateString('nl-BE')
+                                    : ''}
+                                </div>
+                              )}
+                              {profile?.notes && (
+                                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', fontStyle: 'italic' }}>{profile.notes}</div>
+                              )}
                             </div>
                             <div style={{ display: 'flex', gap: '4px' }}>
-                              <button style={{ ...s.iconBtn, color: '#f59e0b' }} title="Badge uitreiken" onClick={() => setAwardTarget({ id: m.id, firstName: user?.firstName || '?', lastName: user?.lastName || '' })}><Award size={16} /></button>
-                              <button style={{ ...s.iconBtn, color: '#ef4444' }} onClick={() => { if (confirm('Lidmaatschap definitief verwijderen?')) GroupFactory.removeMember(selectedClub.id, selectedGroup.id, m.id); }}><Trash2 size={16} /></button>
+                              <button
+                                style={{ ...s.iconBtn, color: '#f59e0b' }}
+                                title="Badge uitreiken"
+                                onClick={() => setAwardTarget({
+                                  clubId:    selectedClub.id,
+                                  memberId,
+                                  firstName: profile?.firstName || '?',
+                                  lastName:  profile?.lastName  || '',
+                                })}
+                              >
+                                <Award size={16} />
+                              </button>
+                              <button
+                                style={{ ...s.iconBtn, color: '#ef4444' }}
+                                onClick={() => { if (confirm('Lidmaatschap definitief verwijderen?')) GroupFactory.removeMember(selectedClub.id, selectedGroup.id, memberId); }}
+                              >
+                                <Trash2 size={16} />
+                              </button>
                             </div>
                           </div>
 
                           <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                            <button style={{ ...s.roleToggle, backgroundColor: m.isSkipper ? '#3b82f6' : '#334155' }} onClick={() => handleUpdateMember(m.id, { isSkipper: !m.isSkipper })}>Skipper: {m.isSkipper ? 'JA' : 'NEE'}</button>
-                            <button style={{ ...s.roleToggle, backgroundColor: m.isCoach ? '#f59e0b' : '#334155' }} onClick={() => handleUpdateMember(m.id, { isCoach: !m.isCoach })}>Coach: {m.isCoach ? 'JA' : 'NEE'}</button>
+                            <button style={{ ...s.roleToggle, backgroundColor: m.isSkipper ? '#3b82f6' : '#334155' }} onClick={() => handleUpdateMember(memberId, { isSkipper: !m.isSkipper })}>Skipper: {m.isSkipper ? 'JA' : 'NEE'}</button>
+                            <button style={{ ...s.roleToggle, backgroundColor: m.isCoach   ? '#f59e0b' : '#334155' }} onClick={() => handleUpdateMember(memberId, { isCoach:   !m.isCoach   })}>Coach: {m.isCoach ? 'JA' : 'NEE'}</button>
                           </div>
 
                           <div style={s.memberDates}>
@@ -748,8 +878,8 @@ export default function SuperAdmin() {
 
                           <div style={{ marginTop: '10px' }}>
                             {isEditing
-                              ? <button style={s.saveBtn} onClick={() => handleUpdateMember(m.id, memberEditForm)}><Save size={14} /> Opslaan</button>
-                              : <button style={s.editBtn} onClick={() => { setEditingMemberUid(m.id); setMemberEditForm(m); }}><Edit2 size={14} /> Wijzig lidmaatschap</button>}
+                              ? <button style={s.saveBtn} onClick={() => handleUpdateMember(memberId, memberEditForm)}><Save size={14} /> Opslaan</button>
+                              : <button style={s.editBtn} onClick={() => { setEditingMemberUid(memberId); setMemberEditForm(m); }}><Edit2 size={14} /> Wijzig lidmaatschap</button>}
                           </div>
                         </div>
                       );
@@ -757,19 +887,85 @@ export default function SuperAdmin() {
                   {members.length === 0 && <p style={s.emptyText}>Geen leden in deze groep.</p>}
                 </div>
 
+                {/* ── Feature 8.12: Picker — shows ClubMembers not yet in group ── */}
                 <div style={s.pickerPanel}>
-                  <div style={s.pickerTitle}>Lid toevoegen</div>
-                  <div style={s.searchWrap}><Search size={14} style={s.searchIcon} /><input placeholder="Zoek gebruiker…" onChange={e => setSearchTerm(e.target.value)} style={s.searchInput} /></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <div style={s.pickerTitle}>Lid toevoegen</div>
+                    <button
+                      onClick={() => { setShowNewMemberForm(v => !v); setNewMemberError(''); }}
+                      style={{ ...bs.secondary, fontSize: '12px', padding: '6px 10px' }}
+                    >
+                      <Plus size={13} /> Nieuw lid aanmaken
+                    </button>
+                  </div>
+
+                  {/* Inline new-member form */}
+                  {showNewMemberForm && (
+                    <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', padding: '14px', marginBottom: '12px', border: '1px solid #334155' }}>
+                      <div style={{ fontSize: '12px', color: '#a78bfa', fontWeight: '700', marginBottom: '10px' }}>Nieuw ClubMember aanmaken</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                        <div>
+                          <label style={s.fieldLabel}>Voornaam *</label>
+                          <input style={s.input} placeholder="Emma" value={newMemberForm.firstName} onChange={e => setNewMemberForm(f => ({ ...f, firstName: e.target.value }))} />
+                        </div>
+                        <div>
+                          <label style={s.fieldLabel}>Achternaam *</label>
+                          <input style={s.input} placeholder="De Smet" value={newMemberForm.lastName} onChange={e => setNewMemberForm(f => ({ ...f, lastName: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                        <div>
+                          <label style={s.fieldLabel}>Geboortedatum</label>
+                          <input style={s.input} type="date" value={newMemberForm.birthDate} onChange={e => setNewMemberForm(f => ({ ...f, birthDate: e.target.value }))} />
+                        </div>
+                        <div>
+                          <label style={s.fieldLabel}>Notities</label>
+                          <input style={s.input} placeholder="optioneel" value={newMemberForm.notes} onChange={e => setNewMemberForm(f => ({ ...f, notes: e.target.value }))} />
+                        </div>
+                      </div>
+                      {newMemberError && (
+                        <div style={{ color: '#ef4444', fontSize: '12px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <AlertCircle size={12} />{newMemberError}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          onClick={handleCreateAndAddMember}
+                          disabled={newMemberSaving}
+                          style={{ ...bs.primary, opacity: newMemberSaving ? 0.6 : 1 }}
+                        >
+                          <UserPlus size={14} />{newMemberSaving ? 'Aanmaken…' : 'Aanmaken & toevoegen'}
+                        </button>
+                        <button onClick={() => setShowNewMemberForm(false)} style={bs.secondary}><X size={14} /> Annuleren</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Existing ClubMembers search */}
+                  <div style={s.searchWrap}>
+                    <Search size={14} style={s.searchIcon} />
+                    <input placeholder="Zoek bestaand lid…" onChange={e => setSearchTerm(e.target.value)} style={s.searchInput} />
+                  </div>
                   <div style={s.pickerList}>
-                    {users
-                      .filter(u => !members.some(m => m.id === u.id))
-                      .filter(u => `${u.firstName} ${u.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()))
-                      .map(u => (
-                        <div key={u.id} style={s.pickerRow} onClick={() => handleAddMember(u)}>
-                          <span style={{ fontSize: '14px' }}>{u.firstName} {u.lastName}</span>
+                    {filteredAvailable.length === 0 ? (
+                      <p style={{ color: '#475569', fontSize: '13px', textAlign: 'center', padding: '16px 0' }}>
+                        Alle leden van deze club zitten al in de groep.
+                      </p>
+                    ) : (
+                      filteredAvailable.map(p => (
+                        <div key={p.id} style={s.pickerRow} onClick={() => handleAddMember(p)}>
+                          <div>
+                            <span style={{ fontSize: '14px' }}>{p.firstName} {p.lastName}</span>
+                            {p.birthDate?.seconds && (
+                              <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>
+                                {new Date(p.birthDate.seconds * 1000).toLocaleDateString('nl-BE')}
+                              </span>
+                            )}
+                          </div>
                           <PlusCircle size={18} color="#22c55e" />
                         </div>
-                      ))}
+                      ))
+                    )}
                   </div>
                 </div>
               </div>
@@ -825,9 +1021,9 @@ export default function SuperAdmin() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
                             <span style={{ fontWeight: '700', fontSize: '15px', color: '#f1f5f9' }}>{req.firstName} {req.lastName}</span>
                             <span style={{ ...s.statusBadge, backgroundColor: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}33` }}>
-                              {req.status === 'pending' && <Clock size={10} />}
+                              {req.status === 'pending'  && <Clock       size={10} />}
                               {req.status === 'approved' && <CheckCircle2 size={10} />}
-                              {req.status === 'rejected' && <XCircle size={10} />}
+                              {req.status === 'rejected' && <XCircle      size={10} />}
                               {cfg.label}
                             </span>
                           </div>
@@ -957,7 +1153,7 @@ export default function SuperAdmin() {
               <input placeholder="Groep naam" required style={s.input} value={groupForm.name} onChange={e => setGroupForm({ ...groupForm, name: e.target.value })} />
               <label style={s.fieldLabel}>Hartslagmeters (HRM)</label>
               <div style={s.switchRow} onClick={() => setGroupForm({ ...groupForm, useHRM: !groupForm.useHRM })}>
-                <div style={{ ...s.switchHalf, backgroundColor: groupForm.useHRM ? '#059669' : '#334155' }}>AAN</div>
+                <div style={{ ...s.switchHalf, backgroundColor: groupForm.useHRM  ? '#059669' : '#334155' }}>AAN</div>
                 <div style={{ ...s.switchHalf, backgroundColor: !groupForm.useHRM ? '#ef4444' : '#334155' }}>UIT</div>
               </div>
               <button type="submit" style={s.saveBtn}><Save size={16} /> Opslaan</button>
@@ -976,7 +1172,7 @@ const getRoleColor = (role) => {
   return '#3b82f6';
 };
 
-// ─── Button helpers (sub-components) ─────────────────────────────────────────
+// ─── Button helpers ───────────────────────────────────────────────────────────
 const bs = {
   primary:   { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '9px 14px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
   secondary: { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '9px 14px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '8px', color: '#94a3b8', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
@@ -1040,7 +1236,7 @@ const s = {
   editBtn: { width: '100%', background: 'none', border: '1px solid #334155', color: '#94a3b8', padding: '8px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' },
   saveBtn: { width: '100%', backgroundColor: '#22c55e', border: 'none', color: 'white', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' },
   pickerPanel: { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '14px' },
-  pickerTitle: { fontSize: '13px', fontWeight: '700', color: '#94a3b8', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' },
+  pickerTitle: { fontSize: '13px', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' },
   pickerList: { maxHeight: '240px', overflowY: 'auto', marginTop: '10px' },
   pickerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #334155', cursor: 'pointer', fontSize: '14px', color: '#f1f5f9' },
   requestsHeader: { marginBottom: '14px' },
