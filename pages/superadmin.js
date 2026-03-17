@@ -10,8 +10,16 @@ import {
   Trash2, Search, Edit2, X, Save, ArrowLeft, Plus,
   Heart, HeartOff, PlusCircle, Calendar,
   Bell, CheckCircle2, XCircle, Clock, MessageSquare,
-  Check, AlertCircle, Medal, Upload, Award,
+  Check, AlertCircle, Medal, Upload, Award, ChevronRight,
 } from 'lucide-react';
+
+// ─── Cookie helper ─────────────────────────────────────────────────────────────
+const COOKIE_KEY = 'msc_uid';
+const getCookieUid = () => {
+  if (typeof document === 'undefined') return null;
+  const m = document.cookie.match(new RegExp(`(?:^|; )${COOKIE_KEY}=([^;]*)`));
+  return m ? m[1] : null;
+};
 
 // ─── Status config ────────────────────────────────────────────────────────────
 const STATUS_CONFIG = {
@@ -24,12 +32,12 @@ const CATEGORY_COLORS = {
   speed: '#f97316', milestone: '#3b82f6', consistency: '#22c55e', skill: '#a78bfa',
 };
 const CATEGORIES = [
-  { value: 'speed',       label: 'Snelheid',    emoji: '⚡' },
-  { value: 'milestone',   label: 'Mijlpalen',   emoji: '🎯' },
-  { value: 'consistency', label: 'Consistentie',emoji: '🗓️' },
-  { value: 'skill',       label: 'Vaardigheid', emoji: '🌟' },
+  { value: 'speed',        label: 'Snelheid',     emoji: '⚡' },
+  { value: 'milestone',    label: 'Mijlpalen',    emoji: '🎯' },
+  { value: 'consistency',  label: 'Consistentie', emoji: '🗓️' },
+  { value: 'skill',        label: 'Vaardigheid',  emoji: '🌟' },
 ];
-const DISCIPLINES = ['any', '30sec', '2min', '3min'];
+const DISCIPLINES   = ['any', '30sec', '2min', '3min'];
 const SESSION_TYPES = ['any', 'Training', 'Wedstrijd'];
 const TRIGGER_KINDS = [
   { value: 'score',            label: 'Minimum score (steps)' },
@@ -67,18 +75,18 @@ function buildTrigger(kind, vals) {
 function ImageUploader({ currentUrl, onUploaded }) {
   const fileRef = useRef();
   const [uploading, setUploading] = useState(false);
-  const [preview, setPreview] = useState(currentUrl || '');
+  const [preview,   setPreview]   = useState(currentUrl || '');
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) { alert('Alleen afbeeldingen zijn toegestaan.'); return; }
-    if (file.size > 2 * 1024 * 1024) { alert('Afbeelding mag maximaal 2 MB zijn.'); return; }
+    if (file.size > 2 * 1024 * 1024)    { alert('Afbeelding mag maximaal 2 MB zijn.');   return; }
     setUploading(true);
     try {
       const storage = getStorage();
-      const path = `badge-images/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
-      const sRef = storageRef(storage, path);
+      const path    = `badge-images/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const sRef    = storageRef(storage, path);
       await uploadBytes(sRef, file);
       const url = await getDownloadURL(sRef);
       setPreview(url);
@@ -101,7 +109,11 @@ function ImageUploader({ currentUrl, onUploaded }) {
         <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} style={bs.secondary}>
           <Upload size={13} />{uploading ? 'Uploading…' : preview ? 'Vervang' : 'Upload afbeelding'}
         </button>
-        {preview && <button type="button" onClick={() => { setPreview(''); onUploaded(''); }} style={{ ...bs.ghost, marginLeft: '6px', color: '#ef4444' }}><X size={12} /> Wis</button>}
+        {preview && (
+          <button type="button" onClick={() => { setPreview(''); onUploaded(''); }} style={{ ...bs.ghost, marginLeft: '6px', color: '#ef4444' }}>
+            <X size={12} /> Wis
+          </button>
+        )}
         <p style={{ fontSize: '10px', color: '#475569', margin: '4px 0 0' }}>PNG / JPG · max 2 MB</p>
       </div>
     </div>
@@ -114,11 +126,11 @@ function BadgeFormModal({ badge, clubs, onSave, onClose }) {
   const [form, setForm] = useState(badge ? { ...EMPTY_BADGE, ...badge } : { ...EMPTY_BADGE });
   const [triggerKind, setTriggerKind] = useState(detectTriggerKind(badge?.trigger));
   const [tv, setTv] = useState({
-    discipline:      badge?.trigger?.discipline      || 'any',
-    sessionType:     badge?.trigger?.sessionType     || 'any',
-    minScore:        badge?.trigger?.minScore        ?? '',
-    totalSessions:   badge?.trigger?.totalSessions   ?? '',
-    consecutiveWeeks:badge?.trigger?.consecutiveWeeks ?? '',
+    discipline:       badge?.trigger?.discipline       || 'any',
+    sessionType:      badge?.trigger?.sessionType      || 'any',
+    minScore:         badge?.trigger?.minScore         ?? '',
+    totalSessions:    badge?.trigger?.totalSessions    ?? '',
+    consecutiveWeeks: badge?.trigger?.consecutiveWeeks ?? '',
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -165,7 +177,7 @@ function BadgeFormModal({ badge, clubs, onSave, onClose }) {
               ...bs.toggle,
               backgroundColor: form.category === c.value ? (CATEGORY_COLORS[c.value] + '22') : 'transparent',
               borderColor: form.category === c.value ? CATEGORY_COLORS[c.value] : '#334155',
-              color: form.category === c.value ? CATEGORY_COLORS[c.value] : '#64748b',
+              color:       form.category === c.value ? CATEGORY_COLORS[c.value] : '#64748b',
             }}>{c.emoji} {c.label}</button>
           ))}
         </div>
@@ -242,16 +254,15 @@ function BadgeFormModal({ badge, clubs, onSave, onClose }) {
   );
 }
 
-// ─── Award Badge Modal ─────────────────────────────────────────────────────────
-// Feature 8.12: skipper now carries { clubId, memberId, firstName, lastName }
-// BadgeFactory.award writes to clubs/{clubId}/members/{memberId}/earnedBadges
-function AwardBadgeModal({ skipper, onClose }) {
-  const [badges, setBadges] = useState([]);
+// ─── Award Badge Modal ────────────────────────────────────────────────────────
+// skipper = { clubId, memberId, firstName, lastName }
+function AwardBadgeModal({ skipper, awardedByName, onClose }) {
+  const [badges,     setBadges]     = useState([]);
   const [selectedId, setSelectedId] = useState('');
-  const [note, setNote] = useState('');
-  const [coachName, setCoachName] = useState('Coach');
-  const [saving, setSaving] = useState(false);
-  const [done, setDone] = useState(false);
+  const [note,       setNote]       = useState('');
+  const [coachName,  setCoachName]  = useState(awardedByName || 'Coach');
+  const [saving,     setSaving]     = useState(false);
+  const [done,       setDone]       = useState(false);
 
   useEffect(() => {
     const unsub = BadgeFactory.getAll(all => setBadges(all.filter(b => b.type === 'manual' && b.isActive)));
@@ -263,24 +274,11 @@ function AwardBadgeModal({ skipper, onClose }) {
     setSaving(true);
     const badge = badges.find(b => b.id === selectedId);
     try {
-      // Feature 8.12: award to ClubMember path
-      await BadgeFactory.award(
-        skipper.clubId,
-        skipper.memberId,
-        badge,
-        coachName,
-        coachName,
-        null,
-        note,
-      );
+      await BadgeFactory.award(skipper.clubId, skipper.memberId, badge, coachName, coachName, null, note);
       setDone(true);
       setTimeout(onClose, 1500);
-    } catch (e) {
-      console.error(e);
-      alert('Uitreiken mislukt.');
-    } finally {
-      setSaving(false);
-    }
+    } catch (e) { console.error(e); alert('Uitreiken mislukt.'); }
+    finally { setSaving(false); }
   };
 
   return (
@@ -328,11 +326,9 @@ function AwardBadgeModal({ skipper, onClose }) {
 
             <label style={s.fieldLabel}>Jouw naam</label>
             <input style={{ ...s.input, marginBottom: '12px' }} value={coachName} onChange={e => setCoachName(e.target.value)} placeholder="Naam van de coach" />
-
             <label style={s.fieldLabel}>Notitie (optioneel)</label>
             <textarea style={{ ...s.input, resize: 'vertical', minHeight: '70px', marginBottom: '16px', fontFamily: 'inherit' }}
               value={note} onChange={e => setNote(e.target.value)} placeholder="Waarom verdient deze skipper dit?" />
-
             <div style={{ display: 'flex', gap: '10px' }}>
               <button onClick={handleAward} disabled={saving || !selectedId} style={{ ...bs.primary, flex: 1, justifyContent: 'center' }}>
                 <Award size={15} /> {saving ? 'Uitreiken…' : 'Uitreiken'}
@@ -346,18 +342,196 @@ function AwardBadgeModal({ skipper, onClose }) {
   );
 }
 
-// ─── Badges Tab ───────────────────────────────────────────────────────────────
-function BadgesTab({ clubs }) {
-  const [badges, setBadges] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [filter, setFilter] = useState('all');
-  const [seeding, setSeeding] = useState(false);
+// ─── ClubMember Form Modal ────────────────────────────────────────────────────
+function ClubMemberFormModal({ member, clubId, createdByUid, onClose }) {
+  const isEdit = !!member?.id;
+  const [form, setForm] = useState({
+    firstName: member?.firstName || '',
+    lastName:  member?.lastName  || '',
+    birthDate: member?.birthDate?.seconds
+      ? new Date(member.birthDate.seconds * 1000).toISOString().split('T')[0]
+      : '',
+    notes: member?.notes || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  const handleSave = async () => {
+    setError('');
+    if (!form.firstName.trim() || !form.lastName.trim()) { setError('Voornaam en achternaam zijn verplicht.'); return; }
+    setSaving(true);
+    try {
+      const data = {
+        firstName: form.firstName.trim(),
+        lastName:  form.lastName.trim(),
+        birthDate: form.birthDate ? new Date(form.birthDate) : null,
+        notes:     form.notes.trim(),
+      };
+      if (isEdit) {
+        await ClubMemberFactory.update(clubId, member.id, data);
+      } else {
+        await ClubMemberFactory.create(clubId, data, createdByUid);
+      }
+      onClose();
+    } catch (e) { console.error(e); setError('Opslaan mislukt. Probeer opnieuw.'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div style={s.modalOverlay}>
+      <div style={s.modal}>
+        <div style={s.modalHeader}>
+          <h3 style={{ margin: 0, fontSize: '16px' }}>{isEdit ? 'Lid bewerken' : 'Nieuw lid aanmaken'}</h3>
+          <button style={s.iconBtn} onClick={onClose}><X size={18} /></button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+          <div>
+            <label style={s.fieldLabel}>Voornaam *</label>
+            <input style={s.input} placeholder="Emma" value={form.firstName} onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} autoFocus />
+          </div>
+          <div>
+            <label style={s.fieldLabel}>Achternaam *</label>
+            <input style={s.input} placeholder="De Smet" value={form.lastName} onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} />
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+          <div>
+            <label style={s.fieldLabel}>Geboortedatum</label>
+            <input style={s.input} type="date" value={form.birthDate} onChange={e => setForm(f => ({ ...f, birthDate: e.target.value }))} />
+          </div>
+          <div>
+            <label style={s.fieldLabel}>Notities</label>
+            <input style={s.input} placeholder="optioneel" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          </div>
+        </div>
+        {error && <div style={s.errorBanner}><AlertCircle size={13} /> {error}</div>}
+        <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+          <button onClick={handleSave} disabled={saving} style={{ ...bs.primary, flex: 1, justifyContent: 'center', opacity: saving ? 0.6 : 1 }}>
+            <Save size={15} /> {saving ? 'Opslaan…' : isEdit ? 'Wijzigingen opslaan' : 'Lid aanmaken'}
+          </button>
+          <button onClick={onClose} style={bs.secondary}><X size={15} /> Annuleren</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Leden Tab ─────────────────────────────────────────────────────────────────
+function LedenTab({ clubId, clubName, currentUserName }) {
+  const [members,     setMembers]     = useState([]);
+  const [search,      setSearch]      = useState('');
+  const [showForm,    setShowForm]    = useState(false);
+  const [editing,     setEditing]     = useState(null);
+  const [awardTarget, setAwardTarget] = useState(null);
+  const createdByUid = getCookieUid();
 
   useEffect(() => {
-    const u = BadgeFactory.getAll(setBadges);
-    return () => u();
-  }, []);
+    if (!clubId) return;
+    const unsub = ClubMemberFactory.getAll(clubId, setMembers);
+    return () => unsub();
+  }, [clubId]);
+
+  const filtered = members.filter(m =>
+    `${m.firstName} ${m.lastName}`.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const handleDelete = async (member) => {
+    if (!confirm(`Lid "${member.firstName} ${member.lastName}" verwijderen? Dit verwijdert ook alle groepslidmaatschappen en koppelingen.`)) return;
+    await ClubMemberFactory.delete(clubId, member.id);
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+        <div>
+          <div style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Users size={18} color="#3b82f6" /> Leden
+            {clubName && <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '400' }}>— {clubName}</span>}
+          </div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{members.length} leden in de club</div>
+        </div>
+        <button onClick={() => { setEditing(null); setShowForm(true); }} style={bs.primary}>
+          <UserPlus size={15} /> Nieuw lid
+        </button>
+      </div>
+
+      <div style={{ ...s.searchWrap, marginBottom: '14px' }}>
+        <Search size={16} style={s.searchIcon} />
+        <input placeholder="Zoek op naam…" value={search} onChange={e => setSearch(e.target.value)} style={s.searchInput} />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '50px 0', color: '#475569' }}>
+          <Users size={36} color="#334155" style={{ marginBottom: '10px' }} />
+          <p style={{ fontSize: '13px' }}>{search ? 'Geen leden gevonden voor deze zoekopdracht.' : 'Nog geen leden. Klik op "Nieuw lid" om te beginnen.'}</p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {filtered.map(member => {
+            const birthYear = member.birthDate?.seconds
+              ? new Date(member.birthDate.seconds * 1000).getFullYear()
+              : null;
+            const initials = `${member.firstName?.[0] || '?'}${member.lastName?.[0] || ''}`.toUpperCase();
+            return (
+              <div key={member.id} style={s.memberCard}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#3b82f622', border: '1px solid #3b82f644', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '13px', color: '#60a5fa', flexShrink: 0 }}>
+                    {initials}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: '600', fontSize: '14px', color: '#f1f5f9' }}>{member.firstName} {member.lastName}</div>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '1px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {birthYear && <span>🎂 {birthYear}</span>}
+                      {member.notes && <span style={{ fontStyle: 'italic' }}>{member.notes}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                    <button style={{ ...s.iconBtn, color: '#f59e0b' }} title="Badge uitreiken"
+                      onClick={() => setAwardTarget({ clubId, memberId: member.id, firstName: member.firstName, lastName: member.lastName })}>
+                      <Award size={16} />
+                    </button>
+                    <button style={s.iconBtn} title="Bewerken" onClick={() => { setEditing(member); setShowForm(true); }}>
+                      <Edit2 size={16} />
+                    </button>
+                    <button style={{ ...s.iconBtn, color: '#ef4444' }} title="Verwijderen" onClick={() => handleDelete(member)}>
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showForm && (
+        <ClubMemberFormModal
+          member={editing}
+          clubId={clubId}
+          createdByUid={createdByUid}
+          onClose={() => { setShowForm(false); setEditing(null); }}
+        />
+      )}
+      {awardTarget && (
+        <AwardBadgeModal
+          skipper={awardTarget}
+          awardedByName={currentUserName}
+          onClose={() => setAwardTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Badges Tab (SuperAdmin only) ─────────────────────────────────────────────
+function BadgesTab({ clubs }) {
+  const [badges,   setBadges]   = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editing,  setEditing]  = useState(null);
+  const [filter,   setFilter]   = useState('all');
+  const [seeding,  setSeeding]  = useState(false);
+
+  useEffect(() => { const u = BadgeFactory.getAll(setBadges); return () => u(); }, []);
 
   const handleSave = async (data) => {
     if (data.id) { const { id, ...rest } = data; await BadgeFactory.update(id, rest); }
@@ -365,7 +539,7 @@ function BadgesTab({ clubs }) {
   };
 
   const handleSeed = async () => {
-    if (!confirm('Standaard badges toevoegen? Dit voegt ~12 nieuwe badges toe.')) return;
+    if (!confirm('Standaard badges toevoegen?')) return;
     setSeeding(true);
     try { await BadgeFactory.seedDefaults(); }
     catch (e) { console.error(e); alert('Seeding mislukt.'); }
@@ -373,9 +547,8 @@ function BadgesTab({ clubs }) {
   };
 
   const FILTERS = [
-    { v: 'all', l: 'Alle' }, { v: 'global', l: '🌐 Globaal' },
-    { v: 'club', l: '🏟 Club' }, { v: 'automatic', l: '🤖 Auto' },
-    { v: 'manual', l: '👋 Manueel' }, { v: 'inactive', l: '⛔ Inactief' },
+    { v: 'all', l: 'Alle' }, { v: 'global', l: '🌐 Globaal' }, { v: 'club', l: '🏟 Club' },
+    { v: 'automatic', l: '🤖 Auto' }, { v: 'manual', l: '👋 Manueel' }, { v: 'inactive', l: '⛔ Inactief' },
   ];
 
   const filtered = badges.filter(b => {
@@ -394,30 +567,17 @@ function BadgesTab({ clubs }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800', fontSize: '16px', color: '#f1f5f9' }}>
             <Medal size={18} color="#f59e0b" /> Badges beheren
           </div>
-          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-            {badges.filter(b => b.isActive).length} actief · {badges.length} totaal
-          </div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{badges.filter(b => b.isActive).length} actief · {badges.length} totaal</div>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          {badges.length === 0 && (
-            <button onClick={handleSeed} disabled={seeding} style={bs.secondary}>
-              {seeding ? '⏳ Laden…' : '🌱 Standaard badges'}
-            </button>
-          )}
-          <button onClick={() => { setEditing(null); setShowForm(true); }} style={bs.primary}>
-            <Plus size={15} /> Nieuwe badge
-          </button>
+          {badges.length === 0 && <button onClick={handleSeed} disabled={seeding} style={bs.secondary}>{seeding ? '⏳ Laden…' : '🌱 Standaard badges'}</button>}
+          <button onClick={() => { setEditing(null); setShowForm(true); }} style={bs.primary}><Plus size={15} /> Nieuwe badge</button>
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
         {FILTERS.map(f => (
-          <button key={f.v} onClick={() => setFilter(f.v)} style={{
-            ...bs.toggle,
-            backgroundColor: filter === f.v ? '#3b82f622' : 'transparent',
-            borderColor: filter === f.v ? '#3b82f6' : '#334155',
-            color: filter === f.v ? '#60a5fa' : '#64748b',
-          }}>{f.l}</button>
+          <button key={f.v} onClick={() => setFilter(f.v)} style={{ ...bs.toggle, backgroundColor: filter === f.v ? '#3b82f622' : 'transparent', borderColor: filter === f.v ? '#3b82f6' : '#334155', color: filter === f.v ? '#60a5fa' : '#64748b' }}>{f.l}</button>
         ))}
       </div>
 
@@ -467,220 +627,263 @@ function BadgesTab({ clubs }) {
           })}
         </div>
       )}
-
-      {showForm && (
-        <BadgeFormModal
-          badge={editing}
-          clubs={clubs}
-          onSave={handleSave}
-          onClose={() => { setShowForm(false); setEditing(null); }}
-        />
-      )}
+      {showForm && <BadgeFormModal badge={editing} clubs={clubs} onSave={handleSave} onClose={() => { setShowForm(false); setEditing(null); }} />}
     </div>
   );
 }
 
-// ─── Main SuperAdmin Component ────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ════════════════════════════════════════════════════════════════════════════
 export default function SuperAdmin() {
-  const [activeTab, setActiveTab] = useState('users');
-  const [searchTerm, setSearchTerm] = useState('');
+  // ── Auth ───────────────────────────────────────────────────────────────────
+  const [currentUser,  setCurrentUser]  = useState(null);
+  const [authLoading,  setAuthLoading]  = useState(true);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [isClubAdmin,  setIsClubAdmin]  = useState(false);
+  const [adminClubs,   setAdminClubs]   = useState([]);
+  const [activeClub,   setActiveClub]   = useState(null);
 
-  const [users, setUsers] = useState([]);
-  const [clubs, setClubs] = useState([]);
-  const [groups, setGroups] = useState([]);
-
-  // Feature 8.12: group members are now memberId-keyed ClubMember refs
-  const [members, setMembers] = useState([]);
-  // Feature 8.12: ClubMember profiles for name resolution
+  // ── UI state ───────────────────────────────────────────────────────────────
+  const [activeTab,   setActiveTab]   = useState('clubs');
+  const [searchTerm,  setSearchTerm]  = useState('');
+  const [users,       setUsers]       = useState([]);
+  const [clubs,       setClubs]       = useState([]);
+  const [groups,      setGroups]      = useState([]);
+  const [members,            setMembers]            = useState([]);
   const [clubMemberProfiles, setClubMemberProfiles] = useState([]);
-
-  const [memberCounts, setMemberCounts] = useState({});
-  const [selectedClub, setSelectedClub] = useState(null);
-  const [selectedGroup, setSelectedGroup] = useState(null);
-
-  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
-  const [isClubModalOpen, setIsClubModalOpen] = useState(false);
-  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
-
-  // Feature 8.12: awardTarget now carries { clubId, memberId, firstName, lastName }
-  const [awardTarget, setAwardTarget] = useState(null);
-
-  const [editingId, setEditingId] = useState(null);
-  const [editingMemberUid, setEditingMemberUid] = useState(null);
-  const [userForm, setUserForm] = useState({ firstName: '', lastName: '', email: '', role: 'user' });
-  const [clubForm, setClubForm] = useState({ name: '', logoUrl: '' });
-  const [groupForm, setGroupForm] = useState({ name: '', useHRM: true });
-  const [memberEditForm, setMemberEditForm] = useState({});
-  const [showOnlyActive, setShowOnlyActive] = useState(true);
-
-  // Feature 8.12: "Nieuw lid aanmaken" inline form state
-  const [showNewMemberForm, setShowNewMemberForm] = useState(false);
-  const [newMemberForm, setNewMemberForm] = useState({ firstName: '', lastName: '', birthDate: '', notes: '' });
-  const [newMemberSaving, setNewMemberSaving] = useState(false);
-  const [newMemberError, setNewMemberError] = useState('');
-
-  const [joinRequests, setJoinRequests] = useState([]);
-  const [requestFilter, setRequestFilter] = useState('pending');
-  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [memberCounts,       setMemberCounts]       = useState({});
+  const [selectedGroup,      setSelectedGroup]      = useState(null);
+  const [isUserModalOpen,    setIsUserModalOpen]    = useState(false);
+  const [isClubModalOpen,    setIsClubModalOpen]    = useState(false);
+  const [isGroupModalOpen,   setIsGroupModalOpen]   = useState(false);
+  const [awardTarget,        setAwardTarget]        = useState(null);
+  const [editingId,          setEditingId]          = useState(null);
+  const [editingMemberUid,   setEditingMemberUid]   = useState(null);
+  const [userForm,           setUserForm]           = useState({ firstName: '', lastName: '', email: '', role: 'user' });
+  const [clubForm,           setClubForm]           = useState({ name: '', logoUrl: '' });
+  const [groupForm,          setGroupForm]          = useState({ name: '', useHRM: true });
+  const [memberEditForm,     setMemberEditForm]     = useState({});
+  const [showOnlyActive,     setShowOnlyActive]     = useState(true);
+  const [showNewMemberForm,  setShowNewMemberForm]  = useState(false);
+  const [newMemberForm,      setNewMemberForm]      = useState({ firstName: '', lastName: '', birthDate: '', notes: '' });
+  const [newMemberSaving,    setNewMemberSaving]    = useState(false);
+  const [newMemberError,     setNewMemberError]     = useState('');
+  const [joinRequests,       setJoinRequests]       = useState([]);
+  const [requestFilter,      setRequestFilter]      = useState('pending');
+  const [rejectModalOpen,    setRejectModalOpen]    = useState(false);
   const [rejectingRequestId, setRejectingRequestId] = useState(null);
-  const [rejectReason, setRejectReason] = useState('');
-  const [rejectError, setRejectError] = useState('');
-  const [rejectSaving, setRejectSaving] = useState(false);
+  const [rejectReason,       setRejectReason]       = useState('');
+  const [rejectError,        setRejectError]        = useState('');
+  const [rejectSaving,       setRejectSaving]       = useState(false);
+
+  // ── Bootstrap ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const uid = getCookieUid();
+    if (!uid) { setAuthLoading(false); return; }
+
+    UserFactory.get(uid).then(snap => {
+      if (!snap.exists()) { setAuthLoading(false); return; }
+      const user = { id: uid, ...snap.data() };
+      setCurrentUser(user);
+      const role = user.role || 'user';
+
+      if (role === 'superadmin') {
+        setIsSuperAdmin(true);
+        ClubFactory.getAll(all => { setAdminClubs(all); setAuthLoading(false); });
+      } else if (role === 'clubadmin') {
+        setIsClubAdmin(true);
+        // Resolve which clubs this admin manages by scanning groups for isCoach
+        ClubFactory.getAll(allClubs => {
+          let found = [];
+          let pending = allClubs.length;
+          if (pending === 0) { setAdminClubs([]); setAuthLoading(false); return; }
+
+          allClubs.forEach(club => {
+            GroupFactory.getGroupsByClub(club.id, groups => {
+              let gPending = groups.length;
+              if (gPending === 0) {
+                if (--pending === 0) { setAdminClubs(found); setAuthLoading(false); }
+                return;
+              }
+              groups.forEach(group => {
+                GroupFactory.getMembersByGroup(club.id, group.id, mems => {
+                  const isCoach = mems.some(m => (m.memberId || m.id) === uid && m.isCoach);
+                  if (isCoach && !found.find(c => c.id === club.id)) found = [...found, club];
+                  if (--gPending === 0 && --pending === 0) { setAdminClubs(found); setAuthLoading(false); }
+                });
+              });
+            });
+          });
+        });
+      } else {
+        setAuthLoading(false);
+      }
+    });
+  }, []);
+
+  // Auto-select club for single-club ClubAdmin
+  useEffect(() => {
+    if (isClubAdmin && adminClubs.length === 1 && !activeClub) setActiveClub(adminClubs[0]);
+  }, [isClubAdmin, adminClubs, activeClub]);
+
+  // SuperAdmin: full club list; ClubAdmin: adminClubs only
+  useEffect(() => {
+    if (isSuperAdmin) { const u = ClubFactory.getAll(setClubs); return () => u(); }
+    else setClubs(adminClubs);
+  }, [isSuperAdmin, adminClubs]);
 
   useEffect(() => {
-    const u1 = UserFactory.getAll(setUsers);
-    const u2 = ClubFactory.getAll(setClubs);
-    const u3 = ClubJoinRequestFactory.getAll((data) => {
+    if (isSuperAdmin) { const u = UserFactory.getAll(setUsers); return () => u(); }
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    if (!activeClub) return;
+    const u = GroupFactory.getGroupsByClub(activeClub.id, gData => {
+      setGroups(gData);
+      gData.forEach(g => GroupFactory.getMemberCount(activeClub.id, g.id, count =>
+        setMemberCounts(prev => ({ ...prev, [g.id]: count }))
+      ));
+    });
+    return () => u();
+  }, [activeClub]);
+
+  useEffect(() => {
+    if (!selectedGroup || !activeClub) return;
+    const u1 = GroupFactory.getMembersByGroup(activeClub.id, selectedGroup.id, setMembers);
+    const u2 = ClubMemberFactory.getAll(activeClub.id, setClubMemberProfiles);
+    return () => { u1(); u2(); };
+  }, [selectedGroup, activeClub]);
+
+  useEffect(() => {
+    const u = ClubJoinRequestFactory.getAll(data => {
       setJoinRequests([...data].sort((a, b) => {
         if (a.status === 'pending' && b.status !== 'pending') return -1;
         if (a.status !== 'pending' && b.status === 'pending') return 1;
         return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
       }));
     });
-    return () => { u1(); u2(); u3(); };
+    return () => u();
   }, []);
 
-  useEffect(() => {
-    if (!selectedClub) return;
-    const unsub = GroupFactory.getGroupsByClub(selectedClub.id, (groupsData) => {
-      setGroups(groupsData);
-      groupsData.forEach(g => {
-        GroupFactory.getMemberCount(selectedClub.id, g.id, (count) => {
-          setMemberCounts(prev => ({ ...prev, [g.id]: count }));
-        });
-      });
-    });
-    return () => unsub();
-  }, [selectedClub]);
-
-  useEffect(() => {
-    if (!selectedGroup || !selectedClub) return;
-    // Feature 8.12: load both group membership docs AND ClubMember profiles
-    const u1 = GroupFactory.getMembersByGroup(selectedClub.id, selectedGroup.id, setMembers);
-    const u2 = ClubMemberFactory.getAll(selectedClub.id, setClubMemberProfiles);
-    return () => { u1(); u2(); };
-  }, [selectedGroup, selectedClub]);
-
-  // Feature 8.12: resolve ClubMember name — m.id is now memberId
-  const getMemberProfile = (memberId) =>
-    clubMemberProfiles.find(p => p.id === memberId) || null;
-
-  const filteredUsers   = users.filter(u => `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(searchTerm.toLowerCase()));
-  const filteredClubs   = clubs.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
-  const pendingCount    = joinRequests.filter(r => r.status === 'pending').length;
+  const getMemberProfile = (memberId) => clubMemberProfiles.find(p => p.id === memberId) || null;
+  const filteredUsers    = users.filter(u => `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredClubs    = adminClubs.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const pendingCount     = joinRequests.filter(r => r.status === 'pending').length;
   const filteredRequests = requestFilter === 'all' ? joinRequests : joinRequests.filter(r => r.status === requestFilter);
-
-  // Feature 8.12: ClubMembers not yet in this group (for the picker)
   const memberIdsInGroup = new Set(members.map(m => m.memberId || m.id));
-  const availableToAdd = clubMemberProfiles.filter(p => !memberIdsInGroup.has(p.id));
-  const filteredAvailable = availableToAdd.filter(p =>
-    `${p.firstName} ${p.lastName}`.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const availableToAdd   = clubMemberProfiles.filter(p => !memberIdsInGroup.has(p.id));
+  const filteredAvailable = availableToAdd.filter(p => `${p.firstName} ${p.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()));
+  const currentUserName  = currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() : 'Admin';
 
-  const handleUserSubmit = async (e) => {
-    e.preventDefault();
-    editingId ? await UserFactory.updateProfile(editingId, userForm) : await UserFactory.create(Date.now().toString(), userForm);
-    setIsUserModalOpen(false);
-  };
-  const handleClubSubmit = async (e) => {
-    e.preventDefault();
-    editingId ? await ClubFactory.update(editingId, clubForm) : await ClubFactory.create(clubForm);
-    setIsClubModalOpen(false);
-  };
-  const handleGroupSubmit = async (e) => {
-    e.preventDefault();
-    editingId ? await GroupFactory.update(selectedClub.id, editingId, groupForm) : await GroupFactory.create(selectedClub.id, groupForm);
-    setIsGroupModalOpen(false);
+  // ── Handlers ──────────────────────────────────────────────────────────────
+  const handleUserSubmit  = async (e) => { e.preventDefault(); editingId ? await UserFactory.updateProfile(editingId, userForm) : await UserFactory.create(Date.now().toString(), userForm); setIsUserModalOpen(false); };
+  const handleClubSubmit  = async (e) => { e.preventDefault(); editingId ? await ClubFactory.update(editingId, clubForm) : await ClubFactory.create(clubForm); setIsClubModalOpen(false); };
+  const handleGroupSubmit = async (e) => { e.preventDefault(); editingId ? await GroupFactory.update(activeClub.id, editingId, groupForm) : await GroupFactory.create(activeClub.id, groupForm); setIsGroupModalOpen(false); };
+
+  const handleAddMember = async (profile) => {
+    await GroupFactory.addMember(activeClub.id, selectedGroup.id, profile.id, { isSkipper: true, isCoach: false, startMembership: new Date(), endMembership: null });
   };
 
-  // Feature 8.12: addMember uses memberId from ClubMember profile
-  const handleAddMember = async (memberProfile) => {
-    await GroupFactory.addMember(
-      selectedClub.id,
-      selectedGroup.id,
-      memberProfile.id, // memberId
-      { isSkipper: true, isCoach: false, startMembership: new Date(), endMembership: null }
-    );
-  };
-
-  // Feature 8.12: create a brand-new ClubMember and immediately add to group
   const handleCreateAndAddMember = async () => {
     setNewMemberError('');
-    if (!newMemberForm.firstName.trim() || !newMemberForm.lastName.trim()) {
-      setNewMemberError('Voornaam en achternaam zijn verplicht.');
-      return;
-    }
+    if (!newMemberForm.firstName.trim() || !newMemberForm.lastName.trim()) { setNewMemberError('Voornaam en achternaam zijn verplicht.'); return; }
     setNewMemberSaving(true);
     try {
-      // Get current user uid for createdBy (best-effort from cookie)
-      const uid = typeof document !== 'undefined'
-        ? (document.cookie.match(/msc_uid=([^;]*)/) || [])[1] || null
-        : null;
-
-      const docRef = await ClubMemberFactory.create(
-        selectedClub.id,
-        {
-          firstName: newMemberForm.firstName.trim(),
-          lastName:  newMemberForm.lastName.trim(),
-          birthDate: newMemberForm.birthDate ? new Date(newMemberForm.birthDate) : null,
-          notes:     newMemberForm.notes.trim(),
-        },
-        uid,
-      );
-      await GroupFactory.addMember(
-        selectedClub.id,
-        selectedGroup.id,
-        docRef.id,
-        { isSkipper: true, isCoach: false, startMembership: new Date(), endMembership: null }
-      );
+      const uid    = getCookieUid();
+      const docRef = await ClubMemberFactory.create(activeClub.id, {
+        firstName: newMemberForm.firstName.trim(), lastName: newMemberForm.lastName.trim(),
+        birthDate: newMemberForm.birthDate ? new Date(newMemberForm.birthDate) : null,
+        notes: newMemberForm.notes.trim(),
+      }, uid);
+      await GroupFactory.addMember(activeClub.id, selectedGroup.id, docRef.id, { isSkipper: true, isCoach: false, startMembership: new Date(), endMembership: null });
       setNewMemberForm({ firstName: '', lastName: '', birthDate: '', notes: '' });
       setShowNewMemberForm(false);
-    } catch (e) {
-      console.error(e);
-      setNewMemberError('Aanmaken mislukt. Probeer opnieuw.');
-    } finally {
-      setNewMemberSaving(false);
-    }
+    } catch (e) { console.error(e); setNewMemberError('Aanmaken mislukt.'); }
+    finally { setNewMemberSaving(false); }
   };
 
-  const handleUpdateMember = async (memberId, data) => {
-    await GroupFactory.updateMember(selectedClub.id, selectedGroup.id, memberId, data);
-    setEditingMemberUid(null);
-  };
+  const handleUpdateMember = async (memberId, data) => { await GroupFactory.updateMember(activeClub.id, selectedGroup.id, memberId, data); setEditingMemberUid(null); };
 
   const handleConfirmReject = async () => {
     if (!rejectReason.trim()) { setRejectError('Een reden is verplicht bij afwijzing.'); return; }
     setRejectSaving(true);
-    try {
-      await ClubJoinRequestFactory.reject(rejectingRequestId, rejectReason.trim());
-      setRejectModalOpen(false); setRejectingRequestId(null); setRejectReason('');
-    } catch { setRejectError('Er ging iets mis. Probeer opnieuw.'); }
+    try { await ClubJoinRequestFactory.reject(rejectingRequestId, rejectReason.trim()); setRejectModalOpen(false); setRejectingRequestId(null); setRejectReason(''); }
+    catch { setRejectError('Er ging iets mis.'); }
     finally { setRejectSaving(false); }
   };
 
   const handleBack = () => {
     if (selectedGroup) { setSelectedGroup(null); setMembers([]); setClubMemberProfiles([]); setSearchTerm(''); }
-    else if (selectedClub) { setSelectedClub(null); setGroups([]); setSearchTerm(''); }
+    else if (activeClub && isSuperAdmin) { setActiveClub(null); setGroups([]); setSearchTerm(''); }
   };
 
+  // ── Tab config ─────────────────────────────────────────────────────────────
+  const tabs = [
+    ...(isSuperAdmin ? [{ key: 'users', label: 'Gebruikers' }] : []),
+    { key: 'clubs',    label: 'Clubs & Groepen' },
+    { key: 'leden',    label: 'Leden' },
+    ...(isSuperAdmin ? [{ key: 'badges', label: 'Badges' }] : []),
+    { key: 'requests', label: 'Aanvragen', badge: pendingCount },
+  ];
+
+  // ── Guards ─────────────────────────────────────────────────────────────────
+  if (authLoading) return (
+    <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
+      <style>{css}</style>
+      <div style={s.spinner} />
+      <p style={{ color: '#64748b', fontSize: '14px', fontFamily: 'system-ui, sans-serif' }}>Laden…</p>
+    </div>
+  );
+
+  if (!isSuperAdmin && !isClubAdmin) return (
+    <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px', fontFamily: 'system-ui, sans-serif' }}>
+      <ShieldAlert size={40} color="#ef4444" />
+      <p style={{ color: '#ef4444', fontSize: '16px', fontWeight: '700' }}>Geen toegang</p>
+      <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', maxWidth: '300px' }}>Je hebt geen beheerderrechten. Neem contact op met een administrator.</p>
+      <a href="/" style={{ padding: '10px 20px', backgroundColor: '#3b82f6', color: 'white', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '14px' }}>Terug naar home</a>
+    </div>
+  );
+
+  // ClubAdmin with multiple clubs needs to pick one first
+  if (isClubAdmin && !activeClub && adminClubs.length > 1) return (
+    <div style={{ ...s.page, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <style>{css}</style>
+      <div style={{ maxWidth: '400px', width: '100%', padding: '24px 16px' }}>
+        <div style={{ fontWeight: '800', fontSize: '18px', color: '#f1f5f9', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Building2 size={20} color="#a78bfa" /> Kies een club
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {adminClubs.map(club => (
+            <button key={club.id} onClick={() => setActiveClub(club)} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px', backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', color: 'white', cursor: 'pointer', textAlign: 'left' }}>
+              <Building2 size={20} color="#a78bfa" />
+              <span style={{ fontWeight: '600', fontSize: '15px', flex: 1 }}>{club.name}</span>
+              <ChevronRight size={16} color="#475569" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={s.page}>
       <style>{css}</style>
 
-      {/* HEADER */}
       <header style={s.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <ShieldAlert size={20} color="#3b82f6" />
-          <span style={s.headerTitle}>SuperAdmin</span>
+          <ShieldAlert size={20} color={isSuperAdmin ? '#3b82f6' : '#a78bfa'} />
+          <div>
+            <span style={s.headerTitle}>{isSuperAdmin ? 'SuperAdmin' : 'ClubAdmin'}</span>
+            {isClubAdmin && activeClub && (
+              <span style={{ marginLeft: '8px', fontSize: '12px', color: '#64748b', fontWeight: '400' }}>— {activeClub.name}</span>
+            )}
+          </div>
         </div>
         <div style={s.tabBar}>
-          {[
-            { key: 'users',    label: 'Gebruikers' },
-            { key: 'clubs',    label: 'Clubs' },
-            { key: 'badges',   label: 'Badges' },
-            { key: 'requests', label: 'Aanvragen', badge: pendingCount },
-          ].map(tab => (
-            <button key={tab.key} onClick={() => { setActiveTab(tab.key); setSelectedClub(null); setSelectedGroup(null); setSearchTerm(''); }} style={{ ...s.tab, ...(activeTab === tab.key ? s.tabActive : {}) }}>
+          {tabs.map(tab => (
+            <button key={tab.key} onClick={() => { setActiveTab(tab.key); setSelectedGroup(null); setSearchTerm(''); }} style={{ ...s.tab, ...(activeTab === tab.key ? s.tabActive : {}) }}>
               {tab.label}
               {tab.badge > 0 && <span style={s.tabBadge}>{tab.badge > 9 ? '9+' : tab.badge}</span>}
             </button>
@@ -691,16 +894,11 @@ export default function SuperAdmin() {
       <main style={s.content}>
 
         {/* ═══ USERS ═══ */}
-        {activeTab === 'users' && (
+        {activeTab === 'users' && isSuperAdmin && (
           <div>
             <div style={s.actionBar}>
-              <div style={s.searchWrap}>
-                <Search size={16} style={s.searchIcon} />
-                <input placeholder="Zoek gebruiker…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={s.searchInput} />
-              </div>
-              <button style={s.addBtn} onClick={() => { setEditingId(null); setUserForm({ firstName: '', lastName: '', email: '', role: 'user' }); setIsUserModalOpen(true); }}>
-                <UserPlus size={16} /><span className="btn-label">Nieuwe gebruiker</span>
-              </button>
+              <div style={s.searchWrap}><Search size={16} style={s.searchIcon} /><input placeholder="Zoek gebruiker…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={s.searchInput} /></div>
+              <button style={s.addBtn} onClick={() => { setEditingId(null); setUserForm({ firstName: '', lastName: '', email: '', role: 'user' }); setIsUserModalOpen(true); }}><UserPlus size={16} /><span className="btn-label">Nieuwe gebruiker</span></button>
             </div>
             <div className="user-list">
               {filteredUsers.map(user => (
@@ -725,13 +923,14 @@ export default function SuperAdmin() {
         {/* ═══ CLUBS & GROUPS ═══ */}
         {activeTab === 'clubs' && (
           <div>
-            {selectedClub && (
+            {(selectedGroup || (activeClub && isSuperAdmin)) && (
               <button style={s.backBtn} onClick={handleBack}>
-                <ArrowLeft size={16} />{selectedGroup ? `Terug naar ${selectedClub.name}` : 'Terug naar clubs'}
+                <ArrowLeft size={16} />{selectedGroup ? `Terug naar ${activeClub?.name}` : 'Terug naar clubs'}
               </button>
             )}
 
-            {!selectedClub && (
+            {/* Club list (SuperAdmin only) */}
+            {!activeClub && isSuperAdmin && (
               <>
                 <div style={s.actionBar}>
                   <div style={s.searchWrap}><Search size={16} style={s.searchIcon} /><input placeholder="Zoek club…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={s.searchInput} /></div>
@@ -740,13 +939,13 @@ export default function SuperAdmin() {
                 <div className="card-grid">
                   {filteredClubs.map(club => (
                     <div key={club.id} style={s.clubCard}>
-                      <div style={s.clubCardBody} onClick={() => setSelectedClub(club)}>
+                      <div style={s.clubCardBody} onClick={() => { setActiveClub(club); setGroups([]); setSelectedGroup(null); }}>
                         {club.logoUrl ? <img src={club.logoUrl} style={s.clubLogo} alt={club.name} /> : <div style={s.clubLogoPlaceholder}><Building2 size={32} color="#64748b" /></div>}
                         <div style={s.clubCardName}>{club.name}</div>
                       </div>
                       <div style={s.clubCardActions}>
                         <button style={s.iconBtn} onClick={() => { setEditingId(club.id); setClubForm(club); setIsClubModalOpen(true); }}><Edit2 size={14} /></button>
-                        <button style={{ ...s.iconBtn, color: '#ef4444' }} onClick={() => { if (confirm('Club verwijderen? Dit wist ook alle groepen!')) ClubFactory.delete(club.id); }}><Trash2 size={14} /></button>
+                        <button style={{ ...s.iconBtn, color: '#ef4444' }} onClick={() => { if (confirm('Club verwijderen?')) ClubFactory.delete(club.id); }}><Trash2 size={14} /></button>
                       </div>
                     </div>
                   ))}
@@ -755,11 +954,12 @@ export default function SuperAdmin() {
               </>
             )}
 
-            {selectedClub && !selectedGroup && (
+            {/* Group list */}
+            {activeClub && !selectedGroup && (
               <>
                 <div style={s.sectionTitle}>
                   <Building2 size={18} color="#a78bfa" />
-                  <span>{selectedClub.name} — Groepen</span>
+                  <span>{activeClub.name} — Groepen</span>
                   <button style={{ ...s.addBtn, marginLeft: 'auto' }} onClick={() => { setEditingId(null); setGroupForm({ name: '', useHRM: true }); setIsGroupModalOpen(true); }}><Plus size={16} /><span className="btn-label">Groep</span></button>
                 </div>
                 <div className="card-grid">
@@ -774,7 +974,7 @@ export default function SuperAdmin() {
                       </div>
                       <div style={{ display: 'flex', gap: '4px', marginTop: '10px' }}>
                         <button style={s.iconBtn} onClick={() => { setEditingId(group.id); setGroupForm(group); setIsGroupModalOpen(true); }}><Edit2 size={14} /></button>
-                        <button style={{ ...s.iconBtn, color: '#ef4444' }} onClick={() => GroupFactory.delete(selectedClub.id, group.id)}><Trash2 size={14} /></button>
+                        <button style={{ ...s.iconBtn, color: '#ef4444' }} onClick={() => GroupFactory.delete(activeClub.id, group.id)}><Trash2 size={14} /></button>
                       </div>
                     </div>
                   ))}
@@ -783,13 +983,10 @@ export default function SuperAdmin() {
               </>
             )}
 
-            {selectedClub && selectedGroup && (
+            {/* Group member management */}
+            {activeClub && selectedGroup && (
               <div>
-                <div style={s.sectionTitle}>
-                  <Users size={18} color="#3b82f6" />
-                  <span>{selectedGroup.name} — Leden ({members.length})</span>
-                </div>
-
+                <div style={s.sectionTitle}><Users size={18} color="#3b82f6" /><span>{selectedGroup.name} — Leden ({members.length})</span></div>
                 <div style={s.filterRow}>
                   <label style={s.filterLabel}>
                     <input type="checkbox" checked={showOnlyActive} onChange={e => setShowOnlyActive(e.target.checked)} style={{ marginRight: '6px' }} />
@@ -797,89 +994,56 @@ export default function SuperAdmin() {
                   </label>
                 </div>
 
-                {/* ── Member list ── */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
                   {members
                     .filter(m => {
                       if (!showOnlyActive) return true;
                       const nu    = new Date();
                       const start = m.startMembership?.toDate ? m.startMembership.toDate() : new Date(m.startMembership);
-                      const eind  = m.endMembership?.toDate  ? m.endMembership.toDate()   : (m.endMembership ? new Date(m.endMembership) : null);
+                      const eind  = m.endMembership?.toDate   ? m.endMembership.toDate()   : (m.endMembership ? new Date(m.endMembership) : null);
                       return start <= nu && (!eind || eind > nu);
                     })
                     .map(m => {
-                      // Feature 8.12: m.id is memberId — resolve name from ClubMember profiles
-                      const memberId = m.memberId || m.id;
-                      const profile  = getMemberProfile(memberId);
+                      const memberId  = m.memberId || m.id;
+                      const profile   = getMemberProfile(memberId);
                       const isEditing = editingMemberUid === memberId;
-
                       return (
                         <div key={memberId} style={s.memberCard}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                             <div>
                               <div style={s.memberName}>
-                                {profile
-                                  ? `${profile.firstName} ${profile.lastName}`
-                                  : <span style={{ color: '#475569', fontStyle: 'italic' }}>Onbekend lid ({memberId.slice(0, 8)}…)</span>
-                                }
+                                {profile ? `${profile.firstName} ${profile.lastName}` : <span style={{ color: '#475569', fontStyle: 'italic' }}>Onbekend lid ({memberId.slice(0, 8)}…)</span>}
                               </div>
-                              {profile?.birthDate && (
-                                <div style={s.memberEmail}>
-                                  {profile.birthDate?.seconds
-                                    ? new Date(profile.birthDate.seconds * 1000).toLocaleDateString('nl-BE')
-                                    : ''}
-                                </div>
-                              )}
-                              {profile?.notes && (
-                                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', fontStyle: 'italic' }}>{profile.notes}</div>
-                              )}
+                              {profile?.birthDate?.seconds && <div style={s.memberEmail}>{new Date(profile.birthDate.seconds * 1000).toLocaleDateString('nl-BE')}</div>}
+                              {profile?.notes && <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', fontStyle: 'italic' }}>{profile.notes}</div>}
                             </div>
                             <div style={{ display: 'flex', gap: '4px' }}>
-                              <button
-                                style={{ ...s.iconBtn, color: '#f59e0b' }}
-                                title="Badge uitreiken"
-                                onClick={() => setAwardTarget({
-                                  clubId:    selectedClub.id,
-                                  memberId,
-                                  firstName: profile?.firstName || '?',
-                                  lastName:  profile?.lastName  || '',
-                                })}
-                              >
+                              <button style={{ ...s.iconBtn, color: '#f59e0b' }} title="Badge uitreiken"
+                                onClick={() => setAwardTarget({ clubId: activeClub.id, memberId, firstName: profile?.firstName || '?', lastName: profile?.lastName || '' })}>
                                 <Award size={16} />
                               </button>
-                              <button
-                                style={{ ...s.iconBtn, color: '#ef4444' }}
-                                onClick={() => { if (confirm('Lidmaatschap definitief verwijderen?')) GroupFactory.removeMember(selectedClub.id, selectedGroup.id, memberId); }}
-                              >
+                              <button style={{ ...s.iconBtn, color: '#ef4444' }}
+                                onClick={() => { if (confirm('Uit groep verwijderen?')) GroupFactory.removeMember(activeClub.id, selectedGroup.id, memberId); }}>
                                 <Trash2 size={16} />
                               </button>
                             </div>
                           </div>
-
                           <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
                             <button style={{ ...s.roleToggle, backgroundColor: m.isSkipper ? '#3b82f6' : '#334155' }} onClick={() => handleUpdateMember(memberId, { isSkipper: !m.isSkipper })}>Skipper: {m.isSkipper ? 'JA' : 'NEE'}</button>
                             <button style={{ ...s.roleToggle, backgroundColor: m.isCoach   ? '#f59e0b' : '#334155' }} onClick={() => handleUpdateMember(memberId, { isCoach:   !m.isCoach   })}>Coach: {m.isCoach ? 'JA' : 'NEE'}</button>
                           </div>
-
                           <div style={s.memberDates}>
                             <div style={s.dateRow}>
                               <span style={{ color: '#64748b', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}><Calendar size={12} /> Start</span>
-                              {isEditing
-                                ? <input type="date" style={s.dateInput} defaultValue={m.startMembership?.toDate ? m.startMembership.toDate().toISOString().split('T')[0] : ''} onChange={e => setMemberEditForm({ ...memberEditForm, startMembership: new Date(e.target.value) })} />
-                                : <span style={{ fontSize: '12px', color: '#f1f5f9' }}>{m.startMembership?.toDate ? m.startMembership.toDate().toLocaleDateString() : '-'}</span>}
+                              {isEditing ? <input type="date" style={s.dateInput} defaultValue={m.startMembership?.toDate ? m.startMembership.toDate().toISOString().split('T')[0] : ''} onChange={e => setMemberEditForm({ ...memberEditForm, startMembership: new Date(e.target.value) })} /> : <span style={{ fontSize: '12px', color: '#f1f5f9' }}>{m.startMembership?.toDate ? m.startMembership.toDate().toLocaleDateString() : '-'}</span>}
                             </div>
                             <div style={s.dateRow}>
                               <span style={{ color: '#64748b', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}><Calendar size={12} /> Einde</span>
-                              {isEditing
-                                ? <input type="date" style={s.dateInput} defaultValue={m.endMembership?.toDate ? m.endMembership.toDate().toISOString().split('T')[0] : ''} onChange={e => setMemberEditForm({ ...memberEditForm, endMembership: e.target.value ? new Date(e.target.value) : null })} />
-                                : <span style={{ fontSize: '12px', color: '#f1f5f9' }}>{m.endMembership?.toDate ? m.endMembership.toDate().toLocaleDateString() : 'Geen'}</span>}
+                              {isEditing ? <input type="date" style={s.dateInput} defaultValue={m.endMembership?.toDate ? m.endMembership.toDate().toISOString().split('T')[0] : ''} onChange={e => setMemberEditForm({ ...memberEditForm, endMembership: e.target.value ? new Date(e.target.value) : null })} /> : <span style={{ fontSize: '12px', color: '#f1f5f9' }}>{m.endMembership?.toDate ? m.endMembership.toDate().toLocaleDateString() : 'Geen'}</span>}
                             </div>
                           </div>
-
                           <div style={{ marginTop: '10px' }}>
-                            {isEditing
-                              ? <button style={s.saveBtn} onClick={() => handleUpdateMember(memberId, memberEditForm)}><Save size={14} /> Opslaan</button>
-                              : <button style={s.editBtn} onClick={() => { setEditingMemberUid(memberId); setMemberEditForm(m); }}><Edit2 size={14} /> Wijzig lidmaatschap</button>}
+                            {isEditing ? <button style={s.saveBtn} onClick={() => handleUpdateMember(memberId, memberEditForm)}><Save size={14} /> Opslaan</button> : <button style={s.editBtn} onClick={() => { setEditingMemberUid(memberId); setMemberEditForm(m); }}><Edit2 size={14} /> Wijzig lidmaatschap</button>}
                           </div>
                         </div>
                       );
@@ -887,80 +1051,42 @@ export default function SuperAdmin() {
                   {members.length === 0 && <p style={s.emptyText}>Geen leden in deze groep.</p>}
                 </div>
 
-                {/* ── Feature 8.12: Picker — shows ClubMembers not yet in group ── */}
+                {/* Picker */}
                 <div style={s.pickerPanel}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                    <div style={s.pickerTitle}>Lid toevoegen</div>
-                    <button
-                      onClick={() => { setShowNewMemberForm(v => !v); setNewMemberError(''); }}
-                      style={{ ...bs.secondary, fontSize: '12px', padding: '6px 10px' }}
-                    >
-                      <Plus size={13} /> Nieuw lid aanmaken
-                    </button>
+                    <div style={s.pickerTitle}>Lid toevoegen aan groep</div>
+                    <button onClick={() => { setShowNewMemberForm(v => !v); setNewMemberError(''); }} style={{ ...bs.secondary, fontSize: '12px', padding: '6px 10px' }}><Plus size={13} /> Nieuw lid aanmaken</button>
                   </div>
 
-                  {/* Inline new-member form */}
                   {showNewMemberForm && (
                     <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', padding: '14px', marginBottom: '12px', border: '1px solid #334155' }}>
                       <div style={{ fontSize: '12px', color: '#a78bfa', fontWeight: '700', marginBottom: '10px' }}>Nieuw ClubMember aanmaken</div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
-                        <div>
-                          <label style={s.fieldLabel}>Voornaam *</label>
-                          <input style={s.input} placeholder="Emma" value={newMemberForm.firstName} onChange={e => setNewMemberForm(f => ({ ...f, firstName: e.target.value }))} />
-                        </div>
-                        <div>
-                          <label style={s.fieldLabel}>Achternaam *</label>
-                          <input style={s.input} placeholder="De Smet" value={newMemberForm.lastName} onChange={e => setNewMemberForm(f => ({ ...f, lastName: e.target.value }))} />
-                        </div>
+                        <div><label style={s.fieldLabel}>Voornaam *</label><input style={s.input} placeholder="Emma" value={newMemberForm.firstName} onChange={e => setNewMemberForm(f => ({ ...f, firstName: e.target.value }))} /></div>
+                        <div><label style={s.fieldLabel}>Achternaam *</label><input style={s.input} placeholder="De Smet" value={newMemberForm.lastName} onChange={e => setNewMemberForm(f => ({ ...f, lastName: e.target.value }))} /></div>
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
-                        <div>
-                          <label style={s.fieldLabel}>Geboortedatum</label>
-                          <input style={s.input} type="date" value={newMemberForm.birthDate} onChange={e => setNewMemberForm(f => ({ ...f, birthDate: e.target.value }))} />
-                        </div>
-                        <div>
-                          <label style={s.fieldLabel}>Notities</label>
-                          <input style={s.input} placeholder="optioneel" value={newMemberForm.notes} onChange={e => setNewMemberForm(f => ({ ...f, notes: e.target.value }))} />
-                        </div>
+                        <div><label style={s.fieldLabel}>Geboortedatum</label><input style={s.input} type="date" value={newMemberForm.birthDate} onChange={e => setNewMemberForm(f => ({ ...f, birthDate: e.target.value }))} /></div>
+                        <div><label style={s.fieldLabel}>Notities</label><input style={s.input} placeholder="optioneel" value={newMemberForm.notes} onChange={e => setNewMemberForm(f => ({ ...f, notes: e.target.value }))} /></div>
                       </div>
-                      {newMemberError && (
-                        <div style={{ color: '#ef4444', fontSize: '12px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <AlertCircle size={12} />{newMemberError}
-                        </div>
-                      )}
+                      {newMemberError && <div style={{ color: '#ef4444', fontSize: '12px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}><AlertCircle size={12} />{newMemberError}</div>}
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        <button
-                          onClick={handleCreateAndAddMember}
-                          disabled={newMemberSaving}
-                          style={{ ...bs.primary, opacity: newMemberSaving ? 0.6 : 1 }}
-                        >
-                          <UserPlus size={14} />{newMemberSaving ? 'Aanmaken…' : 'Aanmaken & toevoegen'}
-                        </button>
+                        <button onClick={handleCreateAndAddMember} disabled={newMemberSaving} style={{ ...bs.primary, opacity: newMemberSaving ? 0.6 : 1 }}><UserPlus size={14} />{newMemberSaving ? 'Aanmaken…' : 'Aanmaken & toevoegen'}</button>
                         <button onClick={() => setShowNewMemberForm(false)} style={bs.secondary}><X size={14} /> Annuleren</button>
                       </div>
                     </div>
                   )}
 
-                  {/* Existing ClubMembers search */}
-                  <div style={s.searchWrap}>
-                    <Search size={14} style={s.searchIcon} />
-                    <input placeholder="Zoek bestaand lid…" onChange={e => setSearchTerm(e.target.value)} style={s.searchInput} />
-                  </div>
+                  <div style={s.searchWrap}><Search size={14} style={s.searchIcon} /><input placeholder="Zoek bestaand lid uit de 'Leden' tab…" onChange={e => setSearchTerm(e.target.value)} style={s.searchInput} /></div>
                   <div style={s.pickerList}>
                     {filteredAvailable.length === 0 ? (
-                      <p style={{ color: '#475569', fontSize: '13px', textAlign: 'center', padding: '16px 0' }}>
-                        Alle leden van deze club zitten al in de groep.
-                      </p>
+                      <p style={{ color: '#475569', fontSize: '13px', textAlign: 'center', padding: '16px 0' }}>Alle leden zitten al in de groep. Maak eerst een nieuw lid aan via de "Leden" tab.</p>
                     ) : (
                       filteredAvailable.map(p => (
                         <div key={p.id} style={s.pickerRow} onClick={() => handleAddMember(p)}>
                           <div>
                             <span style={{ fontSize: '14px' }}>{p.firstName} {p.lastName}</span>
-                            {p.birthDate?.seconds && (
-                              <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>
-                                {new Date(p.birthDate.seconds * 1000).toLocaleDateString('nl-BE')}
-                              </span>
-                            )}
+                            {p.birthDate?.seconds && <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>{new Date(p.birthDate.seconds * 1000).toLocaleDateString('nl-BE')}</span>}
                           </div>
                           <PlusCircle size={18} color="#22c55e" />
                         </div>
@@ -973,8 +1099,20 @@ export default function SuperAdmin() {
           </div>
         )}
 
-        {/* ═══ BADGES ═══ */}
-        {activeTab === 'badges' && <BadgesTab clubs={clubs} />}
+        {/* ═══ LEDEN TAB ═══ */}
+        {activeTab === 'leden' && (
+          !activeClub && isSuperAdmin ? (
+            <div style={{ textAlign: 'center', padding: '60px 0', color: '#475569' }}>
+              <Users size={36} color="#334155" style={{ marginBottom: '12px' }} />
+              <p style={{ fontSize: '14px' }}>Selecteer eerst een club via "Clubs & Groepen".</p>
+            </div>
+          ) : (
+            <LedenTab clubId={activeClub?.id} clubName={activeClub?.name} currentUserName={currentUserName} />
+          )
+        )}
+
+        {/* ═══ BADGES (SuperAdmin only) ═══ */}
+        {activeTab === 'badges' && isSuperAdmin && <BadgesTab clubs={adminClubs} />}
 
         {/* ═══ JOIN REQUESTS ═══ */}
         {activeTab === 'requests' && (
@@ -983,7 +1121,6 @@ export default function SuperAdmin() {
               <div style={s.sectionTitleText}>Club Aanvragen</div>
               {pendingCount > 0 && <div style={{ fontSize: '12px', color: '#f59e0b', marginTop: '2px' }}>{pendingCount} openstaande aanvraag/aanvragen</div>}
             </div>
-
             <div style={s.filterPills}>
               {[
                 { key: 'pending',  label: 'In behandeling', count: joinRequests.filter(r => r.status === 'pending').length },
@@ -993,24 +1130,16 @@ export default function SuperAdmin() {
               ].map(f => (
                 <button key={f.key} onClick={() => setRequestFilter(f.key)} style={{ ...s.filterPill, ...(requestFilter === f.key ? s.filterPillActive : {}) }}>
                   {f.label}
-                  {f.count > 0 && (
-                    <span style={{ ...s.pillCount, backgroundColor: requestFilter === f.key ? '#1e293b' : (f.key === 'pending' ? '#f59e0b' : '#334155'), color: f.key === 'pending' && requestFilter !== f.key ? '#000' : '#94a3b8' }}>
-                      {f.count}
-                    </span>
-                  )}
+                  {f.count > 0 && <span style={{ ...s.pillCount, backgroundColor: requestFilter === f.key ? '#1e293b' : (f.key === 'pending' ? '#f59e0b' : '#334155'), color: f.key === 'pending' && requestFilter !== f.key ? '#000' : '#94a3b8' }}>{f.count}</span>}
                 </button>
               ))}
             </div>
-
             {filteredRequests.length === 0 ? (
-              <div style={s.emptyState}>
-                <Bell size={36} color="#334155" />
-                <p style={{ color: '#64748b', margin: '12px 0 0', fontSize: '14px' }}>{requestFilter === 'pending' ? 'Geen openstaande aanvragen.' : 'Geen aanvragen gevonden.'}</p>
-              </div>
+              <div style={s.emptyState}><Bell size={36} color="#334155" /><p style={{ color: '#64748b', margin: '12px 0 0', fontSize: '14px' }}>{requestFilter === 'pending' ? 'Geen openstaande aanvragen.' : 'Geen aanvragen gevonden.'}</p></div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {filteredRequests.map(req => {
-                  const cfg = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending;
+                  const cfg      = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending;
                   const initials = `${req.firstName?.[0] || '?'}${req.lastName?.[0] || ''}`.toUpperCase();
                   return (
                     <div key={req.id} style={{ ...s.requestCard, borderColor: req.status === 'pending' ? '#f59e0b44' : '#334155' }}>
@@ -1021,7 +1150,7 @@ export default function SuperAdmin() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
                             <span style={{ fontWeight: '700', fontSize: '15px', color: '#f1f5f9' }}>{req.firstName} {req.lastName}</span>
                             <span style={{ ...s.statusBadge, backgroundColor: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}33` }}>
-                              {req.status === 'pending'  && <Clock       size={10} />}
+                              {req.status === 'pending'  && <Clock        size={10} />}
                               {req.status === 'approved' && <CheckCircle2 size={10} />}
                               {req.status === 'rejected' && <XCircle      size={10} />}
                               {cfg.label}
@@ -1030,23 +1159,14 @@ export default function SuperAdmin() {
                           <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                             <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Building2 size={11} /> {req.clubName}</span>
                             {req.email && <span>{req.email}</span>}
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <Calendar size={11} />{req.createdAt?.seconds ? new Date(req.createdAt.seconds * 1000).toLocaleDateString('nl-BE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
-                            </span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Calendar size={11} />{req.createdAt?.seconds ? new Date(req.createdAt.seconds * 1000).toLocaleDateString('nl-BE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
                           </div>
                         </div>
                         <button style={{ ...s.iconBtn, color: '#64748b', flexShrink: 0 }} onClick={() => { if (confirm('Aanvraag permanent verwijderen?')) ClubJoinRequestFactory.delete(req.id); }}><Trash2 size={15} /></button>
                       </div>
-
                       {req.message && <div style={s.requestMessage}><MessageSquare size={11} color="#475569" />"{req.message}"</div>}
-                      {req.status === 'rejected' && req.rejectionReason && (
-                        <div style={s.rejectionReason}><XCircle size={13} style={{ flexShrink: 0 }} /><div><strong>Reden:</strong> {req.rejectionReason}</div></div>
-                      )}
-                      {req.resolvedAt?.seconds && req.status !== 'pending' && (
-                        <div style={{ fontSize: '11px', color: '#475569', marginTop: '8px' }}>
-                          Behandeld op {new Date(req.resolvedAt.seconds * 1000).toLocaleDateString('nl-BE', { day: '2-digit', month: 'short', year: 'numeric' })}
-                        </div>
-                      )}
+                      {req.status === 'rejected' && req.rejectionReason && <div style={s.rejectionReason}><XCircle size={13} style={{ flexShrink: 0 }} /><div><strong>Reden:</strong> {req.rejectionReason}</div></div>}
+                      {req.resolvedAt?.seconds && req.status !== 'pending' && <div style={{ fontSize: '11px', color: '#475569', marginTop: '8px' }}>Behandeld op {new Date(req.resolvedAt.seconds * 1000).toLocaleDateString('nl-BE', { day: '2-digit', month: 'short', year: 'numeric' })}</div>}
                       {req.status === 'pending' && (
                         <div style={s.requestActions}>
                           <button style={s.approveBtn} onClick={() => ClubJoinRequestFactory.approve(req.id)}><Check size={15} /> Goedkeuren</button>
@@ -1054,11 +1174,7 @@ export default function SuperAdmin() {
                         </div>
                       )}
                       {req.status === 'approved' && (
-                        <div style={s.approvedHint}>
-                          <CheckCircle2 size={13} />
-                          Voeg {req.firstName} toe aan een groep via het tabblad{' '}
-                          <strong style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setActiveTab('clubs')}>Clubs</strong>.
-                        </div>
+                        <div style={s.approvedHint}><CheckCircle2 size={13} />Voeg {req.firstName} toe via <strong style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setActiveTab('clubs')}>Clubs & Groepen</strong>.</div>
                       )}
                     </div>
                   );
@@ -1070,24 +1186,19 @@ export default function SuperAdmin() {
       </main>
 
       {/* ══ AWARD BADGE MODAL ══ */}
-      {awardTarget && <AwardBadgeModal skipper={awardTarget} onClose={() => setAwardTarget(null)} />}
+      {awardTarget && <AwardBadgeModal skipper={awardTarget} awardedByName={currentUserName} onClose={() => setAwardTarget(null)} />}
 
       {/* ══ REJECT MODAL ══ */}
       {rejectModalOpen && (
         <div style={s.modalOverlay}>
           <div style={s.modal}>
-            <div style={s.modalHeader}>
-              <h3 style={{ margin: 0, color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '16px' }}><XCircle size={20} /> Aanvraag afwijzen</h3>
-              <button style={s.iconBtn} onClick={() => setRejectModalOpen(false)}><X size={18} /></button>
-            </div>
-            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px', lineHeight: 1.6 }}>Geef een duidelijke reden op. De gebruiker zal dit zien in zijn/haar dashboard.</p>
+            <div style={s.modalHeader}><h3 style={{ margin: 0, color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '16px' }}><XCircle size={20} /> Aanvraag afwijzen</h3><button style={s.iconBtn} onClick={() => setRejectModalOpen(false)}><X size={18} /></button></div>
+            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px', lineHeight: 1.6 }}>Geef een duidelijke reden op. De gebruiker zal dit zien.</p>
             <label style={s.fieldLabel}>Reden <span style={{ color: '#ef4444' }}>*</span></label>
             <textarea autoFocus style={s.textarea} placeholder="bijv. De club accepteert momenteel geen nieuwe leden…" value={rejectReason} onChange={e => { setRejectReason(e.target.value); setRejectError(''); }} />
             {rejectError && <div style={s.errorBanner}><AlertCircle size={13} /> {rejectError}</div>}
             <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-              <button style={{ ...s.rejectBtn, flex: 1, justifyContent: 'center', padding: '12px', opacity: rejectSaving ? 0.6 : 1 }} onClick={handleConfirmReject} disabled={rejectSaving}>
-                {rejectSaving ? 'Opslaan…' : <><XCircle size={15} /> Bevestigen</>}
-              </button>
+              <button style={{ ...s.rejectBtn, flex: 1, justifyContent: 'center', padding: '12px', opacity: rejectSaving ? 0.6 : 1 }} onClick={handleConfirmReject} disabled={rejectSaving}>{rejectSaving ? 'Opslaan…' : <><XCircle size={15} /> Bevestigen</>}</button>
               <button style={{ ...s.cancelBtn, flex: 1 }} onClick={() => setRejectModalOpen(false)}>Annuleren</button>
             </div>
           </div>
@@ -1096,83 +1207,58 @@ export default function SuperAdmin() {
 
       {/* ══ USER MODAL ══ */}
       {isUserModalOpen && (
-        <div style={s.modalOverlay}>
-          <div style={s.modal}>
-            <div style={s.modalHeader}>
-              <h3 style={{ margin: 0, fontSize: '16px' }}>Gebruiker {editingId ? 'bewerken' : 'toevoegen'}</h3>
-              <button style={s.iconBtn} onClick={() => setIsUserModalOpen(false)}><X size={18} /></button>
-            </div>
-            <form onSubmit={handleUserSubmit} style={s.form}>
-              <label style={s.fieldLabel}>Voornaam</label>
-              <input placeholder="Voornaam" required style={s.input} value={userForm.firstName} onChange={e => setUserForm({ ...userForm, firstName: e.target.value })} />
-              <label style={s.fieldLabel}>Achternaam</label>
-              <input placeholder="Achternaam" required style={s.input} value={userForm.lastName} onChange={e => setUserForm({ ...userForm, lastName: e.target.value })} />
-              <label style={s.fieldLabel}>Email</label>
-              <input placeholder="Email" style={s.input} value={userForm.email} onChange={e => setUserForm({ ...userForm, email: e.target.value })} />
-              <label style={s.fieldLabel}>Rol</label>
-              <select style={s.input} value={userForm.role} onChange={e => setUserForm({ ...userForm, role: e.target.value })}>
-                <option value="user">User</option>
-                <option value="clubadmin">ClubAdmin</option>
-                <option value="superadmin">SuperAdmin</option>
-              </select>
-              <button type="submit" style={s.saveBtn}><Save size={16} /> Opslaan</button>
-            </form>
-          </div>
-        </div>
+        <div style={s.modalOverlay}><div style={s.modal}>
+          <div style={s.modalHeader}><h3 style={{ margin: 0, fontSize: '16px' }}>Gebruiker {editingId ? 'bewerken' : 'toevoegen'}</h3><button style={s.iconBtn} onClick={() => setIsUserModalOpen(false)}><X size={18} /></button></div>
+          <form onSubmit={handleUserSubmit} style={s.form}>
+            <label style={s.fieldLabel}>Voornaam</label><input placeholder="Voornaam" required style={s.input} value={userForm.firstName} onChange={e => setUserForm({ ...userForm, firstName: e.target.value })} />
+            <label style={s.fieldLabel}>Achternaam</label><input placeholder="Achternaam" required style={s.input} value={userForm.lastName} onChange={e => setUserForm({ ...userForm, lastName: e.target.value })} />
+            <label style={s.fieldLabel}>Email</label><input placeholder="Email" style={s.input} value={userForm.email} onChange={e => setUserForm({ ...userForm, email: e.target.value })} />
+            <label style={s.fieldLabel}>Rol</label>
+            <select style={s.input} value={userForm.role} onChange={e => setUserForm({ ...userForm, role: e.target.value })}>
+              <option value="user">User</option><option value="clubadmin">ClubAdmin</option><option value="superadmin">SuperAdmin</option>
+            </select>
+            <button type="submit" style={s.saveBtn}><Save size={16} /> Opslaan</button>
+          </form>
+        </div></div>
       )}
 
       {/* ══ CLUB MODAL ══ */}
       {isClubModalOpen && (
-        <div style={s.modalOverlay}>
-          <div style={s.modal}>
-            <div style={s.modalHeader}>
-              <h3 style={{ margin: 0, fontSize: '16px' }}>Club {editingId ? 'bewerken' : 'toevoegen'}</h3>
-              <button style={s.iconBtn} onClick={() => setIsClubModalOpen(false)}><X size={18} /></button>
-            </div>
-            <form onSubmit={handleClubSubmit} style={s.form}>
-              <label style={s.fieldLabel}>Naam</label>
-              <input placeholder="Club naam" required style={s.input} value={clubForm.name} onChange={e => setClubForm({ ...clubForm, name: e.target.value })} />
-              <label style={s.fieldLabel}>Logo URL</label>
-              <input placeholder="https://…" style={s.input} value={clubForm.logoUrl} onChange={e => setClubForm({ ...clubForm, logoUrl: e.target.value })} />
-              <button type="submit" style={s.saveBtn}><Save size={16} /> Opslaan</button>
-            </form>
-          </div>
-        </div>
+        <div style={s.modalOverlay}><div style={s.modal}>
+          <div style={s.modalHeader}><h3 style={{ margin: 0, fontSize: '16px' }}>Club {editingId ? 'bewerken' : 'toevoegen'}</h3><button style={s.iconBtn} onClick={() => setIsClubModalOpen(false)}><X size={18} /></button></div>
+          <form onSubmit={handleClubSubmit} style={s.form}>
+            <label style={s.fieldLabel}>Naam</label><input placeholder="Club naam" required style={s.input} value={clubForm.name} onChange={e => setClubForm({ ...clubForm, name: e.target.value })} />
+            <label style={s.fieldLabel}>Logo URL</label><input placeholder="https://…" style={s.input} value={clubForm.logoUrl} onChange={e => setClubForm({ ...clubForm, logoUrl: e.target.value })} />
+            <button type="submit" style={s.saveBtn}><Save size={16} /> Opslaan</button>
+          </form>
+        </div></div>
       )}
 
       {/* ══ GROUP MODAL ══ */}
       {isGroupModalOpen && (
-        <div style={s.modalOverlay}>
-          <div style={s.modal}>
-            <div style={s.modalHeader}>
-              <h3 style={{ margin: 0, fontSize: '16px' }}>Groep {editingId ? 'bewerken' : 'toevoegen'}</h3>
-              <button style={s.iconBtn} onClick={() => setIsGroupModalOpen(false)}><X size={18} /></button>
+        <div style={s.modalOverlay}><div style={s.modal}>
+          <div style={s.modalHeader}><h3 style={{ margin: 0, fontSize: '16px' }}>Groep {editingId ? 'bewerken' : 'toevoegen'}</h3><button style={s.iconBtn} onClick={() => setIsGroupModalOpen(false)}><X size={18} /></button></div>
+          <form onSubmit={handleGroupSubmit} style={s.form}>
+            <label style={s.fieldLabel}>Naam</label><input placeholder="Groep naam" required style={s.input} value={groupForm.name} onChange={e => setGroupForm({ ...groupForm, name: e.target.value })} />
+            <label style={s.fieldLabel}>Hartslagmeters (HRM)</label>
+            <div style={s.switchRow} onClick={() => setGroupForm({ ...groupForm, useHRM: !groupForm.useHRM })}>
+              <div style={{ ...s.switchHalf, backgroundColor:  groupForm.useHRM ? '#059669' : '#334155' }}>AAN</div>
+              <div style={{ ...s.switchHalf, backgroundColor: !groupForm.useHRM ? '#ef4444' : '#334155' }}>UIT</div>
             </div>
-            <form onSubmit={handleGroupSubmit} style={s.form}>
-              <label style={s.fieldLabel}>Naam</label>
-              <input placeholder="Groep naam" required style={s.input} value={groupForm.name} onChange={e => setGroupForm({ ...groupForm, name: e.target.value })} />
-              <label style={s.fieldLabel}>Hartslagmeters (HRM)</label>
-              <div style={s.switchRow} onClick={() => setGroupForm({ ...groupForm, useHRM: !groupForm.useHRM })}>
-                <div style={{ ...s.switchHalf, backgroundColor: groupForm.useHRM  ? '#059669' : '#334155' }}>AAN</div>
-                <div style={{ ...s.switchHalf, backgroundColor: !groupForm.useHRM ? '#ef4444' : '#334155' }}>UIT</div>
-              </div>
-              <button type="submit" style={s.saveBtn}><Save size={16} /> Opslaan</button>
-            </form>
-          </div>
-        </div>
+            <button type="submit" style={s.saveBtn}><Save size={16} /> Opslaan</button>
+          </form>
+        </div></div>
       )}
     </div>
   );
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 const getRoleColor = (role) => {
   if (role === 'superadmin') return '#ef4444';
   if (role === 'clubadmin')  return '#f59e0b';
   return '#3b82f6';
 };
 
-// ─── Button helpers ───────────────────────────────────────────────────────────
 const bs = {
   primary:   { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '9px 14px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
   secondary: { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '9px 14px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '8px', color: '#94a3b8', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
@@ -1180,19 +1266,19 @@ const bs = {
   toggle:    { padding: '5px 10px', borderRadius: '14px', border: '1px solid', fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
 };
 
-// ─── Responsive CSS ───────────────────────────────────────────────────────────
 const css = `
   * { box-sizing: border-box; }
   .btn-label { display: inline; }
   .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
   .user-list { display: flex; flex-direction: column; gap: 10px; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   @media (max-width: 600px) { .btn-label { display: none; } .card-grid { grid-template-columns: 1fr 1fr; gap: 10px; } }
   @media (max-width: 400px) { .card-grid { grid-template-columns: 1fr; } }
 `;
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const s = {
   page: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif' },
+  spinner: { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
   header: { backgroundColor: '#1e293b', borderBottom: '1px solid #334155', padding: '12px 16px', position: 'sticky', top: 0, zIndex: 100, display: 'flex', flexDirection: 'column', gap: '12px' },
   headerTitle: { fontWeight: '800', fontSize: '16px', color: '#f1f5f9' },
   tabBar: { display: 'flex', gap: '6px', overflowX: 'auto' },
