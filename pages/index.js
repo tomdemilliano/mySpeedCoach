@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { UserFactory, ClubFactory, GroupFactory, LiveSessionFactory, ClubJoinRequestFactory, BadgeFactory } from '../constants/dbSchema';
+import { UserFactory, ClubFactory, GroupFactory, LiveSessionFactory, ClubJoinRequestFactory, BadgeFactory, ClubMemberFactory, UserMemberLinkFactory } from '../constants/dbSchema';
 import {
   Bluetooth, BluetoothOff, Heart, Settings, Trophy,
   Target, Plus, Edit2, Trash2, Check, X, ChevronRight,
@@ -142,7 +142,6 @@ function HrmHeaderWidget({ connected, bpm, deviceName, zones, onConnect, onDisco
 }
 
 // ─── Celebration Overlay ──────────────────────────────────────────────────────
-// onAccept = save record / mark goal; onDecline = skip saving; badges auto-saved so onAccept = dismiss
 function CelebrationOverlay({ type, data, onAccept, onDecline }) {
   const isBadge  = type === 'badge';
   const isRecord = type === 'record';
@@ -152,7 +151,6 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
 
   return (
     <>
-      {/* Sparks */}
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 3000, overflow: 'hidden' }}>
         {Array.from({ length: 24 }).map((_, i) => (
           <div key={i} style={{
@@ -166,11 +164,9 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
         ))}
       </div>
 
-      {/* Modal */}
       <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 500 }}>
         <div style={{ backgroundColor: '#1e293b', padding: '30px', borderRadius: '20px', width: '100%', maxWidth: '400px', border: `1px solid ${accentColor}`, animation: 'fadeInUp 0.4s ease-out' }}>
 
-          {/* Icon / badge image */}
           {isBadge && data.badgeImageUrl ? (
             <img src={data.badgeImageUrl} alt={data.badgeName} style={{ width: '90px', height: '90px', borderRadius: '50%', objectFit: 'cover', margin: '0 auto 16px', display: 'block', border: `3px solid ${accentColor}` }} />
           ) : (
@@ -208,7 +204,6 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
             )}
           </div>
 
-          {/* Badges: single dismiss button. Records/goals: accept or skip */}
           {isBadge ? (
             <button onClick={onAccept} style={{ width: '100%', padding: '14px', backgroundColor: accentColor, border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
               <Check size={20} /> GEWELDIG!
@@ -260,14 +255,24 @@ function StatCard({ icon: Icon, color, label, value, sub, href }) {
 }
 
 // ─── Recent sessions mini list ────────────────────────────────────────────────
-function RecentSessionsList({ uid }) {
+// Feature 8.10: reads from ClubMember path via memberContext
+function RecentSessionsList({ memberContext }) {
   const [sessions, setSessions] = useState([]);
 
   useEffect(() => {
-    if (!uid) return;
-    const unsub = UserFactory.getSessionHistory(uid, (data) => setSessions(data.slice(0, 5)));
+    if (!memberContext) return;
+    const { clubId, memberId } = memberContext;
+    const unsub = ClubMemberFactory.getSessionHistory(clubId, memberId, (data) => {
+      setSessions(data.slice(0, 5));
+    });
     return () => unsub();
-  }, [uid]);
+  }, [memberContext]);
+
+  if (!memberContext) return (
+    <div style={{ textAlign: 'center', padding: '20px 0', color: '#334155', fontSize: '13px' }}>
+      Koppel je account aan een clubprofiel om sessies te zien.
+    </div>
+  );
 
   if (sessions.length === 0) return (
     <div style={{ textAlign: 'center', padding: '20px 0', color: '#334155', fontSize: '13px' }}>
@@ -307,7 +312,6 @@ function MembershipsPanel({ uid, allClubs, onClose }) {
   const [joinForm, setJoinForm] = useState({ clubId: '', message: '' });
   const [joinSending, setJoinSending] = useState(false);
   const [joinError, setJoinError] = useState('');
-  const [showHiddenRequests, setShowHiddenRequests] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
@@ -356,7 +360,6 @@ function MembershipsPanel({ uid, allClubs, onClose }) {
   };
 
   const visibleRequests = joinRequests.filter(r => !r.hidden);
-  const hiddenRequests = joinRequests.filter(r => r.hidden);
   const newRejections = joinRequests.filter(r => r.status === 'rejected' && !r.hidden).length;
 
   return (
@@ -369,7 +372,6 @@ function MembershipsPanel({ uid, allClubs, onClose }) {
           <button style={s.iconBtn} onClick={onClose}><X size={18} /></button>
         </div>
 
-        {/* Memberships */}
         {memberships.length > 0 && (
           <div style={{ marginBottom: '20px' }}>
             <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Clubs</div>
@@ -393,7 +395,6 @@ function MembershipsPanel({ uid, allClubs, onClose }) {
           </div>
         )}
 
-        {/* Join requests */}
         {visibleRequests.length > 0 && (
           <div style={{ marginBottom: '16px' }}>
             <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Aanvragen</div>
@@ -445,7 +446,6 @@ function MembershipsPanel({ uid, allClubs, onClose }) {
           <Send size={15} /> Club aanvraag indienen
         </button>
 
-        {/* Join modal nested */}
         {showJoinModal && (
           <div style={{ ...s.modalOverlay, zIndex: 600 }}>
             <div style={{ ...s.modal, maxWidth: '400px' }}>
@@ -489,23 +489,28 @@ export default function IndexPage() {
   const [newUserSaving, setNewUserSaving] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
 
+  // Feature 8.10: ClubMember context resolved via UserMemberLink
+  const [memberContext, setMemberContext] = useState(null); // { clubId, memberId }
+
   // HRM
   const [heartRate, setHeartRate] = useState(0);
   const [hrmConnected, setHrmConnected] = useState(false);
   const [hrmDeviceName, setHrmDeviceName] = useState('');
   const lastBpmRef = useRef(0);
 
-  // Records
+  // Records — Feature 8.10: from ClubMember path
   const [records, setRecords] = useState([]);
 
-  // Goals
+  // Goals — Feature 8.10: from ClubMember path
   const [goals, setGoals] = useState([]);
 
-  // Sessions
+  // Sessions — Feature 8.10: from ClubMember path
   const [recentSessions, setRecentSessions] = useState([]);
 
-  // Achievements
+  // Badges — Feature 8.10: from ClubMember path
   const [earnedBadges, setEarnedBadges] = useState([]);
+
+  // Achievements
   const [achievementQueue, setAchievementQueue] = useState([]);
   const [isProcessingAchievements, setIsProcessingAchievements] = useState(false);
 
@@ -515,11 +520,10 @@ export default function IndexPage() {
   const [settingsForm, setSettingsForm] = useState({ firstName: '', lastName: '', email: '' });
   const [zonesForm, setZonesForm] = useState(DEFAULT_ZONES);
 
-  // Notification badge for rejected requests
   const [newRejections, setNewRejections] = useState(0);
 
-  // View mode toggle — users who are both skipper and coach can switch
-  const [viewMode, setViewMode] = useState('skipper'); // 'skipper' | 'coach'
+  // View mode toggle
+  const [viewMode, setViewMode] = useState('skipper');
   const [isCoachInGroup, setIsCoachInGroup] = useState(false);
 
   useEffect(() => {
@@ -550,30 +554,28 @@ export default function IndexPage() {
     return () => unsub();
   }, [selectedClubFilter, allUsers]);
 
-  // ── Achievement check (defined early so loginUser's useEffect can reference it) ──
+  // ── Achievement check ──────────────────────────────────────────────────────
   const achievementCheckedRef = useRef(false);
 
-  // Run once when the user first lands on the page (after login).
-  // Uses one-shot reads so we don't leave dangling listeners.
-  const checkNewAchievements = useCallback(async (user) => {
+  // Feature 8.10: checkNewAchievements now reads from ClubMember sub-collections
+  const checkNewAchievements = useCallback(async (user, ctx) => {
+    // ctx = { clubId, memberId } — may be null if no UserMemberLink yet
     try {
       const lastVisitedRaw = await UserFactory.getLastVisited(user.id);
       const lastVisitedMs = lastVisitedRaw?.seconds ? lastVisitedRaw.seconds * 1000 : 0;
-
-      // Update last visited timestamp immediately so next visit has a fresh baseline
       await UserFactory.updateLastVisited(user.id);
 
-      // First visit ever — nothing to show yet
-      if (!lastVisitedMs) return;
+      if (!lastVisitedMs || !ctx) return;
 
+      const { clubId, memberId } = ctx;
       const queue = [];
 
-      // ── 1. New badges since last visit ──
+      // 1. New badges since last visit — Feature 8.10: ClubMember path
       const { getDocs, collection } = await import('firebase/firestore');
       const { db: firestoreDb } = await import('../firebaseConfig');
-      const badgesSnap = await getDocs(collection(firestoreDb, `users/${user.id}/earnedBadges`));
-      const earnedBadges = badgesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      earnedBadges
+      const badgesSnap = await getDocs(collection(firestoreDb, `clubs/${clubId}/members/${memberId}/earnedBadges`));
+      const allEarned = badgesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      allEarned
         .filter(b => {
           const ms = b.earnedAt?.seconds ? b.earnedAt.seconds * 1000 : 0;
           return ms > lastVisitedMs;
@@ -581,16 +583,16 @@ export default function IndexPage() {
         .sort((a, b) => (a.earnedAt?.seconds || 0) - (b.earnedAt?.seconds || 0))
         .forEach(b => queue.push({ type: 'badge', data: b }));
 
-      // ── 2. New records since last visit ──
-      const history = await UserFactory.getSessionHistoryOnce(user.id);
-      const recentSessions = history.filter(s => {
+      // 2. New records since last visit — Feature 8.10: ClubMember path
+      const history = await ClubMemberFactory.getSessionHistoryOnce(clubId, memberId);
+      const recentSess = history.filter(s => {
         const ms = s.sessionEnd?.seconds ? s.sessionEnd.seconds * 1000 : 0;
         return ms > lastVisitedMs;
       });
 
-      for (const session of recentSessions) {
+      for (const session of recentSess) {
         if (!session.score) continue;
-        const best = await UserFactory.getBestRecord(user.id, session.discipline, session.sessionType);
+        const best = await ClubMemberFactory.getBestRecord(clubId, memberId, session.discipline, session.sessionType);
         if (best) {
           const recMs = best.achievedAt?.seconds ? best.achievedAt.seconds * 1000 : 0;
           if (recMs > lastVisitedMs && best.score === session.score) {
@@ -608,8 +610,8 @@ export default function IndexPage() {
         }
       }
 
-      // ── 3. Newly achieved goals since last visit ──
-      const goalsSnap = await getDocs(collection(firestoreDb, `users/${user.id}/goals`));
+      // 3. Newly achieved goals since last visit — Feature 8.10: ClubMember path
+      const goalsSnap = await getDocs(collection(firestoreDb, `clubs/${clubId}/members/${memberId}/goals`));
       const allGoals = goalsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       allGoals
         .filter(g => {
@@ -617,7 +619,7 @@ export default function IndexPage() {
           return achievedMs > lastVisitedMs;
         })
         .forEach(g => {
-          const matchingSession = recentSessions.find(s =>
+          const matchingSession = recentSess.find(s =>
             s.discipline === g.discipline && (s.score || 0) >= g.targetScore
           );
           queue.push({
@@ -640,12 +642,19 @@ export default function IndexPage() {
     }
   }, []);
 
-  // Run achievement check exactly once per login session
   useEffect(() => {
     if (!currentUser || achievementCheckedRef.current) return;
     achievementCheckedRef.current = true;
-    checkNewAchievements(currentUser);
-  }, [currentUser, checkNewAchievements]);
+    // memberContext may not be set yet at this point; we check after it resolves
+  }, [currentUser]);
+
+  // Run achievement check once memberContext is resolved (after login)
+  const achievementFiredRef = useRef(false);
+  useEffect(() => {
+    if (!currentUser || !memberContext || achievementFiredRef.current) return;
+    achievementFiredRef.current = true;
+    checkNewAchievements(currentUser, memberContext);
+  }, [currentUser, memberContext, checkNewAchievements]);
 
   const loginUser = useCallback((user) => {
     setCurrentUser(user);
@@ -653,39 +662,80 @@ export default function IndexPage() {
     setSettingsForm({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email || '' });
     setZonesForm(user.heartrateZones || DEFAULT_ZONES);
     setPhase('app');
-    // Achievement check fires via useEffect once currentUser is in state
+    achievementCheckedRef.current = false;
+    achievementFiredRef.current = false;
   }, []);
 
+  // Feature 8.10: resolve memberContext (clubId + memberId) via UserMemberLink
   useEffect(() => {
     if (!currentUser) return;
+    const unsub = UserMemberLinkFactory.getForUser(currentUser.id, (profiles) => {
+      const selfProfile = profiles.find(p => p.link.relationship === 'self');
+      setMemberContext(selfProfile
+        ? { clubId: selfProfile.member.clubId, memberId: selfProfile.member.id }
+        : null
+      );
+    });
+    return () => unsub();
+  }, [currentUser]);
+
+  // Feature 8.10: subscribe to records from ClubMember path
+  useEffect(() => {
+    if (!memberContext) return;
+    const { clubId, memberId } = memberContext;
     const unsubs = [];
     DISCIPLINES.forEach(d => SESSION_TYPES.forEach(st => {
-      const u = UserFactory.subscribeToRecords(currentUser.id, d, st, (rec) => {
-        if (rec) setRecords(prev => { const f = prev.filter(r => !(r.discipline === d && r.sessionType === st)); return [...f, { ...rec, discipline: d, sessionType: st }]; });
-        else setRecords(prev => prev.filter(r => !(r.discipline === d && r.sessionType === st)));
+      const u = ClubMemberFactory.subscribeToRecords(clubId, memberId, d, st, (rec) => {
+        if (rec) {
+          setRecords(prev => {
+            const f = prev.filter(r => !(r.discipline === d && r.sessionType === st));
+            return [...f, { ...rec, discipline: d, sessionType: st }];
+          });
+        } else {
+          setRecords(prev => prev.filter(r => !(r.discipline === d && r.sessionType === st)));
+        }
       });
       unsubs.push(u);
     }));
-    const u2 = UserFactory.getGoals(currentUser.id, setGoals);
-    const u3 = UserFactory.getSessionHistory(currentUser.id, (data) => setRecentSessions(data.slice(0, 5)));
-    const u4 = BadgeFactory.getEarned(currentUser.id, setEarnedBadges);
-    return () => { unsubs.forEach(u => u && u()); u2(); u3(); u4(); };
-  }, [currentUser]);
+    return () => unsubs.forEach(u => u && u());
+  }, [memberContext]);
 
-  // Detect if user is a coach in any group (for view toggle)
+  // Feature 8.10: subscribe to goals from ClubMember path
+  useEffect(() => {
+    if (!memberContext) return;
+    const { clubId, memberId } = memberContext;
+    const unsub = ClubMemberFactory.getGoals(clubId, memberId, setGoals);
+    return () => unsub();
+  }, [memberContext]);
+
+  // Feature 8.10: subscribe to recent sessions from ClubMember path
+  useEffect(() => {
+    if (!memberContext) return;
+    const { clubId, memberId } = memberContext;
+    const unsub = ClubMemberFactory.getSessionHistory(clubId, memberId, (data) => {
+      setRecentSessions(data.slice(0, 5));
+    });
+    return () => unsub();
+  }, [memberContext]);
+
+  // Feature 8.10: subscribe to earned badges from ClubMember path
+  useEffect(() => {
+    if (!memberContext) return;
+    const { clubId, memberId } = memberContext;
+    const unsub = BadgeFactory.getEarned(clubId, memberId, setEarnedBadges);
+    return () => unsub();
+  }, [memberContext]);
+
+  // Detect coach role in any group
   useEffect(() => {
     if (!currentUser || allClubs.length === 0) return;
     const unsubs = [];
-    let foundCoach = false;
     allClubs.forEach(club => {
       const u = GroupFactory.getGroupsByClub(club.id, (groups) => {
         groups.forEach(group => {
           const u2 = GroupFactory.getMembersByGroup(club.id, group.id, (members) => {
             const mine = members.find(m => m.id === currentUser.id);
-            if (mine?.isCoach) {
-              foundCoach = true;
-              setIsCoachInGroup(true);
-            }
+            if (mine?.isCoach) setIsCoachInGroup(true);
           });
           unsubs.push(u2);
         });
@@ -769,12 +819,12 @@ export default function IndexPage() {
   const handleAchievementAccept = async () => {
     const current = achievementQueue[0];
     if (!current || !currentUser) { advanceAchievementQueue(); return; }
-    if (current.type === 'record') {
+    // Feature 8.10: save record to ClubMember path
+    if (current.type === 'record' && memberContext) {
       try {
-        await UserFactory.addRecord(currentUser.id, current.data);
+        await ClubMemberFactory.addRecord(memberContext.clubId, memberContext.memberId, current.data);
       } catch (e) { console.error('Failed to save record:', e); }
     }
-    // Badge: already saved automatically, goal: already marked by BadgeFactory — just advance
     advanceAchievementQueue();
   };
 
@@ -783,11 +833,14 @@ export default function IndexPage() {
   const logout = () => {
     clearCookie();
     setCurrentUser(null);
+    setMemberContext(null);
     setHeartRate(0);
     setHrmConnected(false);
     setRecords([]);
     setGoals([]);
-    achievementCheckedRef.current = false; // allow re-check on next login
+    setEarnedBadges([]);
+    achievementCheckedRef.current = false;
+    achievementFiredRef.current = false;
     setPhase('identify');
   };
 
@@ -884,7 +937,6 @@ export default function IndexPage() {
   }
 
   // ─── App ───────────────────────────────────────────────────────────────────
-  // User is eligible for coach view if they have an admin role OR are a coach in any group
   const hasCoachAccess = currentUser?.role === 'clubadmin' || currentUser?.role === 'superadmin' || isCoachInGroup;
   const isCoach = viewMode === 'coach' && hasCoachAccess;
 
@@ -894,11 +946,11 @@ export default function IndexPage() {
 
       {isProcessingAchievements && achievementQueue.length > 0 && (
         <CelebrationOverlay
-            type={achievementQueue[0].type}
-            data={achievementQueue[0].data}
-            onAccept={handleAchievementAccept}
-            onDecline={handleAchievementDecline}
-          />
+          type={achievementQueue[0].type}
+          data={achievementQueue[0].data}
+          onAccept={handleAchievementAccept}
+          onDecline={handleAchievementDecline}
+        />
       )}
 
       {/* ── HEADER ── */}
@@ -916,11 +968,9 @@ export default function IndexPage() {
                 onClick={() => setViewMode(v => {
                   const next = v === 'coach' ? 'skipper' : 'coach';
                   sessionStorage.setItem('msc_viewmode', next);
-                  // Notify _app.js via storage event (same-tab workaround)
                   window.dispatchEvent(new StorageEvent('storage', { key: 'msc_viewmode', newValue: next }));
                   return next;
                 })}
-                title={viewMode === 'coach' ? 'Overschakelen naar skipper-weergave' : 'Overschakelen naar coach-weergave'}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: '4px',
                   marginTop: '2px', padding: '2px 8px', borderRadius: '10px',
@@ -941,7 +991,6 @@ export default function IndexPage() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-          {/* Rejection notification */}
           {newRejections > 0 && (
             <button onClick={() => setShowMemberships(true)} style={{ position: 'relative', background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
               <Bell size={18} color="#f59e0b" />
@@ -951,7 +1000,6 @@ export default function IndexPage() {
             </button>
           )}
 
-          {/* HRM widget */}
           <HrmHeaderWidget
             connected={hrmConnected}
             bpm={heartRate}
@@ -969,7 +1017,6 @@ export default function IndexPage() {
       {/* ── CONTENT ── */}
       <div style={{ maxWidth: '760px', margin: '0 auto', padding: '20px 16px 40px' }}>
 
-        {/* Greeting */}
         <div style={{ marginBottom: '20px' }}>
           <h2 style={{ fontSize: '20px', fontWeight: '800', color: '#f1f5f9', margin: '0 0 2px' }}>
             Hallo, {currentUser.firstName} 👋
@@ -979,11 +1026,25 @@ export default function IndexPage() {
           </p>
         </div>
 
-        {/* Quick stats */}
+        {/* Quick stats — Feature 8.10: data now from ClubMember path via state */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '24px' }}>
-          <StatCard icon={Hash} color="#60a5fa" label="Laatste sessie" value={lastSession?.score} sub={lastSession ? `${DISC_LABELS[lastSession.discipline]} · ${lastSession.sessionType}` : 'Nog geen sessies'} />
-          <StatCard icon={Trophy} color="#facc15" label="Beste record" value={bestRecord?.score} sub={bestRecord ? `${DISC_LABELS[bestRecord.discipline]} · ${bestRecord.sessionType}` : 'Nog geen record'} href="/achievements" />
-          <StatCard icon={Target} color="#22c55e" label="Actieve doelen" value={activeGoals.length || null} sub={activeGoals.length > 0 ? `${activeGoals[0].discipline} → ${activeGoals[0].targetScore} stps` : 'Geen doelen'} href="/achievements" />
+          <StatCard
+            icon={Hash} color="#60a5fa" label="Laatste sessie"
+            value={lastSession?.score}
+            sub={lastSession ? `${DISC_LABELS[lastSession.discipline]} · ${lastSession.sessionType}` : (memberContext ? 'Nog geen sessies' : 'Koppel clubprofiel')}
+          />
+          <StatCard
+            icon={Trophy} color="#facc15" label="Beste record"
+            value={bestRecord?.score}
+            sub={bestRecord ? `${DISC_LABELS[bestRecord.discipline]} · ${bestRecord.sessionType}` : (memberContext ? 'Nog geen record' : 'Koppel clubprofiel')}
+            href="/achievements"
+          />
+          <StatCard
+            icon={Target} color="#22c55e" label="Actieve doelen"
+            value={activeGoals.length || null}
+            sub={activeGoals.length > 0 ? `${activeGoals[0].discipline} → ${activeGoals[0].targetScore} stps` : 'Geen doelen'}
+            href="/achievements"
+          />
         </div>
 
         {/* Coach: quick launch dashboard */}
@@ -1002,7 +1063,7 @@ export default function IndexPage() {
           </a>
         )}
 
-        {/* Recent sessions */}
+        {/* Recent sessions — Feature 8.10: passes memberContext instead of uid */}
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
             <div style={{ fontSize: '14px', fontWeight: '700', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -1012,10 +1073,10 @@ export default function IndexPage() {
               Alle <ArrowRight size={12} />
             </a>
           </div>
-          <RecentSessionsList uid={currentUser.id} />
+          <RecentSessionsList memberContext={memberContext} />
         </div>
 
-        {/* Recent badges */}
+        {/* Recent badges — Feature 8.10: earnedBadges from ClubMember path */}
         {recentBadges.length > 0 && (
           <div style={{ marginBottom: '24px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
@@ -1130,6 +1191,7 @@ const globalCSS = `
   @keyframes sparkFlyD { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(-80px,-220px) scale(0); opacity:0; } }
   @keyframes sparkFlyE { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(30px,-300px) scale(0); opacity:0; } }
   @keyframes sparkFlyF { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(-200px,-150px) scale(0); opacity:0; } }
+  @keyframes pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.08); } }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .user-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
   @media (max-width: 480px) {
