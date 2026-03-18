@@ -3,20 +3,13 @@ import {
   UserFactory, ClubFactory, GroupFactory,
   ClubJoinRequestFactory, BadgeFactory, ClubMemberFactory,
 } from '../constants/dbSchema';
+import { useAuth } from '../contexts/AuthContext';
 import {
   ShieldAlert, UserPlus, Building2, Users, Trash2, Search,
   Edit2, X, Save, ArrowLeft, Plus, Heart, HeartOff, PlusCircle,
   Calendar, Bell, CheckCircle2, XCircle, Clock, MessageSquare,
   Check, AlertCircle, Award, ChevronRight, Upload, Medal,
 } from 'lucide-react';
-
-// ─── Cookie helper ─────────────────────────────────────────────────────────────
-const COOKIE_KEY = 'msc_uid';
-const getCookieUid = () => {
-  if (typeof document === 'undefined') return null;
-  const m = document.cookie.match(new RegExp(`(?:^|; )${COOKIE_KEY}=([^;]*)`));
-  return m ? m[1] : null;
-};
 
 // ─── URL query helper ─────────────────────────────────────────────────────────
 const getQueryParam = (key) => {
@@ -359,8 +352,8 @@ function ClubMemberFormModal({ member, clubId, createdByUid, onClose }) {
 // ════════════════════════════════════════════════════════════════════════════
 export default function ClubAdmin() {
   // ── Auth / role ────────────────────────────────────────────────────────────
+  const { uid, loading: authLoading } = useAuth();
   const [currentUser,  setCurrentUser]  = useState(null);
-  const [authLoading,  setAuthLoading]  = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isClubAdmin,  setIsClubAdmin]  = useState(false);
 
@@ -416,43 +409,40 @@ export default function ClubAdmin() {
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    const uid = getCookieUid();
-    if (!uid) { setAuthLoading(false); return; }
+    if (authLoading || !uid) return;
 
     UserFactory.get(uid).then(snap => {
-      if (!snap.exists()) { setAuthLoading(false); return; }
+      if (!snap.exists()) return;
       const user = { id: uid, ...snap.data() };
       setCurrentUser(user);
       const role = user.role || 'user';
 
       if (role === 'superadmin') {
         setIsSuperAdmin(true);
-        ClubFactory.getAll(all => { setAdminClubs(all); setAuthLoading(false); });
+        ClubFactory.getAll(all => { setAdminClubs(all); });
       } else if (role === 'clubadmin') {
         setIsClubAdmin(true);
         ClubFactory.getAll(allClubs => {
           let found = [];
           let pending = allClubs.length;
-          if (pending === 0) { setAdminClubs([]); setAuthLoading(false); return; }
+          if (pending === 0) { setAdminClubs([]); return; }
           allClubs.forEach(club => {
             GroupFactory.getGroupsByClub(club.id, groups => {
               let gPending = groups.length;
-              if (gPending === 0) { if (--pending === 0) { setAdminClubs(found); setAuthLoading(false); } return; }
+              if (gPending === 0) { if (--pending === 0) { setAdminClubs(found); } return; }
               groups.forEach(group => {
                 GroupFactory.getMembersByGroup(club.id, group.id, mems => {
                   const isCoach = mems.some(m => (m.memberId || m.id) === uid && m.isCoach);
                   if (isCoach && !found.find(c => c.id === club.id)) found = [...found, club];
-                  if (--gPending === 0 && --pending === 0) { setAdminClubs(found); setAuthLoading(false); }
+                  if (--gPending === 0 && --pending === 0) { setAdminClubs(found); }
                 });
               });
             });
           });
         });
-      } else {
-        setAuthLoading(false);
       }
     });
-  }, []);
+  }, [uid, authLoading]);
 
   useEffect(() => {
     if (adminClubs.length === 0) return;
@@ -1138,7 +1128,7 @@ export default function ClubAdmin() {
         <ClubMemberFormModal
           member={ledenEditing}
           clubId={activeClub.id}
-          createdByUid={getCookieUid()}
+          createdByUid={uid}
           onClose={() => { setLedenForm(false); setLedenEditing(null); }}
         />
       )}
