@@ -421,45 +421,12 @@ export const ClubJoinRequestFactory = {
       callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }),
 
-  approve: async (requestId, approvedByUid = null) => {
-    // 1. Fetch the request so we have the uid + clubId
-    const reqSnap = await getDoc(doc(db, 'clubJoinRequests', requestId));
-    if (!reqSnap.exists()) throw new Error('Join request not found');
- 
-    const { uid, clubId } = reqSnap.data();
- 
-    if (uid && clubId) {
-      // 2. Check if a UserMemberLink already exists to avoid duplicates
-      const existingQuery = query(
-        collection(db, 'userMemberLinks'),
-        where('uid',    '==', uid),
-        where('clubId', '==', clubId),
-      );
-      const existingSnap = await getDocs(existingQuery);
- 
-      if (existingSnap.empty) {
-        // 3. Create the UserMemberLink — no memberId yet (coach assigns to group later)
-        //    approvedBy is set so the coach can see who approved it
-        await addDoc(collection(db, 'userMemberLinks'), {
-          uid,
-          clubId,
-          memberId:      null,   // set when coach links to a ClubMember
-          relationship:  'self',
-          canEdit:       false,
-          canViewHealth: false,
-          createdAt:     serverTimestamp(),
-          approvedBy:    approvedByUid || 'admin',
-        });
-      }
-    }
- 
-    // 4. Mark the request as approved
-    return updateDoc(doc(db, 'clubJoinRequests', requestId), {
+  approve: (requestId, approvedByUid = null) =>
+    updateDoc(doc(db, 'clubJoinRequests', requestId), {
       status: 'approved',
       rejectionReason: '',
       resolvedAt: serverTimestamp(),
-    });
-  },
+    }),
 
   reject: (requestId, reason) =>
     updateDoc(doc(db, 'clubJoinRequests', requestId), {
@@ -880,10 +847,8 @@ export const UserMemberLinkFactory = {
       const links = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const joined = await Promise.all(
         links.map(async (link) => {
-          // Link approved but coach hasn't assigned a ClubMember yet
-          if (!link.memberId) {
-            return { link, member: null };
-          }
+          // Defensive guard: skip links with no memberId (legacy/broken links)
+          if (!link.memberId) return null;
           const memberSnap = await getDoc(doc(db, `clubs/${link.clubId}/members`, link.memberId));
           if (!memberSnap.exists()) return null;
           return { link, member: { id: memberSnap.id, clubId: link.clubId, ...memberSnap.data() } };
