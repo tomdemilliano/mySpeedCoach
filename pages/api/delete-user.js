@@ -3,16 +3,19 @@
 // Deletes a Firebase Auth account server-side using the Admin SDK.
 // Called by UserFactory.delete() after it has cleaned up Firestore.
 //
-// Required environment variables (set in .env.local or your hosting provider):
-//   FIREBASE_PROJECT_ID
+// projectId is hardcoded from firebaseConfig.js (it's already public).
+// Only two env vars are needed (Vercel dashboard or .env.local):
 //   FIREBASE_CLIENT_EMAIL
-//   FIREBASE_PRIVATE_KEY   (the full PEM string, including \n newlines)
+//   FIREBASE_PRIVATE_KEY
 //
-// You can find these values in the Firebase console:
-//   Project Settings → Service Accounts → Generate new private key
+// Generate these from: Firebase Console → Project Settings → Service Accounts
+//   → Generate new private key
 
 const { initializeApp, getApps, cert } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
+
+// Safe to hardcode — already public in firebaseConfig.js
+const PROJECT_ID = 'myspeedcoach-416ac';
 
 // Initialise the Admin SDK once (Next.js hot-reloads can call this file
 // multiple times, so we guard against re-initialisation).
@@ -20,10 +23,9 @@ function getAdminAuth() {
   if (!getApps().length) {
     initializeApp({
       credential: cert({
-        projectId:   process.env.FIREBASE_PROJECT_ID,
+        projectId:   PROJECT_ID,
         clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        // The private key comes in as a JSON string with literal \n — convert
-        // them back to real newlines so the PEM is valid.
+        // Vercel stores the key with literal \n — convert back to real newlines.
         privateKey:  process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
       }),
     });
