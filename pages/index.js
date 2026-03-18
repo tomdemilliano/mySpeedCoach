@@ -204,144 +204,6 @@ function RecentSessionsList({ memberContext }) {
   );
 }
 
-// ─── Memberships panel ────────────────────────────────────────────────────────
-function MembershipsPanel({ uid, allClubs, onClose }) {
-  const [memberships,   setMemberships]   = useState([]);
-  const [joinRequests,  setJoinRequests]  = useState([]);
-  const [showJoinModal, setShowJoinModal] = useState(false);
-  const [joinForm,      setJoinForm]      = useState({ clubId: '', message: '' });
-  const [joinSending,   setJoinSending]   = useState(false);
-  const [joinError,     setJoinError]     = useState('');
-  const [currentUser,   setCurrentUser]   = useState(null);
-
-  useEffect(() => {
-    if (!uid) return;
-    UserFactory.get(uid).then(snap => { if (snap.exists()) setCurrentUser({ id: uid, ...snap.data() }); });
-    const u1 = ClubJoinRequestFactory.getByUser(uid, setJoinRequests);
-    return () => u1();
-  }, [uid]);
-
-  useEffect(() => {
-    if (!currentUser || allClubs.length === 0) return;
-    const allUnsubs = [];
-    const collected = {};
-    allClubs.forEach(club => {
-      const u = GroupFactory.getGroupsByClub(club.id, (groups) => {
-        groups.forEach(group => {
-          const u2 = GroupFactory.getMembersByGroup(club.id, group.id, (members) => {
-            const mine = members.find(m => m.id === uid);
-            const key = `${club.id}-${group.id}`;
-            if (mine) collected[key] = { clubId: club.id, clubName: club.name, groupId: group.id, groupName: group.name, isSkipper: mine.isSkipper, isCoach: mine.isCoach };
-            else delete collected[key];
-            setMemberships(Object.values(collected));
-          });
-          allUnsubs.push(u2);
-        });
-      });
-      allUnsubs.push(u);
-    });
-    return () => allUnsubs.forEach(u => u && u());
-  }, [currentUser, allClubs]);
-
-  const handleSendJoin = async () => {
-    setJoinError('');
-    if (!joinForm.clubId) { setJoinError('Selecteer een club.'); return; }
-    const already = joinRequests.find(r => r.clubId === joinForm.clubId && r.status === 'pending');
-    if (already) { setJoinError('Je hebt al een openstaande aanvraag.'); return; }
-    setJoinSending(true);
-    try {
-      const club = allClubs.find(c => c.id === joinForm.clubId);
-      await ClubJoinRequestFactory.create(uid, { firstName: currentUser?.firstName || '', lastName: currentUser?.lastName || '', email: currentUser?.email || '' }, joinForm.clubId, club?.name || '', joinForm.message);
-      setShowJoinModal(false); setJoinForm({ clubId: '', message: '' });
-    } catch { setJoinError('Aanvraag kon niet worden verzonden.'); }
-    finally { setJoinSending(false); }
-  };
-
-  const visibleRequests = joinRequests.filter(r => !r.hidden);
-  const newRejections   = joinRequests.filter(r => r.status === 'rejected' && !r.hidden).length;
-
-  return (
-    <div style={s.modalOverlay}>
-      <div style={{ ...s.modal, maxHeight: '85vh' }}>
-        <div style={s.modalHeader}>
-          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px', fontSize: '16px' }}><Building2 size={18} color="#a78bfa" /> Lidmaatschappen</h3>
-          <button style={s.iconBtn} onClick={onClose}><X size={18} /></button>
-        </div>
-        {memberships.length > 0 && (
-          <div style={{ marginBottom: '20px' }}>
-            <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Clubs</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {memberships.map((m, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #334155' }}>
-                  <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#2d1d4e', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Building2 size={15} color="#a78bfa" /></div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: '600', fontSize: '14px', color: '#f1f5f9' }}>{m.clubName}</div>
-                    <div style={{ fontSize: '12px', color: '#64748b' }}>{m.groupName}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                    {m.isSkipper && <span style={{ padding: '2px 7px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', backgroundColor: '#3b82f622', color: '#60a5fa', border: '1px solid #3b82f644' }}>Skipper</span>}
-                    {m.isCoach   && <span style={{ padding: '2px 7px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', backgroundColor: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44' }}>Coach</span>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {visibleRequests.length > 0 && (
-          <div style={{ marginBottom: '16px' }}>
-            <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Aanvragen</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {visibleRequests.map(req => {
-                const cfg = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending;
-                const StatusIcon = cfg.icon;
-                return (
-                  <div key={req.id} style={{ padding: '10px 12px', backgroundColor: cfg.bg, borderRadius: '10px', border: `1px solid ${cfg.color}33` }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                      <span style={{ fontWeight: '600', fontSize: '14px', color: '#f1f5f9' }}>{req.clubName}</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: '700', color: cfg.color }}><StatusIcon size={10} /> {cfg.label}</span>
-                    </div>
-                    {req.status === 'rejected' && req.rejectionReason && <div style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>Reden: {req.rejectionReason}</div>}
-                    <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-                      {req.status !== 'pending' && <button onClick={() => ClubJoinRequestFactory.hide(req.id)} style={{ fontSize: '11px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}><EyeOff size={11} /> Verbergen</button>}
-                      {req.status !== 'pending' && <button onClick={() => { if (window.confirm('Verwijderen?')) ClubJoinRequestFactory.delete(req.id); }} style={{ fontSize: '11px', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}><Trash2 size={11} /> Verwijderen</button>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-        {memberships.length === 0 && visibleRequests.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '20px 0', color: '#475569', fontSize: '13px' }}>
-            <Users size={28} color="#334155" style={{ marginBottom: '8px', display: 'block', margin: '0 auto 8px' }} />Geen clublidmaatschappen
-          </div>
-        )}
-        <button onClick={() => { setShowJoinModal(true); setJoinError(''); }} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '11px', backgroundColor: '#7c3aed22', border: '1px solid #7c3aed44', borderRadius: '10px', color: '#a78bfa', fontWeight: '600', fontSize: '14px', cursor: 'pointer', marginTop: '8px' }}>
-          <Send size={15} /> Club aanvraag indienen
-        </button>
-        {showJoinModal && (
-          <div style={{ ...s.modalOverlay, zIndex: 600 }}>
-            <div style={{ ...s.modal, maxWidth: '400px' }}>
-              <div style={s.modalHeader}><h3 style={{ margin: 0, fontSize: '15px' }}>Aanvraag voor club</h3><button style={s.iconBtn} onClick={() => setShowJoinModal(false)}><X size={18} /></button></div>
-              <label style={s.fieldLabel}>Club <span style={{ color: '#ef4444' }}>*</span></label>
-              <select style={{ ...s.select, marginBottom: '14px' }} value={joinForm.clubId} onChange={e => setJoinForm({ ...joinForm, clubId: e.target.value })}>
-                <option value="">-- Selecteer een club --</option>
-                {allClubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <label style={s.fieldLabel}>Motivatie (optioneel)</label>
-              <textarea style={{ ...s.input, minHeight: '70px', resize: 'vertical', lineHeight: 1.5, marginBottom: '4px' }} placeholder="Vertel iets over jezelf…" value={joinForm.message} onChange={e => setJoinForm({ ...joinForm, message: e.target.value })} />
-              {joinError && <div style={{ color: '#ef4444', fontSize: '12px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}><AlertCircle size={12} />{joinError}</div>}
-              <button onClick={handleSendJoin} disabled={joinSending} style={{ width: '100%', padding: '12px', backgroundColor: '#7c3aed', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', marginTop: '12px', opacity: joinSending ? 0.6 : 1 }}>
-                {joinSending ? 'Verzenden…' : 'Aanvraag verzenden'}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════════════════
@@ -371,11 +233,17 @@ export default function IndexPage() {
 
   // Modals
   const [showSettings,   setShowSettings]   = useState(false);
-  const [showMemberships,setShowMemberships]= useState(false);
   const [settingsForm,   setSettingsForm]   = useState({ firstName: '', lastName: '', email: '' });
   const [zonesForm,      setZonesForm]      = useState(DEFAULT_ZONES);
 
   const [newRejections,  setNewRejections]  = useState(0);
+  const [joinRequests,   setJoinRequests]   = useState([]);
+  const [memberships,    setMemberships]    = useState([]); // { clubName, groupName, isSkipper, isCoach }
+  const [showJoinForm,   setShowJoinForm]   = useState(false);
+  const [joinClubId,     setJoinClubId]     = useState('');
+  const [joinMessage,    setJoinMessage]    = useState('');
+  const [joinSending,    setJoinSending]    = useState(false);
+  const [joinError,      setJoinError]      = useState('');
   const [viewMode,       setViewMode]       = useState('skipper');
   const [isCoachInGroup, setIsCoachInGroup] = useState(false);
 
@@ -463,14 +331,37 @@ export default function IndexPage() {
     return () => unsubs.forEach(u => u && u());
   }, [uid, allClubs]);
 
-  // ── Rejected requests notification ────────────────────────────────────────
+  // ── Join requests + memberships (for settings panel) ─────────────────────
   useEffect(() => {
     if (!uid) return;
     const unsub = ClubJoinRequestFactory.getByUser(uid, (requests) => {
+      setJoinRequests(requests);
       setNewRejections(requests.filter(r => r.status === 'rejected' && !r.hidden).length);
     });
     return () => unsub();
   }, [uid]);
+
+  useEffect(() => {
+    if (!uid || allClubs.length === 0) return;
+    const allUnsubs = [];
+    const collected = {};
+    allClubs.forEach(club => {
+      const u = GroupFactory.getGroupsByClub(club.id, (groups) => {
+        groups.forEach(group => {
+          const u2 = GroupFactory.getMembersByGroup(club.id, group.id, (members) => {
+            const mine = members.find(m => m.id === uid);
+            const key = `${club.id}-${group.id}`;
+            if (mine) collected[key] = { clubId: club.id, clubName: club.name, groupId: group.id, groupName: group.name, isSkipper: mine.isSkipper, isCoach: mine.isCoach };
+            else delete collected[key];
+            setMemberships(Object.values(collected));
+          });
+          allUnsubs.push(u2);
+        });
+      });
+      allUnsubs.push(u);
+    });
+    return () => allUnsubs.forEach(u => u && u());
+  }, [uid, allClubs]);
 
   // ── Achievement check on mount ─────────────────────────────────────────────
   const achievementFiredRef = useRef(false);
@@ -573,6 +464,20 @@ export default function IndexPage() {
     });
   };
 
+  const handleSendJoin = async () => {
+    setJoinError('');
+    if (!joinClubId) { setJoinError('Selecteer een club.'); return; }
+    const already = joinRequests.find(r => r.clubId === joinClubId && r.status === 'pending');
+    if (already) { setJoinError('Je hebt al een openstaande aanvraag voor deze club.'); return; }
+    setJoinSending(true);
+    try {
+      const club = allClubs.find(c => c.id === joinClubId);
+      await ClubJoinRequestFactory.create(uid, { firstName: currentUser?.firstName || '', lastName: currentUser?.lastName || '', email: currentUser?.email || '' }, joinClubId, club?.name || '', joinMessage.trim());
+      setShowJoinForm(false); setJoinClubId(''); setJoinMessage('');
+    } catch { setJoinError('Aanvraag kon niet worden verzonden.'); }
+    finally { setJoinSending(false); }
+  };
+
   const handleAchievementAccept = async () => {
     const current = achievementQueue[0];
     if (!current) { advanceAchievementQueue(); return; }
@@ -589,6 +494,8 @@ export default function IndexPage() {
   const lastSession  = recentSessions[0] || null;
   const activeGoals  = goals.filter(g => !g.achievedAt);
   const recentBadges = earnedBadges.slice(0, 4);
+  const pendingRequests = joinRequests.filter(r => r.status === 'pending');
+  const visibleRequests = joinRequests.filter(r => !r.hidden);
 
   const hasCoachAccess = currentUser?.role === 'clubadmin' || currentUser?.role === 'superadmin' || isCoachInGroup;
   const isCoach        = viewMode === 'coach' && hasCoachAccess;
@@ -638,7 +545,7 @@ export default function IndexPage() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
           {newRejections > 0 && (
-            <button onClick={() => setShowMemberships(true)} style={{ position: 'relative', background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
+            <button onClick={() => setShowSettings(true)} style={{ position: 'relative', background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
               <Bell size={18} color="#f59e0b" />
               <span style={{ position: 'absolute', top: '-2px', right: '-2px', backgroundColor: '#ef4444', color: 'white', fontSize: '9px', fontWeight: 'bold', width: '14px', height: '14px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{newRejections}</span>
             </button>
@@ -703,20 +610,20 @@ export default function IndexPage() {
           </div>
         )}
 
-        <button onClick={() => setShowMemberships(true)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px', backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', color: 'white', cursor: 'pointer', textAlign: 'left', position: 'relative' }}>
-          <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: '#2d1d4e', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Building2 size={17} color="#a78bfa" /></div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: '600', fontSize: '14px', color: '#f1f5f9' }}>Lidmaatschappen</div>
-            <div style={{ fontSize: '12px', color: '#64748b' }}>Clubs & groepen beheren</div>
-          </div>
-          {newRejections > 0 && <span style={{ padding: '2px 8px', borderRadius: '10px', backgroundColor: '#ef444422', color: '#ef4444', fontSize: '11px', fontWeight: '700', border: '1px solid #ef444444' }}>{newRejections} melding{newRejections > 1 ? 'en' : ''}</span>}
-          <ChevronRight size={16} color="#475569" />
-        </button>
+        {pendingRequests.length > 0 && (
+          <button onClick={() => setShowSettings(true)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', backgroundColor: 'transparent', border: '1px solid #f59e0b33', borderRadius: '10px', color: '#f59e0b', cursor: 'pointer', textAlign: 'left', marginBottom: '8px' }}>
+            <Clock size={14} color="#f59e0b" style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: '12px', fontWeight: '600' }}>
+              {pendingRequests.length === 1
+                ? `Aanvraag bij ${pendingRequests[0].clubName} in behandeling`
+                : `${pendingRequests.length} clubaanvragen in behandeling`}
+            </span>
+            <ChevronRight size={13} color="#f59e0b" style={{ marginLeft: 'auto', flexShrink: 0 }} />
+          </button>
+        )}
       </div>
 
       {/* ── MODALS ── */}
-      {showMemberships && <MembershipsPanel uid={uid} allClubs={allClubs} onClose={() => setShowMemberships(false)} />}
-
       {showSettings && (
         <div style={s.modalOverlay}>
           <div style={s.modal}>
@@ -745,6 +652,88 @@ export default function IndexPage() {
               </div>
             </div>
             <button style={s.primaryBtn} onClick={saveSettings}><Save size={16} /> Opslaan</button>
+
+            {/* ── Clubs section ── */}
+            <div style={{ marginTop: '28px', borderTop: '1px solid #334155', paddingTop: '20px' }}>
+              <h4 style={s.sectionLabel}>Clubs</h4>
+
+              {/* Active memberships */}
+              {memberships.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
+                  {memberships.map((m, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #334155' }}>
+                      <Building2 size={14} color="#a78bfa" style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: '600', fontSize: '13px', color: '#f1f5f9' }}>{m.clubName}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>{m.groupName}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        {m.isSkipper && <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', backgroundColor: '#3b82f622', color: '#60a5fa', border: '1px solid #3b82f644' }}>Skipper</span>}
+                        {m.isCoach   && <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', backgroundColor: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44' }}>Coach</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Request statuses */}
+              {visibleRequests.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
+                  {visibleRequests.map(req => {
+                    const cfg = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending;
+                    const StatusIcon = cfg.icon;
+                    return (
+                      <div key={req.id} style={{ padding: '10px 12px', backgroundColor: '#0f172a', borderRadius: '8px', border: `1px solid ${cfg.color}33` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: '600', fontSize: '13px', color: '#f1f5f9' }}>{req.clubName}</div>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: '700', color: cfg.color, marginTop: '2px' }}>
+                              <StatusIcon size={9} /> {cfg.label}
+                            </div>
+                          </div>
+                          {req.status !== 'pending' && (
+                            <button onClick={() => ClubJoinRequestFactory.hide(req.id)} style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+                              <EyeOff size={11} /> Verbergen
+                            </button>
+                          )}
+                        </div>
+                        {req.status === 'rejected' && req.rejectionReason && (
+                          <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #ef444422' }}>
+                            Reden: {req.rejectionReason}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Join form */}
+              {!showJoinForm ? (
+                <button onClick={() => { setShowJoinForm(true); setJoinError(''); }} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px', backgroundColor: '#7c3aed22', border: '1px solid #7c3aed44', borderRadius: '8px', color: '#a78bfa', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
+                  <Send size={13} /> Aanvraag bij nieuwe club indienen
+                </button>
+              ) : (
+                <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', padding: '14px', border: '1px solid #334155' }}>
+                  <label style={s.fieldLabel}>Club *</label>
+                  <select style={{ ...s.select, marginBottom: '10px' }} value={joinClubId} onChange={e => setJoinClubId(e.target.value)}>
+                    <option value="">-- Selecteer een club --</option>
+                    {allClubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <label style={s.fieldLabel}>Motivatie (optioneel)</label>
+                  <textarea style={{ ...s.input, paddingLeft: '12px', minHeight: '70px', resize: 'vertical', lineHeight: 1.5, marginBottom: '10px', fontFamily: 'inherit' }} placeholder="Vertel iets over jezelf…" value={joinMessage} onChange={e => setJoinMessage(e.target.value)} />
+                  {joinError && <div style={{ color: '#ef4444', fontSize: '12px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}><AlertCircle size={12} />{joinError}</div>}
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={handleSendJoin} disabled={!joinClubId || joinSending} style={{ flex: 1, padding: '10px', backgroundColor: '#7c3aed', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '700', fontSize: '13px', cursor: 'pointer', opacity: !joinClubId || joinSending ? 0.5 : 1 }}>
+                      {joinSending ? 'Versturen…' : 'Versturen'}
+                    </button>
+                    <button onClick={() => { setShowJoinForm(false); setJoinError(''); setJoinClubId(''); setJoinMessage(''); }} style={{ padding: '10px 14px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '8px', color: '#64748b', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
+                      Annuleren
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
