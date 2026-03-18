@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   UserFactory, ClubFactory, ClubJoinRequestFactory, BadgeFactory, UserMemberLinkFactory,
 } from '../constants/dbSchema';
+import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebaseConfig';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -11,13 +12,7 @@ import {
   AlertCircle, Medal, Upload, Calendar, Users, UserX,
 } from 'lucide-react';
 
-// ─── Cookie helper ─────────────────────────────────────────────────────────────
-const COOKIE_KEY = 'msc_uid';
-const getCookieUid = () => {
-  if (typeof document === 'undefined') return null;
-  const m = document.cookie.match(new RegExp(`(?:^|; )${COOKIE_KEY}=([^;]*)`));
-  return m ? m[1] : null;
-};
+
 
 // ─── Status config ─────────────────────────────────────────────────────────────
 const STATUS_CONFIG = {
@@ -202,8 +197,8 @@ function BadgeFormModal({ badge, clubs, onSave, onClose }) {
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════════════════
 export default function SuperAdmin() {
-  const [authLoading, setAuthLoading] = useState(true);
-  const [hasAccess,   setHasAccess]   = useState(false);
+  const { uid, loading: authLoading } = useAuth();
+  const [hasAccess, setHasAccess] = useState(false);
   const [activeTab,   setActiveTab]   = useState('clubs');
   const [searchTerm,  setSearchTerm]  = useState('');
 
@@ -240,13 +235,11 @@ export default function SuperAdmin() {
 
   // ── Auth ───────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const uid = getCookieUid();
-    if (!uid) { setAuthLoading(false); return; }
+    if (authLoading || !uid) { setHasAccess(false); return; }
     UserFactory.get(uid).then(snap => {
-      if (snap.exists() && snap.data().role === 'superadmin') setHasAccess(true);
-      setAuthLoading(false);
+      setHasAccess(snap.exists() && snap.data().role === 'superadmin');
     });
-  }, []);
+  }, [uid, authLoading]);
 
   // ── Data subscriptions ─────────────────────────────────────────────────────
   useEffect(() => {
