@@ -226,36 +226,68 @@ export default function CounterPage() {
   useEffect(() => {
     if (!selectedClubId) return;
     setSelectedGroupId('');
+    setMemberGroups([]);
     setSkippers([]);
     setClubMembers([]);
 
     const uid = getCookie();
     if (!uid) return;
 
-    // Get all groups in this club, then filter to only those the user is a member of
-    const unsub = GroupFactory.getGroupsByClub(selectedClubId, async (allGroups) => {
-      const memberGroupIds = new Set();
-      await Promise.all(
-        allGroups.map(group =>
-          new Promise(resolve => {
-            const unsub2 = GroupFactory.getMembersByGroup(selectedClubId, group.id, members => {
-              const isMember = members.some(m => (m.memberId || m.id) === uid);
-              if (isMember) memberGroupIds.add(group.id);
-              unsub2();
-              resolve();
-            });
-          })
-        )
-      );
-      const filteredGroups = allGroups.filter(g => memberGroupIds.has(g.id));
-      setMemberGroups(filteredGroups);
+    let cancelled = false;
 
-      // Auto-select if only one group
-      if (filteredGroups.length === 1) {
-        setSelectedGroupId(filteredGroups[0].id);
+    const load = async () => {
+      try {
+        // 1. Find the current user's memberId in this club via UserMemberLink
+        const linksSnap = await getDocs(
+          query(
+            collection(db, 'userMemberLinks'),
+            where('uid',    '==', uid),
+            where('clubId', '==', selectedClubId),
+          )
+        );
+        if (linksSnap.empty) return; // user has no link in this club
+
+        // Collect all memberIds this user is linked to in this club
+        const myMemberIds = new Set(
+          linksSnap.docs.map(d => d.data().memberId).filter(Boolean)
+        );
+
+        // 2. Get all groups in this club (one-shot)
+        const groupsSnap = await getDocs(
+          collection(db, `clubs/${selectedClubId}/groups`)
+        );
+        const allGroups = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        // 3. For each group, check if any of the user's memberIds appear
+        const memberGroupIds = new Set();
+        await Promise.all(
+          allGroups.map(async group => {
+            const membersSnap = await getDocs(
+              collection(db, `clubs/${selectedClubId}/groups/${group.id}/members`)
+            );
+            const isMember = membersSnap.docs.some(
+              d => myMemberIds.has(d.data().memberId || d.id)
+            );
+            if (isMember) memberGroupIds.add(group.id);
+          })
+        );
+
+        if (cancelled) return;
+
+        const filteredGroups = allGroups.filter(g => memberGroupIds.has(g.id));
+        setMemberGroups(filteredGroups);
+
+        // Auto-select if only one group
+        if (filteredGroups.length === 1) {
+          setSelectedGroupId(filteredGroups[0].id);
+        }
+      } catch (e) {
+        console.error('Failed to load member groups:', e);
       }
-    });
-    return () => unsub();
+    };
+
+    load();
+    return () => { cancelled = true; };
   }, [selectedClubId]);
 
   // ── Load all skippers in the selected group ───────────────────────────────
