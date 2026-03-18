@@ -1,13 +1,6 @@
 import { useState, useEffect } from 'react';
-import { BadgeFactory, UserFactory, ClubFactory, GroupFactory } from '../constants/dbSchema';
-import { Medal, Trophy, Building2, Users, ChevronDown, ChevronUp, Shield, Star } from 'lucide-react';
-
-const COOKIE_KEY = 'msc_uid';
-const getCookie = () => {
-  if (typeof document === 'undefined') return null;
-  const match = document.cookie.match(new RegExp(`(?:^|; )${COOKIE_KEY}=([^;]*)`));
-  return match ? match[1] : null;
-};
+import { BadgeFactory, ClubFactory, GroupFactory, ClubMemberFactory } from '../constants/dbSchema';
+import { Medal, Building2, Users, ChevronDown, ChevronUp } from 'lucide-react';
 
 const CATEGORY_CONFIG = {
   speed:       { label: 'Snelheid',     color: '#f97316', emoji: '⚡' },
@@ -20,6 +13,7 @@ const CATEGORY_CONFIG = {
 function BadgeItem({ badge, earned, earnedDate, awardedByName, note, size = 'normal' }) {
   const [showTooltip, setShowTooltip] = useState(false);
   const isSmall = size === 'small';
+  const catColor = CATEGORY_CONFIG[badge.badgeCategory || badge.category]?.color || '#334155';
 
   return (
     <div
@@ -31,12 +25,11 @@ function BadgeItem({ badge, earned, earnedDate, awardedByName, note, size = 'nor
         height: isSmall ? '48px' : '64px',
         borderRadius: '50%',
         backgroundColor: earned ? '#1e293b' : '#0f172a',
-        border: earned ? `2px solid ${CATEGORY_CONFIG[badge.badgeCategory || badge.category]?.color || '#334155'}` : '2px solid #1e293b',
+        border: earned ? `2px solid ${catColor}` : '2px solid #1e293b',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: isSmall ? '22px' : '28px',
         opacity: earned ? 1 : 0.3,
         cursor: 'pointer',
-        transition: 'transform 0.15s',
         filter: earned ? 'none' : 'grayscale(100%)',
         overflow: 'hidden',
       }}>
@@ -54,13 +47,12 @@ function BadgeItem({ badge, earned, earnedDate, awardedByName, note, size = 'nor
         <div style={{
           fontSize: '10px', color: earned ? '#94a3b8' : '#334155',
           textAlign: 'center', maxWidth: '64px',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {badge.badgeName || badge.name}
         </div>
       )}
 
-      {/* Tooltip */}
       {showTooltip && (
         <div style={{
           position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
@@ -80,9 +72,7 @@ function BadgeItem({ badge, earned, earnedDate, awardedByName, note, size = 'nor
                 ✓ Verdiend {earnedDate ? `op ${earnedDate}` : ''}
               </div>
               {awardedByName && awardedByName !== 'Systeem' && (
-                <div style={{ fontSize: '10px', color: '#a78bfa' }}>
-                  Uitgereikt door: {awardedByName}
-                </div>
+                <div style={{ fontSize: '10px', color: '#a78bfa' }}>Uitgereikt door: {awardedByName}</div>
               )}
               {note && (
                 <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', marginTop: '4px' }}>
@@ -99,147 +89,28 @@ function BadgeItem({ badge, earned, earnedDate, awardedByName, note, size = 'nor
   );
 }
 
-// ─── My Badges Panel (used in index.js) ──────────────────────────────────────
-export function MyBadgesPanel({ uid }) {
-  const [earnedBadges, setEarnedBadges] = useState([]);
-  const [allBadges, setAllBadges] = useState([]);
-  const [activeCategory, setActiveCategory] = useState('all');
-
-  useEffect(() => {
-    const uid = getCookie();
-    if (!uid) return;
-    const u1 = BadgeFactory.getEarned(uid, setEarnedBadges);
-    const u2 = BadgeFactory.getGlobal(setAllBadges);
-    return () => { u1(); u2(); };
-  }, [uid]);
-
-  const earnedIds = new Set(earnedBadges.map(b => b.badgeId));
-
-  const categories = ['all', ...Object.keys(CATEGORY_CONFIG)];
-  const filtered = activeCategory === 'all'
-    ? allBadges
-    : allBadges.filter(b => b.category === activeCategory);
-
-  return (
-    <section style={panelStyle.card}>
-      <div style={panelStyle.header}>
-        <Medal size={16} color="#f59e0b" />
-        <span>Mijn Badges</span>
-        <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#64748b' }}>
-          {earnedBadges.length} / {allBadges.length} verdiend
-        </span>
-      </div>
-
-      {/* Category filter */}
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
-        {categories.map(cat => (
-          <button
-            key={cat}
-            onClick={() => setActiveCategory(cat)}
-            style={{
-              padding: '4px 10px', borderRadius: '14px', border: '1px solid',
-              fontSize: '11px', fontWeight: '600', cursor: 'pointer',
-              backgroundColor: activeCategory === cat ? (CATEGORY_CONFIG[cat]?.color || '#3b82f6') + '22' : 'transparent',
-              borderColor: activeCategory === cat ? (CATEGORY_CONFIG[cat]?.color || '#3b82f6') : '#334155',
-              color: activeCategory === cat ? (CATEGORY_CONFIG[cat]?.color || '#3b82f6') : '#64748b',
-            }}
-          >
-            {cat === 'all' ? 'Alle' : `${CATEGORY_CONFIG[cat]?.emoji} ${CATEGORY_CONFIG[cat]?.label}`}
-          </button>
-        ))}
-      </div>
-
-      {/* Badge grid */}
-      {filtered.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '20px', color: '#475569', fontSize: '13px' }}>
-          Geen badges in deze categorie.
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-          {filtered.map(badge => {
-            const earned = earnedBadges.find(e => e.badgeId === badge.id);
-            return (
-              <BadgeItem
-                key={badge.id}
-                badge={badge}
-                earned={!!earned}
-                earnedDate={earned?.earnedAt?.seconds
-                  ? new Date(earned.earnedAt.seconds * 1000).toLocaleDateString('nl-BE')
-                  : null}
-                awardedByName={earned?.awardedByName}
-                note={earned?.note}
-              />
-            );
-          })}
-        </div>
-      )}
-
-      {/* Recently earned */}
-      {earnedBadges.length > 0 && (
-        <div style={{ marginTop: '20px', borderTop: '1px solid #1e293b', paddingTop: '14px' }}>
-          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
-            Recent verdiend
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {earnedBadges.slice(0, 3).map(b => (
-              <div key={b.id} style={{
-                display: 'flex', alignItems: 'center', gap: '10px',
-                backgroundColor: '#0f172a', borderRadius: '8px', padding: '8px 12px',
-                border: '1px solid #1e293b',
-              }}>
-                <div style={{ fontSize: '24px', width: '32px', textAlign: 'center', flexShrink: 0 }}>
-                  {b.badgeImageUrl ? (
-                    <img src={b.badgeImageUrl} alt={b.badgeName} style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }} />
-                  ) : (
-                    b.badgeEmoji || '🏅'
-                  )}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: '600', fontSize: '13px', color: '#f1f5f9' }}>{b.badgeName}</div>
-                  <div style={{ fontSize: '10px', color: '#475569' }}>
-                    {b.awardedByName && b.awardedByName !== 'Systeem' ? `Door: ${b.awardedByName}` : 'Automatisch'}
-                    {b.earnedAt?.seconds ? ` · ${new Date(b.earnedAt.seconds * 1000).toLocaleDateString('nl-BE')}` : ''}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
 // ─── Club Badge Leaderboard Page ──────────────────────────────────────────────
 export default function BadgesPage() {
-  const [currentUser, setCurrentUser] = useState(null);
-  const [allUsers, setAllUsers] = useState([]);
-  const [clubs, setClubs] = useState([]);
-  const [groups, setGroups] = useState([]);
-  const [selectedClub, setSelectedClub] = useState(null);
+  const [clubs,        setClubs]        = useState([]);
+  const [groups,       setGroups]       = useState([]);
+  const [selectedClub,  setSelectedClub]  = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
-  const [groupMembers, setGroupMembers] = useState([]);
-  const [allBadges, setAllBadges] = useState([]);
+
+  // Feature 8.3/8.4: group members are ClubMember-keyed docs { memberId, isSkipper, … }
+  const [groupMembers,       setGroupMembers]       = useState([]);
+  // ClubMember profiles for name resolution
+  const [clubMemberProfiles, setClubMemberProfiles] = useState([]);
+  // Feature 8.4: earnedBadges keyed by memberId
   const [memberBadges, setMemberBadges] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [expandedUser, setExpandedUser] = useState(null);
+  const [allBadges,    setAllBadges]    = useState([]);
+  const [loading,      setLoading]      = useState(false);
+  const [expandedMember, setExpandedMember] = useState(null);
 
   useEffect(() => {
-    const u1 = UserFactory.getAll(setAllUsers);
-    const u2 = ClubFactory.getAll(setClubs);
-    const u3 = BadgeFactory.getGlobal(setAllBadges);
-    return () => { u1(); u2(); u3(); };
+    const u1 = ClubFactory.getAll(setClubs);
+    const u2 = BadgeFactory.getGlobal(setAllBadges);
+    return () => { u1(); u2(); };
   }, []);
-
-  // Identify current user from cookie
-  useEffect(() => {
-    if (!allUsers.length) return;
-    const uid = getCookie();
-    if (uid) {
-      const user = allUsers.find(u => u.id === uid);
-      if (user) setCurrentUser(user);
-    }
-  }, [allUsers]);
 
   useEffect(() => {
     if (!selectedClub) return;
@@ -247,28 +118,38 @@ export default function BadgesPage() {
     return () => u();
   }, [selectedClub]);
 
+  // Feature 8.4: load group members + ClubMember profiles for name resolution
   useEffect(() => {
     if (!selectedClub || !selectedGroup) return;
-    const u = GroupFactory.getMembersByGroup(selectedClub.id, selectedGroup.id, setGroupMembers);
-    return () => u();
+    const u1 = GroupFactory.getMembersByGroup(selectedClub.id, selectedGroup.id, setGroupMembers);
+    const u2 = ClubMemberFactory.getAll(selectedClub.id, setClubMemberProfiles);
+    return () => { u1(); u2(); };
   }, [selectedClub, selectedGroup]);
 
-  // Load badges for all group members
+  // Feature 8.4: load badges via getEarnedForMembers (clubId + memberId pairs)
   useEffect(() => {
-    if (!groupMembers.length) return;
+    if (!selectedClub || groupMembers.length === 0) return;
     setLoading(true);
-    const uids = groupMembers.map(m => m.id);
-    BadgeFactory.getEarnedForUsers(uids).then(results => {
+    const memberPairs = groupMembers.map(m => ({
+      clubId:   selectedClub.id,
+      memberId: m.memberId || m.id,
+    }));
+    BadgeFactory.getEarnedForMembers(memberPairs).then(results => {
       setMemberBadges(results);
       setLoading(false);
     });
-  }, [groupMembers]);
+  }, [selectedClub, groupMembers]);
 
-  const getUser = (uid) => allUsers.find(u => u.id === uid);
+  // Resolve ClubMember profile by memberId
+  const getMemberProfile = (memberId) =>
+    clubMemberProfiles.find(p => p.id === memberId) || null;
 
-  // Sort members by badge count descending
+  // Sort group members by badge count descending
   const rankedMembers = [...groupMembers]
-    .map(m => ({ ...m, badgeCount: (memberBadges[m.id] || []).length }))
+    .map(m => {
+      const memberId = m.memberId || m.id;
+      return { ...m, memberId, badgeCount: (memberBadges[memberId] || []).length };
+    })
     .sort((a, b) => b.badgeCount - a.badgeCount);
 
   const RANK_COLORS = ['#facc15', '#94a3b8', '#f97316'];
@@ -278,7 +159,6 @@ export default function BadgesPage() {
     <div style={css.page}>
       <style>{pageCSS}</style>
 
-      {/* Header */}
       <header style={css.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{ width: '34px', height: '34px', borderRadius: '9px', backgroundColor: '#f59e0b22', border: '1px solid #f59e0b44', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -300,6 +180,7 @@ export default function BadgesPage() {
             setSelectedClub(club || null);
             setSelectedGroup(null);
             setGroupMembers([]);
+            setClubMemberProfiles([]);
             setMemberBadges({});
           }}>
             <option value="">-- Kies een club --</option>
@@ -314,6 +195,7 @@ export default function BadgesPage() {
               const group = groups.find(g => g.id === e.target.value);
               setSelectedGroup(group || null);
               setGroupMembers([]);
+              setClubMemberProfiles([]);
               setMemberBadges({});
             }}>
               <option value="">-- Kies een groep --</option>
@@ -340,65 +222,53 @@ export default function BadgesPage() {
               </p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {rankedMembers.map((member, idx) => {
-                  const user = getUser(member.id);
-                  const earned = memberBadges[member.id] || [];
-                  const isMe = currentUser?.id === member.id;
-                  const isExpanded = expandedUser === member.id;
-                  const rankColor = RANK_COLORS[idx] || '#334155';
+                {rankedMembers.map(({ memberId, badgeCount }, idx) => {
+                  const profile   = getMemberProfile(memberId);
+                  const earned    = memberBadges[memberId] || [];
+                  const isExpanded = expandedMember === memberId;
+                  const rankColor  = RANK_COLORS[idx] || '#334155';
+                  const firstName  = profile?.firstName || '?';
+                  const lastName   = profile?.lastName  || '';
+                  const initials   = `${firstName[0] || '?'}${lastName[0] || ''}`.toUpperCase();
 
                   return (
                     <div
-                      key={member.id}
+                      key={memberId}
                       style={{
                         ...css.memberRow,
-                        borderColor: isMe ? '#3b82f644' : idx < 3 ? rankColor + '44' : '#334155',
-                        backgroundColor: isMe ? '#1e3a5f' : '#1e293b',
+                        borderColor: idx < 3 ? rankColor + '44' : '#334155',
+                        backgroundColor: '#1e293b',
                       }}
                     >
                       {/* Collapsed row */}
                       <div
                         style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}
-                        onClick={() => setExpandedUser(isExpanded ? null : member.id)}
+                        onClick={() => setExpandedMember(isExpanded ? null : memberId)}
                       >
                         {/* Rank */}
-                        <div style={{
-                          width: '32px', textAlign: 'center', fontSize: idx < 3 ? '20px' : '14px',
-                          fontWeight: '800', color: rankColor, flexShrink: 0,
-                        }}>
+                        <div style={{ width: '32px', textAlign: 'center', fontSize: idx < 3 ? '20px' : '14px', fontWeight: '800', color: rankColor, flexShrink: 0 }}>
                           {idx < 3 ? RANK_LABELS[idx] : `#${idx + 1}`}
                         </div>
 
                         {/* Avatar */}
-                        <div style={{
-                          width: '38px', height: '38px', borderRadius: '50%',
-                          backgroundColor: isMe ? '#3b82f6' : '#334155',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontWeight: '700', fontSize: '13px', flexShrink: 0,
-                        }}>
-                          {(user?.firstName?.[0] || '?')}{user?.lastName?.[0] || ''}
+                        <div style={{ width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '13px', flexShrink: 0 }}>
+                          {initials}
                         </div>
 
                         {/* Name */}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9' }}>
-                            {user?.firstName} {user?.lastName}
-                            {isMe && <span style={{ marginLeft: '6px', fontSize: '10px', color: '#3b82f6', fontWeight: '600' }}>jij</span>}
+                            {firstName} {lastName}
                           </div>
                           <div style={{ fontSize: '11px', color: '#64748b' }}>
-                            {earned.length} badge{earned.length !== 1 ? 's' : ''}
+                            {badgeCount} badge{badgeCount !== 1 ? 's' : ''}
                           </div>
                         </div>
 
                         {/* Badge previews */}
                         <div style={{ display: 'flex', gap: '4px', flexShrink: 0, alignItems: 'center' }}>
                           {earned.slice(0, 4).map(b => (
-                            <div key={b.id} style={{
-                              width: '28px', height: '28px', borderRadius: '50%',
-                              backgroundColor: '#0f172a', border: '1px solid #334155',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: '14px', overflow: 'hidden',
-                            }}>
+                            <div key={b.id} style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#0f172a', border: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', overflow: 'hidden' }}>
                               {b.badgeImageUrl
                                 ? <img src={b.badgeImageUrl} alt={b.badgeName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                 : b.badgeEmoji || '🏅'
@@ -410,7 +280,6 @@ export default function BadgesPage() {
                           )}
                         </div>
 
-                        {/* Expand icon */}
                         {earned.length > 0 && (
                           isExpanded
                             ? <ChevronUp size={16} color="#475569" style={{ flexShrink: 0 }} />
@@ -480,32 +349,9 @@ const css = {
     position: 'sticky', top: 0, zIndex: 50,
   },
   content: { maxWidth: '760px', margin: '0 auto', padding: '20px 16px 40px' },
-  field: { marginBottom: '16px' },
-  label: { display: 'block', color: '#64748b', fontSize: '12px', fontWeight: '600', marginBottom: '6px' },
-  select: {
-    width: '100%', padding: '10px 12px', borderRadius: '8px',
-    border: '1px solid #334155', backgroundColor: '#1e293b',
-    color: 'white', fontSize: '14px',
-  },
-  memberRow: {
-    backgroundColor: '#1e293b', borderRadius: '12px',
-    border: '1px solid', padding: '12px 14px',
-  },
-  spinner: {
-    width: '28px', height: '28px', border: '3px solid #1e293b',
-    borderTop: '3px solid #f59e0b', borderRadius: '50%',
-    animation: 'spin 0.8s linear infinite', margin: '0 auto',
-  },
-};
-
-const panelStyle = {
-  card: {
-    backgroundColor: '#1e293b', borderRadius: '16px',
-    padding: '16px', border: '1px solid #334155',
-  },
-  header: {
-    display: 'flex', alignItems: 'center', gap: '8px',
-    marginBottom: '16px', fontSize: '14px', fontWeight: '600',
-    color: '#94a3b8', borderBottom: '1px solid #1e3a5f', paddingBottom: '12px',
-  },
+  field:   { marginBottom: '16px' },
+  label:   { display: 'block', color: '#64748b', fontSize: '12px', fontWeight: '600', marginBottom: '6px' },
+  select:  { width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white', fontSize: '14px' },
+  memberRow: { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid', padding: '12px 14px' },
+  spinner: { width: '28px', height: '28px', border: '3px solid #1e293b', borderTop: '3px solid #f59e0b', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto' },
 };
