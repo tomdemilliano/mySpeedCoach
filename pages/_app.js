@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { UserFactory, AuthFactory } from '../constants/dbSchema';
+import { UserFactory, AuthFactory, UserMemberLinkFactory, ClubJoinRequestFactory } from '../constants/dbSchema';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import AppLayout from '../components/AppLayout';
 
@@ -14,14 +14,21 @@ const PUBLIC_PATHS = ['/login', '/register'];
 // Pages a logged-in but unverified user CAN access
 const EMAIL_VERIFY_EXEMPT = ['/verify-email', '/login', '/register'];
 
+// Pages a verified but club-less user CAN access
+const NO_CLUB_EXEMPT = ['/no-club', '/verify-email', '/login', '/register'];
+
+// Roles that bypass the membership check (admins manage clubs, they don't need to be in one)
+const ADMIN_ROLES = ['superadmin', 'clubadmin'];
+
 // ─── Inner shell — runs inside AuthProvider so useAuth works ─────────────────
 function AppShell({ Component, pageProps }) {
   const router           = useRouter();
   const { uid, loading } = useAuth();
   const isPublicPath     = PUBLIC_PATHS.includes(router.pathname);
 
-  const [userRole,  setUserRole]  = useState('user');
-  const [coachView, setCoachView] = useState(false);
+  const [userRole,    setUserRole]    = useState('user');
+  const [coachView,   setCoachView]   = useState(false);
+  const [hasMembership, setHasMembership] = useState(null); // null = unknown, true/false = resolved
 
   // ── Keep the legacy cookie in sync ──────────────────────────────────────────
   // Many pages still call getCookie() directly. We write the uid into the
@@ -66,6 +73,38 @@ function AppShell({ Component, pageProps }) {
       .then(snap => { if (snap.exists()) setUserRole(snap.data().role || 'user'); })
       .catch(() => {});
   }, [uid]);
+
+  // ── Membership check — runs after email is verified ───────────────────────
+  // A user "has membership" if they have at least one UserMemberLink OR a
+  // pending/approved ClubJoinRequest. Admins bypass this check entirely.
+  useEffect(() => {
+    if (!uid || !AuthFactory.isEmailVerified()) return;
+
+    // Admins always have access
+    if (ADMIN_ROLES.includes(userRole)) { setHasMembership(true); return; }
+
+    let resolved = false;
+    const unsub1 = UserMemberLinkFactory.getForUser(uid, (links) => {
+      if (links.length > 0) { setHasMembership(true); resolved = true; }
+      else if (!resolved) setHasMembership(false);
+    });
+    const unsub2 = ClubJoinRequestFactory.getByUser(uid, (requests) => {
+      const active = requests.filter(r => r.status === 'pending' || r.status === 'approved');
+      if (active.length > 0) { setHasMembership(true); resolved = true; }
+      else if (!resolved) setHasMembership(false);
+    });
+    return () => { unsub1(); unsub2(); };
+  }, [uid, userRole]);
+
+  // ── Membership guard — redirect to /no-club if no membership ─────────────
+  useEffect(() => {
+    if (!uid || !AuthFactory.isEmailVerified()) return;
+    if (ADMIN_ROLES.includes(userRole)) return;
+    if (hasMembership === null) return; // still loading
+    if (!hasMembership && !NO_CLUB_EXEMPT.includes(router.pathname)) {
+      router.replace('/no-club');
+    }
+  }, [uid, hasMembership, userRole, router.pathname]);
 
   // ── coachView toggle — persisted in sessionStorage ───────────────────────────
   useEffect(() => {
