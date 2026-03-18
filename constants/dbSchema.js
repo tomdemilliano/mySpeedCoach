@@ -854,10 +854,8 @@ export const UserMemberLinkFactory = {
 };
 
 // ==========================================
-// 9. AUTH FACTORY  (Feature 9.1)
+// 9. AUTH FACTORY  (Feature 9.1 + 9.2)
 // ==========================================
-// All Firebase Authentication SDK calls go through here.
-// No page or context should import from 'firebase/auth' directly.
 
 import {
   signInWithEmailAndPassword,
@@ -865,6 +863,7 @@ import {
   signOut,
   onAuthStateChanged,
   sendPasswordResetEmail,
+  sendEmailVerification,
   updatePassword,
   GoogleAuthProvider,
   signInWithPopup,
@@ -873,26 +872,30 @@ import { auth } from '../firebaseConfig';
 
 export const AuthFactory = {
   // ── Session ──────────────────────────────────────────────────────────────
-  /**
-   * Subscribe to auth state changes.
-   * @param {(user: import('firebase/auth').User | null) => void} callback
-   * @returns unsubscribe function
-   */
   onAuthStateChanged: (callback) =>
     onAuthStateChanged(auth, callback),
+
+  getCurrentUser: () => auth.currentUser,
 
   // ── Sign-in ───────────────────────────────────────────────────────────────
   signInWithEmail: (email, password) =>
     signInWithEmailAndPassword(auth, email, password),
 
-  signInWithGoogle: () => {
-    const provider = new GoogleAuthProvider();
-    return signInWithPopup(auth, provider);
-  },
+  signInWithGoogle: () =>
+    signInWithPopup(auth, new GoogleAuthProvider()),
 
   // ── Registration ──────────────────────────────────────────────────────────
   registerWithEmail: (email, password) =>
     createUserWithEmailAndPassword(auth, email, password),
+
+  // ── Email verification ────────────────────────────────────────────────────
+  sendEmailVerification: () => {
+    const user = auth.currentUser;
+    if (!user) return Promise.reject(new Error('No current user'));
+    return sendEmailVerification(user);
+  },
+
+  isEmailVerified: () => auth.currentUser?.emailVerified ?? false,
 
   // ── Sign-out ──────────────────────────────────────────────────────────────
   signOut: () => signOut(auth),
@@ -903,7 +906,4 @@ export const AuthFactory = {
 
   updatePassword: (newPassword) =>
     updatePassword(auth.currentUser, newPassword),
-
-  // ── Current user ──────────────────────────────────────────────────────────
-  getCurrentUser: () => auth.currentUser,
 };
