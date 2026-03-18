@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  UserFactory, ClubFactory, ClubJoinRequestFactory, BadgeFactory,
+  UserFactory, ClubFactory, ClubJoinRequestFactory, BadgeFactory, GroupFactory,
 } from '../constants/dbSchema';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import {
   ShieldAlert, UserPlus, Building2, Trash2, Search, Edit2, X, Save,
   Plus, Bell, CheckCircle2, XCircle, Clock, MessageSquare, Check,
-  AlertCircle, Medal, Upload, Award, Calendar,
+  AlertCircle, Medal, Upload, Award, Calendar, Users, UserX,
 } from 'lucide-react';
 
 // ─── Cookie helper ─────────────────────────────────────────────────────────────
@@ -50,10 +50,10 @@ const EMPTY_BADGE = {
 
 function detectTriggerKind(trigger) {
   if (!trigger) return 'none';
-  if (trigger.firstSession)          return 'firstSession';
-  if (trigger.totalSessions != null) return 'totalSessions';
+  if (trigger.firstSession)             return 'firstSession';
+  if (trigger.totalSessions != null)    return 'totalSessions';
   if (trigger.consecutiveWeeks != null) return 'consecutiveWeeks';
-  if (trigger.minScore != null)      return 'score';
+  if (trigger.minScore != null)         return 'score';
   return 'none';
 }
 function buildTrigger(kind, vals) {
@@ -211,6 +211,15 @@ export default function SuperAdmin() {
   const [badges,       setBadges]       = useState([]);
   const [joinRequests, setJoinRequests] = useState([]);
 
+  // ── User-club membership map ───────────────────────────────────────────────
+  // { uid: [clubId, ...] } — built by scanning all groups via GroupFactory
+  const [userClubMap,     setUserClubMap]     = useState({}); // { uid: Set<clubId> }
+  const [clubMembersLoading, setClubMembersLoading] = useState(false);
+
+  // User tab filters
+  const [userClubFilter, setUserClubFilter] = useState(''); // '' = all, '__none__' = no club, or clubId
+  const userClubFilterRef = useRef('');
+
   // Modals / editing
   const [editingId,          setEditingId]          = useState(null);
   const [isUserModalOpen,    setIsUserModalOpen]    = useState(false);
@@ -254,9 +263,61 @@ export default function SuperAdmin() {
     return () => { u1(); u2(); u3(); u4(); };
   }, [hasAccess]);
 
+  // ── Build uid → clubId[] map using GroupFactory ────────────────────────────
+  // Called once when clubs are loaded, and re-runs whenever clubs list changes.
+  // Uses GroupFactory.getGroupsByClub + GroupFactory.getMembersByGroup (both
+  // return realtime listeners — we use the one-shot pattern via the callback).
+  useEffect(() => {
+    if (!hasAccess || clubs.length === 0) return;
+
+    setClubMembersLoading(true);
+    const map = {}; // uid → Set<clubId>
+    let resolvedClubs = 0;
+
+    clubs.forEach(club => {
+      // getGroupsByClub is a realtime listener; we only need the first emission
+      // so we wrap it and unsubscribe after first call.
+      let unsubGroups;
+      unsubGroups = GroupFactory.getGroupsByClub(club.id, (groups) => {
+        // Unsubscribe immediately after first emission
+        if (unsubGroups) { unsubGroups(); unsubGroups = null; }
+
+        if (groups.length === 0) {
+          resolvedClubs++;
+          if (resolvedClubs === clubs.length) {
+            setUserClubMap({ ...map });
+            setClubMembersLoading(false);
+          }
+          return;
+        }
+
+        let resolvedGroups = 0;
+        groups.forEach(group => {
+          let unsubMembers;
+          unsubMembers = GroupFactory.getMembersByGroup(club.id, group.id, (members) => {
+            if (unsubMembers) { unsubMembers(); unsubMembers = null; }
+
+            members.forEach(m => {
+              const uid = m.memberId || m.id;
+              if (!map[uid]) map[uid] = new Set();
+              map[uid].add(club.id);
+            });
+
+            resolvedGroups++;
+            if (resolvedGroups === groups.length) {
+              resolvedClubs++;
+              if (resolvedClubs === clubs.length) {
+                setUserClubMap({ ...map });
+                setClubMembersLoading(false);
+              }
+            }
+          });
+        });
+      });
+    });
+  }, [hasAccess, clubs]);
+
   // ── Derived ────────────────────────────────────────────────────────────────
-  const filteredUsers   = users.filter(u => `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(searchTerm.toLowerCase()));
-  const filteredClubs   = clubs.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
   const pendingCount    = joinRequests.filter(r => r.status === 'pending').length;
   const filteredRequests = requestFilter === 'all' ? joinRequests : joinRequests.filter(r => r.status === requestFilter);
   const filteredBadges  = badges.filter(b => {
@@ -267,6 +328,40 @@ export default function SuperAdmin() {
     if (badgeFilter === 'inactive')  return !b.isActive;
     return true;
   });
+
+  // Users: apply search + club filter
+  const filteredUsers = users.filter(u => {
+    const matchesSearch = `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(searchTerm.toLowerCase());
+    if (!matchesSearch) return false;
+    if (!userClubFilter) return true;
+    if (userClubFilter === '__none__') {
+      const clubsOfUser = userClubMap[u.id];
+      return !clubsOfUser || clubsOfUser.size === 0;
+    }
+    const clubsOfUser = userClubMap[u.id];
+    return clubsOfUser && clubsOfUser.has(userClubFilter);
+  });
+
+  // Per-user club name tags (for display in the user card)
+  const getUserClubNames = (uid) => {
+    const clubIds = userClubMap[uid];
+    if (!clubIds || clubIds.size === 0) return [];
+    return [...clubIds].map(cid => clubs.find(c => c.id === cid)?.name).filter(Boolean);
+  };
+
+  // Stats for the filter pills
+  const countForClub = (clubId) => {
+    if (clubId === '__none__') {
+      return users.filter(u => {
+        const c = userClubMap[u.id];
+        return !c || c.size === 0;
+      }).length;
+    }
+    return users.filter(u => {
+      const c = userClubMap[u.id];
+      return c && c.has(clubId);
+    }).length;
+  };
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleUserSubmit  = async (e) => { e.preventDefault(); editingId ? await UserFactory.updateProfile(editingId, userForm) : await UserFactory.create(Date.now().toString(), userForm); setIsUserModalOpen(false); };
@@ -339,7 +434,7 @@ export default function SuperAdmin() {
               <button style={s.addBtn} onClick={() => { setEditingId(null); setClubForm({ name: '', logoUrl: '' }); setIsClubModalOpen(true); }}><Building2 size={16} /><span className="btn-label"> Nieuwe club</span></button>
             </div>
             <div className="card-grid">
-              {filteredClubs.map(club => (
+              {clubs.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase())).map(club => (
                 <div key={club.id} style={s.clubCard}>
                   <div style={s.clubCardBody}>
                     {club.logoUrl ? <img src={club.logoUrl} style={s.clubLogo} alt={club.name} /> : <div style={s.clubLogoPlaceholder}><Building2 size={32} color="#64748b" /></div>}
@@ -352,7 +447,7 @@ export default function SuperAdmin() {
                   </div>
                 </div>
               ))}
-              {filteredClubs.length === 0 && <p style={s.emptyText}>Geen clubs gevonden.</p>}
+              {clubs.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && <p style={s.emptyText}>Geen clubs gevonden.</p>}
             </div>
           </div>
         )}
@@ -360,26 +455,130 @@ export default function SuperAdmin() {
         {/* ═══ USERS ═══ */}
         {activeTab === 'users' && (
           <div>
+            {/* Search + Add button */}
             <div style={s.actionBar}>
-              <div style={s.searchWrap}><Search size={16} style={s.searchIcon} /><input placeholder="Zoek gebruiker…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={s.searchInput} /></div>
-              <button style={s.addBtn} onClick={() => { setEditingId(null); setUserForm({ firstName: '', lastName: '', email: '', role: 'user' }); setIsUserModalOpen(true); }}><UserPlus size={16} /><span className="btn-label"> Nieuwe gebruiker</span></button>
+              <div style={s.searchWrap}>
+                <Search size={16} style={s.searchIcon} />
+                <input placeholder="Zoek gebruiker…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={s.searchInput} />
+              </div>
+              <button style={s.addBtn} onClick={() => { setEditingId(null); setUserForm({ firstName: '', lastName: '', email: '', role: 'user' }); setIsUserModalOpen(true); }}>
+                <UserPlus size={16} /><span className="btn-label"> Nieuwe gebruiker</span>
+              </button>
             </div>
+
+            {/* Club filter pills */}
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontSize: '11px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Building2 size={11} /> Filter op club
+                {clubMembersLoading && <span style={{ fontSize: '10px', color: '#475569', fontWeight: '400' }}>— laden…</span>}
+              </div>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {/* All */}
+                <button
+                  onClick={() => setUserClubFilter('')}
+                  style={{
+                    ...s.filterPill,
+                    ...(userClubFilter === '' ? s.filterPillActive : {}),
+                  }}
+                >
+                  <Users size={11} /> Alle
+                  <span style={{ ...s.pillCount, backgroundColor: userClubFilter === '' ? '#1e293b' : '#334155', color: '#94a3b8' }}>{users.length}</span>
+                </button>
+
+                {/* Per club */}
+                {clubs.map(club => {
+                  const count = countForClub(club.id);
+                  const isActive = userClubFilter === club.id;
+                  return (
+                    <button
+                      key={club.id}
+                      onClick={() => setUserClubFilter(club.id)}
+                      style={{
+                        ...s.filterPill,
+                        ...(isActive ? s.filterPillActive : {}),
+                      }}
+                    >
+                      {club.logoUrl
+                        ? <img src={club.logoUrl} alt="" style={{ width: '12px', height: '12px', borderRadius: '2px', objectFit: 'cover' }} />
+                        : <Building2 size={11} />
+                      }
+                      {club.name}
+                      <span style={{ ...s.pillCount, backgroundColor: isActive ? '#1e293b' : '#334155', color: '#94a3b8' }}>{count}</span>
+                    </button>
+                  );
+                })}
+
+                {/* No club */}
+                <button
+                  onClick={() => setUserClubFilter('__none__')}
+                  style={{
+                    ...s.filterPill,
+                    ...(userClubFilter === '__none__' ? { ...s.filterPillActive, borderColor: '#f59e0b', color: '#f59e0b' } : {}),
+                  }}
+                >
+                  <UserX size={11} /> Geen club
+                  <span style={{ ...s.pillCount, backgroundColor: userClubFilter === '__none__' ? '#1e293b' : '#f59e0b22', color: userClubFilter === '__none__' ? '#94a3b8' : '#f59e0b' }}>
+                    {countForClub('__none__')}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* Result count */}
+            <div style={{ fontSize: '12px', color: '#475569', marginBottom: '12px' }}>
+              {filteredUsers.length} gebruiker{filteredUsers.length !== 1 ? 's' : ''} gevonden
+              {userClubFilter && userClubFilter !== '__none__' && (
+                <span style={{ color: '#a78bfa', marginLeft: '6px' }}>
+                  in {clubs.find(c => c.id === userClubFilter)?.name}
+                </span>
+              )}
+              {userClubFilter === '__none__' && (
+                <span style={{ color: '#f59e0b', marginLeft: '6px' }}>zonder clublidmaatschap</span>
+              )}
+            </div>
+
+            {/* User list */}
             <div className="user-list">
-              {filteredUsers.map(user => (
-                <div key={user.id} style={s.userCard}>
-                  <div style={s.userCardAvatar}>{(user.firstName?.[0] || '?').toUpperCase()}{(user.lastName?.[0] || '').toUpperCase()}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={s.userCardName}>{user.firstName} {user.lastName}</div>
-                    <div style={s.userCardEmail}>{user.email}</div>
-                    <span style={{ ...s.roleBadge, backgroundColor: getRoleColor(user.role) }}>{user.role}</span>
+              {filteredUsers.map(user => {
+                const clubNames = getUserClubNames(user.id);
+                return (
+                  <div key={user.id} style={s.userCard}>
+                    <div style={{ ...s.userCardAvatar, backgroundColor: getRoleColor(user.role) }}>
+                      {(user.firstName?.[0] || '?').toUpperCase()}{(user.lastName?.[0] || '').toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={s.userCardName}>{user.firstName} {user.lastName}</div>
+                      <div style={s.userCardEmail}>{user.email}</div>
+                      <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '5px', alignItems: 'center' }}>
+                        <span style={{ ...s.roleBadge, backgroundColor: getRoleColor(user.role) }}>{user.role}</span>
+                        {clubNames.length > 0 ? (
+                          clubNames.map(name => (
+                            <span key={name} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 7px', borderRadius: '4px', fontSize: '10px', fontWeight: '600', backgroundColor: '#3b82f611', color: '#60a5fa', border: '1px solid #3b82f633' }}>
+                              <Building2 size={9} /> {name}
+                            </span>
+                          ))
+                        ) : (
+                          !clubMembersLoading && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 7px', borderRadius: '4px', fontSize: '10px', fontWeight: '600', backgroundColor: '#f59e0b11', color: '#f59e0b', border: '1px solid #f59e0b33' }}>
+                              <UserX size={9} /> Geen club
+                            </span>
+                          )
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                      <button style={s.iconBtn} onClick={() => { setEditingId(user.id); setUserForm(user); setIsUserModalOpen(true); }}><Edit2 size={16} /></button>
+                      <button style={{ ...s.iconBtn, color: '#ef4444' }} onClick={() => { if (confirm('Gebruiker wissen?')) UserFactory.delete(user.id); }}><Trash2 size={16} /></button>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                    <button style={s.iconBtn} onClick={() => { setEditingId(user.id); setUserForm(user); setIsUserModalOpen(true); }}><Edit2 size={16} /></button>
-                    <button style={{ ...s.iconBtn, color: '#ef4444' }} onClick={() => { if (confirm('Gebruiker wissen?')) UserFactory.delete(user.id); }}><Trash2 size={16} /></button>
-                  </div>
+                );
+              })}
+              {filteredUsers.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '40px 0', color: '#475569' }}>
+                  <Users size={32} color="#334155" style={{ marginBottom: '10px' }} />
+                  <p style={{ fontSize: '13px', margin: 0 }}>Geen gebruikers gevonden voor deze filter.</p>
                 </div>
-              ))}
-              {filteredUsers.length === 0 && <p style={s.emptyText}>Geen gebruikers gevonden.</p>}
+              )}
             </div>
           </div>
         )}
@@ -608,7 +807,7 @@ const s = {
   userCard: { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '12px' },
   userCardAvatar: { width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '14px', flexShrink: 0, color: 'white' },
   userCardName: { fontWeight: '600', fontSize: '14px', color: '#f1f5f9', marginBottom: '2px' },
-  userCardEmail: { fontSize: '12px', color: '#64748b', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  userCardEmail: { fontSize: '12px', color: '#64748b', marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   roleBadge: { display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', color: 'white' },
   clubCard: { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', overflow: 'hidden' },
   clubCardBody: { padding: '16px', textAlign: 'center' },
