@@ -1102,7 +1102,7 @@ export default function ClubAdmin() {
                       {req.resolvedAt?.seconds && req.status !== 'pending' && <div style={{ fontSize: '11px', color: '#475569', marginTop: '8px' }}>Behandeld op {new Date(req.resolvedAt.seconds * 1000).toLocaleDateString('nl-BE', { day: '2-digit', month: 'short', year: 'numeric' })}</div>}
                       {req.status === 'pending' && (
                         <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
-                          <button style={s.approveBtn} onClick={() => ClubJoinRequestFactory.approve(req.id)}><Check size={15} /> Goedkeuren</button>
+                          <button style={s.approveBtn} onClick={() => ClubJoinRequestFactory.approve(req.id, uid)}><Check size={15} /> Goedkeuren</button>
                           <button style={s.rejectBtn} onClick={() => { setRejectingRequestId(req.id); setRejectReason(''); setRejectError(''); setRejectModalOpen(true); }}><X size={15} /> Afwijzen</button>
                         </div>
                       )}
