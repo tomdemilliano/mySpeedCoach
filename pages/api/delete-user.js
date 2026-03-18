@@ -11,8 +11,8 @@
 // You can find these values in the Firebase console:
 //   Project Settings → Service Accounts → Generate new private key
 
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
+const { initializeApp, getApps, cert } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 
 // Initialise the Admin SDK once (Next.js hot-reloads can call this file
 // multiple times, so we guard against re-initialisation).
@@ -31,7 +31,7 @@ function getAdminAuth() {
   return getAuth();
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== 'DELETE') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
