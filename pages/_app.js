@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { UserFactory, AuthFactory, UserMemberLinkFactory, ClubJoinRequestFactory } from '../constants/dbSchema';
+import { UserFactory, AuthFactory, UserMemberLinkFactory } from '../constants/dbSchema';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import AppLayout from '../components/AppLayout';
 
@@ -75,25 +75,20 @@ function AppShell({ Component, pageProps }) {
   }, [uid]);
 
   // ── Membership check — runs after email is verified ───────────────────────
-  // A user "has membership" if they have at least one UserMemberLink OR a
-  // pending/approved ClubJoinRequest. Admins bypass this check entirely.
+  // A user "has membership" only if they have at least one approved UserMemberLink
+  // (i.e. a coach has added them to a group). A pending ClubJoinRequest does NOT
+  // count — those users stay on /no-club where they can see their request status.
+  // Admins bypass this check entirely.
   useEffect(() => {
     if (!uid || !AuthFactory.isEmailVerified()) return;
 
     // Admins always have access
     if (ADMIN_ROLES.includes(userRole)) { setHasMembership(true); return; }
 
-    let resolved = false;
-    const unsub1 = UserMemberLinkFactory.getForUser(uid, (links) => {
-      if (links.length > 0) { setHasMembership(true); resolved = true; }
-      else if (!resolved) setHasMembership(false);
+    const unsub = UserMemberLinkFactory.getForUser(uid, (links) => {
+      setHasMembership(links.length > 0);
     });
-    const unsub2 = ClubJoinRequestFactory.getByUser(uid, (requests) => {
-      const active = requests.filter(r => r.status === 'pending' || r.status === 'approved');
-      if (active.length > 0) { setHasMembership(true); resolved = true; }
-      else if (!resolved) setHasMembership(false);
-    });
-    return () => { unsub1(); unsub2(); };
+    return () => unsub();
   }, [uid, userRole]);
 
   // ── Membership guard — redirect to /no-club if no membership ─────────────
