@@ -100,11 +100,15 @@ export default function RegisterPage() {
   const [error,   setError]   = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Redirect if already fully set up
+  // Only redirect away if the user has already fully completed registration
+  // (i.e. they have a firstName AND have previously reached the done screen).
+  // We track this with a `registrationDone` flag in Firestore, set on step 3.
+  // Without this guard, completing step 1 (name) would immediately redirect
+  // back here and skip the club onboarding step entirely.
   useEffect(() => {
     if (uid) {
       UserFactory.get(uid).then(snap => {
-        if (snap.exists() && snap.data().firstName) router.replace('/verify-email');
+        if (snap.exists() && snap.data().registrationDone) router.replace('/');
       });
     }
   }, [uid]);
@@ -470,7 +474,13 @@ export default function RegisterPage() {
             <p style={{ fontSize: '12px', color: '#475569', marginBottom: '20px' }}>
               Vergeet niet je e-mailadres te verifiëren — check je inbox.
             </p>
-            <button onClick={() => router.replace('/verify-email')} style={s.btn}>
+            <button onClick={async () => {
+              const currentUid = AuthFactory.getCurrentUser()?.uid;
+              if (currentUid) {
+                try { await UserFactory.updateProfile(currentUid, { registrationDone: true }); } catch (_) {}
+              }
+              router.replace('/verify-email');
+            }} style={s.btn}>
               Naar de app <ChevronRight size={16} />
             </button>
           </div>
