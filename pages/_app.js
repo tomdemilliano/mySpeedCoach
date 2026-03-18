@@ -131,6 +131,22 @@ function AppShell({ Component, pageProps }) {
   // ── Redirect in flight — render nothing to avoid flash ──────────────────────
   if (!uid) return null;
 
+  // ── Block render until membership is resolved to avoid page flash ────────────
+  // For verified non-admin users on non-exempt paths, we don't know yet whether
+  // they have a membership. Show a spinner instead of briefly rendering the page
+  // before the redirect to /no-club fires.
+  const needsMembershipCheck = uid
+    && AuthFactory.isEmailVerified()
+    && !ADMIN_ROLES.includes(userRole)
+    && !NO_CLUB_EXEMPT.includes(router.pathname);
+
+  if (needsMembershipCheck && hasMembership === null) return (
+    <div style={{ minHeight: '100vh', backgroundColor: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <div style={{ width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+    </div>
+  );
+
   // ── Authenticated app ────────────────────────────────────────────────────────
   return (
     <>
