@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  UserFactory, ClubFactory, ClubJoinRequestFactory, BadgeFactory, GroupFactory,
+  UserFactory, ClubFactory, ClubJoinRequestFactory, BadgeFactory, UserMemberLinkFactory,
 } from '../constants/dbSchema';
+import { db } from '../firebaseConfig';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import {
   ShieldAlert, UserPlus, Building2, Trash2, Search, Edit2, X, Save,
   Plus, Bell, CheckCircle2, XCircle, Clock, MessageSquare, Check,
-  AlertCircle, Medal, Upload, Award, Calendar, Users, UserX,
+  AlertCircle, Medal, Upload, Calendar, Users, UserX,
 } from 'lucide-react';
 
 // ─── Cookie helper ─────────────────────────────────────────────────────────────
@@ -218,7 +220,6 @@ export default function SuperAdmin() {
 
   // User tab filters
   const [userClubFilter, setUserClubFilter] = useState(''); // '' = all, '__none__' = no club, or clubId
-  const userClubFilterRef = useRef('');
 
   // Modals / editing
   const [editingId,          setEditingId]          = useState(null);
@@ -263,59 +264,25 @@ export default function SuperAdmin() {
     return () => { u1(); u2(); u3(); u4(); };
   }, [hasAccess]);
 
-  // ── Build uid → clubId[] map using GroupFactory ────────────────────────────
-  // Called once when clubs are loaded, and re-runs whenever clubs list changes.
-  // Uses GroupFactory.getGroupsByClub + GroupFactory.getMembersByGroup (both
-  // return realtime listeners — we use the one-shot pattern via the callback).
+  // ── Build uid → Set<clubId> map via userMemberLinks collection ────────────
+  // userMemberLinks documents have { uid, clubId, memberId, relationship }.
+  // This is the authoritative source tying an app user (uid) to a club.
   useEffect(() => {
-    if (!hasAccess || clubs.length === 0) return;
-
+    if (!hasAccess) return;
     setClubMembersLoading(true);
-    const map = {}; // uid → Set<clubId>
-    let resolvedClubs = 0;
-
-    clubs.forEach(club => {
-      // getGroupsByClub is a realtime listener; we only need the first emission
-      // so we wrap it and unsubscribe after first call.
-      let unsubGroups;
-      unsubGroups = GroupFactory.getGroupsByClub(club.id, (groups) => {
-        // Unsubscribe immediately after first emission
-        if (unsubGroups) { unsubGroups(); unsubGroups = null; }
-
-        if (groups.length === 0) {
-          resolvedClubs++;
-          if (resolvedClubs === clubs.length) {
-            setUserClubMap({ ...map });
-            setClubMembersLoading(false);
-          }
-          return;
-        }
-
-        let resolvedGroups = 0;
-        groups.forEach(group => {
-          let unsubMembers;
-          unsubMembers = GroupFactory.getMembersByGroup(club.id, group.id, (members) => {
-            if (unsubMembers) { unsubMembers(); unsubMembers = null; }
-
-            members.forEach(m => {
-              const uid = m.memberId || m.id;
-              if (!map[uid]) map[uid] = new Set();
-              map[uid].add(club.id);
-            });
-
-            resolvedGroups++;
-            if (resolvedGroups === groups.length) {
-              resolvedClubs++;
-              if (resolvedClubs === clubs.length) {
-                setUserClubMap({ ...map });
-                setClubMembersLoading(false);
-              }
-            }
-          });
-        });
+    const unsub = onSnapshot(collection(db, 'userMemberLinks'), (snap) => {
+      const map = {}; // uid → Set<clubId>
+      snap.docs.forEach(d => {
+        const { uid, clubId } = d.data();
+        if (!uid || !clubId) return;
+        if (!map[uid]) map[uid] = new Set();
+        map[uid].add(clubId);
       });
+      setUserClubMap(map);
+      setClubMembersLoading(false);
     });
-  }, [hasAccess, clubs]);
+    return () => unsub();
+  }, [hasAccess]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const pendingCount    = joinRequests.filter(r => r.status === 'pending').length;
