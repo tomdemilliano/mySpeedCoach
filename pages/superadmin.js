@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  UserFactory, ClubFactory, ClubJoinRequestFactory, BadgeFactory, UserMemberLinkFactory,
+  UserFactory, ClubFactory, ClubJoinRequestFactory, BadgeFactory, UserMemberLinkFactory, ClubMemberFactory,
 } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebaseConfig';
@@ -193,6 +193,185 @@ function BadgeFormModal({ badge, clubs, onSave, onClose }) {
   );
 }
 
+// ─── Approve Member Modal ─────────────────────────────────────────────────────
+function ApproveMemberModal({ request, clubId, approvedByUid, onClose }) {
+  const [mode, setMode]               = useState('new');
+  const [existingMembers, setExistingMembers] = useState([]);
+  const [memberSearch,    setMemberSearch]    = useState('');
+  const [selectedMemberId, setSelectedMemberId] = useState('');
+
+  const [form, setForm] = useState({
+    firstName: request.firstName || '',
+    lastName:  request.lastName  || '',
+    birthDate: '',
+    notes: '',
+  });
+
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  useEffect(() => {
+    const u = ClubMemberFactory.getAll(clubId, setExistingMembers);
+    return () => u();
+  }, [clubId]);
+
+  const filteredMembers = existingMembers.filter(m =>
+    `${m.firstName} ${m.lastName}`.toLowerCase().includes(memberSearch.toLowerCase())
+  );
+
+  const handleConfirm = async () => {
+    setError('');
+    setSaving(true);
+    try {
+      let memberId;
+
+      if (mode === 'new') {
+        if (!form.firstName.trim() || !form.lastName.trim()) {
+          setError('Voornaam en achternaam zijn verplicht.'); setSaving(false); return;
+        }
+        const docRef = await ClubMemberFactory.create(clubId, {
+          firstName: form.firstName.trim(),
+          lastName:  form.lastName.trim(),
+          birthDate: form.birthDate ? new Date(form.birthDate) : null,
+          notes:     form.notes.trim(),
+        }, approvedByUid);
+        memberId = docRef.id;
+      } else {
+        if (!selectedMemberId) { setError('Selecteer een bestaand lid.'); setSaving(false); return; }
+        memberId = selectedMemberId;
+      }
+
+      // Create UserMemberLink with the real memberId
+      const { addDoc, collection, serverTimestamp, updateDoc, doc } = await import('firebase/firestore');
+      const { db } = await import('../firebaseConfig');
+      await addDoc(collection(db, 'userMemberLinks'), {
+        uid:           request.uid,
+        clubId,
+        memberId,
+        relationship:  'self',
+        canEdit:       false,
+        canViewHealth: false,
+        createdAt:     serverTimestamp(),
+        approvedBy:    approvedByUid || 'admin',
+      });
+
+      // Mark request approved
+      await updateDoc(doc(db, 'clubJoinRequests', request.id), {
+        status: 'approved', rejectionReason: '', resolvedAt: serverTimestamp(),
+      });
+
+      onClose();
+    } catch (e) {
+      console.error(e);
+      setError('Opslaan mislukt. Probeer opnieuw.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={s.modalOverlay}>
+      <div style={{ ...s.modal, maxHeight: '92vh', overflowY: 'auto', borderRadius: '20px' }}>
+        <div style={s.modalHeader}>
+          <h3 style={{ margin: 0, fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CheckCircle2 size={18} color="#22c55e" /> Aanvraag goedkeuren
+          </h3>
+          <button style={s.iconBtn} onClick={onClose}><X size={18} /></button>
+        </div>
+
+        {/* Requester info */}
+        <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', padding: '12px 14px', marginBottom: '18px', display: 'flex', gap: '12px', alignItems: 'center', border: '1px solid #1e293b' }}>
+          <div style={{ width: '38px', height: '38px', borderRadius: '10px', backgroundColor: '#3b82f622', border: '1px solid #3b82f644', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '13px', color: '#60a5fa', flexShrink: 0 }}>
+            {(request.firstName?.[0] || '?').toUpperCase()}{(request.lastName?.[0] || '').toUpperCase()}
+          </div>
+          <div>
+            <div style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9' }}>{request.firstName} {request.lastName}</div>
+            <div style={{ fontSize: '11px', color: '#64748b' }}>{request.email}</div>
+          </div>
+        </div>
+
+        {/* Mode picker */}
+        <label style={s.fieldLabel}>Koppel aan een lid</label>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '18px' }}>
+          <button type="button" onClick={() => setMode('new')} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: `1px solid ${mode === 'new' ? '#22c55e' : '#334155'}`, fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', backgroundColor: mode === 'new' ? '#22c55e22' : 'transparent', color: mode === 'new' ? '#22c55e' : '#64748b' }}>
+            + Nieuw lid aanmaken
+          </button>
+          <button type="button" onClick={() => setMode('existing')} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: `1px solid ${mode === 'existing' ? '#3b82f6' : '#334155'}`, fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', backgroundColor: mode === 'existing' ? '#3b82f622' : 'transparent', color: mode === 'existing' ? '#60a5fa' : '#64748b' }}>
+            Bestaand lid koppelen
+          </button>
+        </div>
+
+        {/* New member form */}
+        {mode === 'new' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div>
+                <label style={s.fieldLabel}>Voornaam *</label>
+                <input style={s.input} value={form.firstName} onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} placeholder="Emma" autoFocus />
+              </div>
+              <div>
+                <label style={s.fieldLabel}>Achternaam *</label>
+                <input style={s.input} value={form.lastName} onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} placeholder="De Smet" />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div>
+                <label style={s.fieldLabel}>Geboortedatum</label>
+                <input type="date" style={s.input} value={form.birthDate} onChange={e => setForm(f => ({ ...f, birthDate: e.target.value }))} />
+              </div>
+              <div>
+                <label style={s.fieldLabel}>Notities</label>
+                <input style={s.input} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="optioneel" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Existing member picker */}
+        {mode === 'existing' && (
+          <div>
+            <div style={{ position: 'relative', marginBottom: '10px' }}>
+              <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
+              <input placeholder="Zoek op naam…" value={memberSearch} onChange={e => setMemberSearch(e.target.value)} style={{ ...s.input, paddingLeft: '32px' }} autoFocus />
+            </div>
+            <div style={{ maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {filteredMembers.length === 0 ? (
+                <p style={{ color: '#475569', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>Geen leden gevonden.</p>
+              ) : filteredMembers.map(m => (
+                <div
+                  key={m.id}
+                  onClick={() => setSelectedMemberId(m.id)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '8px', border: `1px solid ${selectedMemberId === m.id ? '#3b82f6' : '#334155'}`, backgroundColor: selectedMemberId === m.id ? '#1e3a5f' : '#0f172a', cursor: 'pointer' }}
+                >
+                  <div style={{ width: '30px', height: '30px', borderRadius: '50%', backgroundColor: selectedMemberId === m.id ? '#3b82f6' : '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', color: 'white', flexShrink: 0 }}>
+                    {(m.firstName?.[0] || '?').toUpperCase()}{(m.lastName?.[0] || '').toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '13px', fontWeight: '600', color: '#f1f5f9' }}>{m.firstName} {m.lastName}</div>
+                    {m.birthDate?.seconds && <div style={{ fontSize: '10px', color: '#64748b' }}>{new Date(m.birthDate.seconds * 1000).getFullYear()}</div>}
+                  </div>
+                  {selectedMemberId === m.id && <Check size={14} color="#3b82f6" />}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {error && <div style={{ ...s.errorBanner, marginTop: '14px' }}><AlertCircle size={13} /> {error}</div>}
+
+        <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+          <button onClick={handleConfirm} disabled={saving} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '12px', backgroundColor: '#22c55e', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '700', fontSize: '13px', cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
+            <Check size={15} /> {saving ? 'Opslaan…' : 'Goedkeuren & koppelen'}
+          </button>
+          <button onClick={onClose} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '12px 16px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '8px', color: '#94a3b8', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
+            <X size={15} /> Annuleren
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════════════════
@@ -232,6 +411,9 @@ export default function SuperAdmin() {
   const [rejectReason,       setRejectReason]       = useState('');
   const [rejectError,        setRejectError]        = useState('');
   const [rejectSaving,       setRejectSaving]       = useState(false);
+
+  // Approve modal
+  const [approveModalRequest, setApproveModalRequest] = useState(null); // full request object
 
   // ── Auth ───────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -661,7 +843,7 @@ export default function SuperAdmin() {
                       {req.resolvedAt?.seconds && req.status !== 'pending' && <div style={{ fontSize: '11px', color: '#475569', marginTop: '8px' }}>Behandeld op {new Date(req.resolvedAt.seconds * 1000).toLocaleDateString('nl-BE', { day: '2-digit', month: 'short', year: 'numeric' })}</div>}
                       {req.status === 'pending' && (
                         <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
-                          <button style={s.approveBtn} onClick={() => ClubJoinRequestFactory.approve(req.id, uid)}><Check size={15} /> Goedkeuren</button>
+                          <button style={s.approveBtn} onClick={() => setApproveModalRequest(req)}><Check size={15} /> Goedkeuren</button>
                           <button style={s.rejectBtn} onClick={() => { setRejectingRequestId(req.id); setRejectReason(''); setRejectError(''); setRejectModalOpen(true); }}><X size={15} /> Afwijzen</button>
                         </div>
                       )}
@@ -678,6 +860,16 @@ export default function SuperAdmin() {
           </div>
         )}
       </main>
+
+      {/* ══ APPROVE MEMBER MODAL ══ */}
+      {approveModalRequest && (
+        <ApproveMemberModal
+          request={approveModalRequest}
+          clubId={approveModalRequest.clubId}
+          approvedByUid={uid}
+          onClose={() => setApproveModalRequest(null)}
+        />
+      )}
 
       {/* ══ BADGE FORM MODAL ══ */}
       {isBadgeFormOpen && <BadgeFormModal badge={editingBadge} clubs={clubs} onSave={handleBadgeSave} onClose={() => { setIsBadgeFormOpen(false); setEditingBadge(null); }} />}
