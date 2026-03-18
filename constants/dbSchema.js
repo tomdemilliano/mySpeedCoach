@@ -143,7 +143,22 @@ export const SCHEMA = {
       sessionType: "string",
       score: "number",
       sessionEnd: "timestamp",
-    }
+    },
+
+    // Feature 12.1 — Message board
+    announcements: {
+      title:      "string",
+      body:       "string",
+      type:       "info|cancel|reminder|result",
+      clubId:     "string",
+      groupIds:   ["string"],   // array of group IDs this announcement targets
+      authorUid:  "string",
+      authorName: "string",
+      pinned:     "boolean",
+      expiresAt:  "timestamp|null",
+      createdAt:  "timestamp",
+      updatedAt:  "timestamp",
+    },
   },
   rtdb: {
     live_sessions: {
@@ -212,8 +227,6 @@ export const UserFactory = {
     await deleteDoc(doc(db, "users", uid));
  
     // 3. Delete the Firebase Auth account via the server-side API route.
-    //    We do this last so Firestore is already clean if Auth deletion fails.
-    //    auth/user-not-found is treated as success by the API route.
     try {
       const res = await fetch('/api/delete-user', {
         method:  'DELETE',
@@ -929,4 +942,131 @@ export const AuthFactory = {
 
   updatePassword: (newPassword) =>
     updatePassword(auth.currentUser, newPassword),
+};
+
+// ==========================================
+// 10. ANNOUNCEMENT FACTORY  (Feature 12.1)
+// ==========================================
+// Schema (top-level collection):
+//
+// announcements/{announcementId}
+//   title:      string
+//   body:       string
+//   type:       "info" | "cancel" | "reminder" | "result"
+//   clubId:     string
+//   groupIds:   string[]   — group IDs this announcement targets
+//   authorUid:  string
+//   authorName: string
+//   pinned:     boolean
+//   expiresAt:  timestamp | null
+//   createdAt:  timestamp
+//   updatedAt:  timestamp
+
+export const AnnouncementFactory = {
+  // ── Write ─────────────────────────────────────────────────────────────────
+
+  create: (data, authorUid, authorName) =>
+    addDoc(collection(db, 'announcements'), {
+      title:      data.title      || '',
+      body:       data.body       || '',
+      type:       data.type       || 'info',
+      clubId:     data.clubId     || '',
+      groupIds:   data.groupIds   || [],
+      authorUid,
+      authorName,
+      pinned:     data.pinned     || false,
+      expiresAt:  data.expiresAt  || null,
+      createdAt:  serverTimestamp(),
+      updatedAt:  serverTimestamp(),
+    }),
+
+  update: (announcementId, data) =>
+    updateDoc(doc(db, 'announcements', announcementId), {
+      ...data,
+      updatedAt: serverTimestamp(),
+    }),
+
+  delete: (announcementId) =>
+    deleteDoc(doc(db, 'announcements', announcementId)),
+
+  pin: (announcementId, pinned) =>
+    updateDoc(doc(db, 'announcements', announcementId), {
+      pinned,
+      updatedAt: serverTimestamp(),
+    }),
+
+  // ── Read ──────────────────────────────────────────────────────────────────
+
+  // One-shot fetch: returns announcements for the given groupIds,
+  // pinned first then createdAt desc.
+  // groupIds is pre-resolved by the caller from GroupFactory.
+  getForUser: async (groupIds) => {
+    if (!groupIds || groupIds.length === 0) return [];
+    // array-contains-any supports up to 30 values per query
+    const snap = await getDocs(
+      query(
+        collection(db, 'announcements'),
+        where('groupIds', 'array-contains-any', groupIds.slice(0, 30))
+      )
+    );
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
+      });
+  },
+
+  // Real-time subscription for a skipper: returns unsubscribe function.
+  subscribeForUser: (groupIds, callback) => {
+    if (!groupIds || groupIds.length === 0) {
+      callback([]);
+      return () => {};
+    }
+    return onSnapshot(
+      query(
+        collection(db, 'announcements'),
+        where('groupIds', 'array-contains-any', groupIds.slice(0, 30))
+      ),
+      (snap) => {
+        const items = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => {
+            if (a.pinned && !b.pinned) return -1;
+            if (!a.pinned && b.pinned) return 1;
+            return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
+          });
+        callback(items);
+      },
+      (err) => {
+        console.error('AnnouncementFactory.subscribeForUser error:', err);
+        callback([]);
+      }
+    );
+  },
+
+  // Coach helper: subscribe to all announcements for a specific group.
+  subscribeForGroup: (clubId, groupId, callback) =>
+    onSnapshot(
+      query(
+        collection(db, 'announcements'),
+        where('clubId',   '==', clubId),
+        where('groupIds', 'array-contains', groupId)
+      ),
+      (snap) => {
+        const items = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => {
+            if (a.pinned && !b.pinned) return -1;
+            if (!a.pinned && b.pinned) return 1;
+            return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
+          });
+        callback(items);
+      },
+      (err) => {
+        console.error('AnnouncementFactory.subscribeForGroup error:', err);
+        callback([]);
+      }
+    ),
 };
