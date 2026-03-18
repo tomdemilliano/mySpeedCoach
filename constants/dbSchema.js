@@ -199,7 +199,7 @@ export const UserFactory = {
   }),
 
   delete: async (uid) => {
-    // Remove from all groups (now memberId-keyed, but uid may still appear during transition)
+    // 1. Remove from all groups
     const clubsSnap = await getDocs(collection(db, "clubs"));
     for (const clubDoc of clubsSnap.docs) {
       const groupsSnap = await getDocs(collection(db, `clubs/${clubDoc.id}/groups`));
@@ -207,7 +207,26 @@ export const UserFactory = {
         await deleteDoc(doc(db, `clubs/${clubDoc.id}/groups/${groupDoc.id}/members`, uid));
       }
     }
-    return deleteDoc(doc(db, "users", uid));
+ 
+    // 2. Remove the Firestore user document
+    await deleteDoc(doc(db, "users", uid));
+ 
+    // 3. Delete the Firebase Auth account via the server-side API route.
+    //    We do this last so Firestore is already clean if Auth deletion fails.
+    //    auth/user-not-found is treated as success by the API route.
+    try {
+      const res = await fetch('/api/delete-user', {
+        method:  'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ uid }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        console.error('Failed to delete Auth account:', data.error || res.status);
+      }
+    } catch (err) {
+      console.error('Error calling /api/delete-user:', err);
+    }
   },
 
   updateProfile: (uid, data) => updateDoc(doc(db, "users", uid), data),
