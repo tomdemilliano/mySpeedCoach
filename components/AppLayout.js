@@ -4,10 +4,15 @@ import {
   Zap, User, Hash, LayoutDashboard, ShieldAlert,
   Menu, X, ChevronRight, Clock, Medal, Home,
   Calendar, MoreHorizontal, Trophy, Target, History,
-  Building2, Users
+  Building2, Users, Shield, Award
 } from 'lucide-react';
 
-// ─── Nav items for the sidebar (More panel) ───────────────────────────────────
+// ─── Role helpers ─────────────────────────────────────────────────────────────
+const isSuperAdmin = (role) => role === 'superadmin';
+const isClubAdmin  = (role) => role === 'clubadmin' || role === 'superadmin';
+const isCoachRole  = (role) => role === 'clubadmin' || role === 'superadmin';
+
+// ─── All possible sidebar items — filtered by role at render time ─────────────
 const SIDEBAR_ITEMS = [
   {
     href: '/history',
@@ -15,7 +20,7 @@ const SIDEBAR_ITEMS = [
     icon: History,
     description: 'Sessies & AI analyse',
     color: '#60a5fa',
-    roles: ['user', 'clubadmin', 'superadmin'],
+    showFor: (role) => true,
   },
   {
     href: '/dashboard',
@@ -23,7 +28,7 @@ const SIDEBAR_ITEMS = [
     icon: LayoutDashboard,
     description: 'Live monitoring',
     color: '#f59e0b',
-    roles: ['user', 'clubadmin', 'superadmin'],
+    showFor: (role) => true,
   },
   {
     href: '/badges',
@@ -31,20 +36,33 @@ const SIDEBAR_ITEMS = [
     icon: Medal,
     description: 'Club klassement',
     color: '#f59e0b',
-    roles: ['user', 'clubadmin', 'superadmin'],
+    showFor: (role) => true,
+  },
+  {
+    href: '/badge-beheer',
+    label: 'Badge Beheer',
+    icon: Award,
+    description: 'Aanmaken & uitreiken',
+    color: '#a78bfa',
+    showFor: (role) => isClubAdmin(role),
+  },
+  {
+    href: '/clubadmin',
+    label: 'Clubbeheer',
+    icon: Building2,
+    description: 'Groepen & leden',
+    color: '#22c55e',
+    showFor: (role) => isClubAdmin(role),
   },
   {
     href: '/superadmin',
-    label: 'Beheer',
+    label: 'SuperAdmin',
     icon: ShieldAlert,
     description: 'Clubs & gebruikers',
-    color: '#a78bfa',
-    roles: ['superadmin', 'clubadmin'],
+    color: '#ef4444',
+    showFor: (role) => isSuperAdmin(role),
   },
 ];
-
-// ─── Role helper ──────────────────────────────────────────────────────────────
-const isCoachRole = (role) => role === 'clubadmin' || role === 'superadmin';
 
 // ─── Bottom nav config per role ───────────────────────────────────────────────
 const getBottomNav = (role) => {
@@ -84,7 +102,7 @@ const getBottomNav = (role) => {
 // ─── More / Sidebar Drawer ────────────────────────────────────────────────────
 function SidebarDrawer({ currentPath, open, onClose, userRole }) {
   const role = userRole || 'user';
-  const visibleItems = SIDEBAR_ITEMS.filter(item => item.roles.includes(role));
+  const visibleItems = SIDEBAR_ITEMS.filter(item => item.showFor(role));
 
   return (
     <>
@@ -214,37 +232,6 @@ function SidebarDrawer({ currentPath, open, onClose, userRole }) {
               </a>
             );
           })}
-
-          {/* Memberships link */}
-          <div style={{ margin: '12px 12px 6px', fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-            Account
-          </div>
-          <a
-            href="/?tab=memberships"
-            onClick={onClose}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '12px',
-              padding: '10px 12px', borderRadius: '10px', marginBottom: '4px',
-              textDecoration: 'none', backgroundColor: 'transparent',
-              border: '1px solid transparent', transition: 'all 0.15s',
-            }}
-          >
-            <div style={{
-              width: '34px', height: '34px', borderRadius: '8px',
-              backgroundColor: '#1e293b', border: '1px solid #334155',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            }}>
-              <Building2 size={16} color="#64748b" />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: '13px', fontWeight: '500', color: '#94a3b8', marginBottom: '1px' }}>
-                Lidmaatschappen
-              </div>
-              <div style={{ fontSize: '10px', color: '#475569' }}>
-                Clubs & groepen
-              </div>
-            </div>
-          </a>
         </nav>
 
         {/* Footer */}
@@ -378,8 +365,7 @@ export default function AppLayout({ children, userRole, coachView }) {
     setDrawerOpen(false);
   }, [currentPath]);
 
-  // On desktop, we keep a slim sidebar for the "more" items
-  // On mobile, everything is bottom nav + drawer
+  const visibleSidebarItems = SIDEBAR_ITEMS.filter(item => item.showFor(effectiveRole));
 
   return (
     <>
@@ -389,7 +375,7 @@ export default function AppLayout({ children, userRole, coachView }) {
         currentPath={currentPath}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        userRole={userRole}
+        userRole={effectiveRole}
       />
 
       {/* Desktop sidebar — always visible on desktop */}
@@ -452,11 +438,13 @@ export default function AppLayout({ children, userRole, coachView }) {
             );
           })}
 
-          {/* Divider */}
-          <div style={{ margin: '8px 12px', borderTop: '1px solid #1e293b' }} />
+          {/* Divider — only shown when there are extra sidebar items */}
+          {visibleSidebarItems.length > 0 && (
+            <div style={{ margin: '8px 12px', borderTop: '1px solid #1e293b' }} />
+          )}
 
-          {/* More items */}
-          {SIDEBAR_ITEMS.filter(i => i.roles.includes(effectiveRole)).map((item) => {
+          {/* Sidebar-only items filtered by role */}
+          {visibleSidebarItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPath === item.href;
             return (
@@ -494,32 +482,10 @@ export default function AppLayout({ children, userRole, coachView }) {
                     {item.description}
                   </div>
                 </div>
+                {isActive && <ChevronRight size={14} color={`${item.color}88`} style={{ flexShrink: 0 }} />}
               </a>
             );
           })}
-
-          {/* Memberships */}
-          <a
-            href="/?tab=memberships"
-            style={{
-              display: 'flex', alignItems: 'center', gap: '12px',
-              padding: '10px 12px', borderRadius: '10px', marginBottom: '4px',
-              textDecoration: 'none', backgroundColor: 'transparent',
-              border: '1px solid transparent', transition: 'all 0.15s',
-            }}
-          >
-            <div style={{
-              width: '34px', height: '34px', borderRadius: '8px',
-              backgroundColor: '#1e293b', border: '1px solid #334155',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            }}>
-              <Building2 size={16} color="#64748b" />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: '13px', fontWeight: '500', color: '#94a3b8' }}>Lidmaatschappen</div>
-              <div style={{ fontSize: '10px', color: '#475569' }}>Clubs & groepen</div>
-            </div>
-          </a>
         </nav>
 
         <div style={{ padding: '14px 16px', borderTop: '1px solid #1e293b', fontSize: '10px', color: '#334155', textAlign: 'center' }}>
