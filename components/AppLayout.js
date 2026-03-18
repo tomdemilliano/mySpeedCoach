@@ -4,7 +4,7 @@ import {
   Zap, User, Hash, LayoutDashboard, ShieldAlert,
   Menu, X, ChevronRight, Clock, Medal, Home,
   Calendar, MoreHorizontal, Trophy, Target, History,
-  Building2, Users, Shield, Award
+  Building2, Users, Shield, Award, Megaphone,
 } from 'lucide-react';
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
@@ -28,6 +28,14 @@ const SIDEBAR_ITEMS = [
     icon: LayoutDashboard,
     description: 'Live monitoring',
     color: '#f59e0b',
+    showFor: (role) => true,
+  },
+  {
+    href: '/announcements',
+    label: 'Aankondigingen',
+    icon: Megaphone,
+    description: 'Berichten van coaches',
+    color: '#a78bfa',
     showFor: (role) => true,
   },
   {
@@ -85,9 +93,9 @@ const getBottomNav = (role) => {
       isPrimary: true,
     },
     {
-      href: '/agenda',
-      label: 'Agenda',
-      icon: Calendar,
+      href: '/announcements',
+      label: 'Berichten',
+      icon: Megaphone,
       color: '#a78bfa',
     },
     {
@@ -249,7 +257,7 @@ function SidebarDrawer({ currentPath, open, onClose, userRole }) {
 }
 
 // ─── Bottom Navigation Bar ────────────────────────────────────────────────────
-function BottomNav({ currentPath, userRole, onMoreClick }) {
+function BottomNav({ currentPath, userRole, onMoreClick, announcementCount }) {
   const items = getBottomNav(userRole || 'user');
 
   return (
@@ -266,6 +274,7 @@ function BottomNav({ currentPath, userRole, onMoreClick }) {
         const isMore = item.key === 'more';
         const isActive = !isMore && currentPath === item.href;
         const isPrimary = item.isPrimary;
+        const isAnnouncements = item.href === '/announcements';
 
         if (isPrimary) {
           return (
@@ -283,7 +292,6 @@ function BottomNav({ currentPath, userRole, onMoreClick }) {
                 position: 'relative',
               }}
             >
-              {/* Primary action pill */}
               <div style={{
                 width: '52px', height: '52px',
                 borderRadius: '16px',
@@ -334,7 +342,23 @@ function BottomNav({ currentPath, userRole, onMoreClick }) {
               position: 'relative',
             }}
           >
-            <Icon size={22} color={isActive ? item.color : '#475569'} />
+            <div style={{ position: 'relative' }}>
+              <Icon size={22} color={isActive ? item.color : '#475569'} />
+              {/* Announcement badge */}
+              {isAnnouncements && announcementCount > 0 && !isActive && (
+                <span style={{
+                  position: 'absolute', top: '-4px', right: '-6px',
+                  backgroundColor: '#ef4444', color: 'white',
+                  fontSize: '9px', fontWeight: '800',
+                  width: '15px', height: '15px',
+                  borderRadius: '50%',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: '1.5px solid #0d1526',
+                }}>
+                  {announcementCount > 9 ? '9+' : announcementCount}
+                </span>
+              )}
+            </div>
             <span style={{ fontSize: '10px', fontWeight: isActive ? '700' : '400', color: isActive ? item.color : '#475569', marginTop: '3px' }}>
               {item.label}
             </span>
@@ -354,7 +378,7 @@ function BottomNav({ currentPath, userRole, onMoreClick }) {
 }
 
 // ─── Main layout wrapper ──────────────────────────────────────────────────────
-export default function AppLayout({ children, userRole, coachView }) {
+export default function AppLayout({ children, userRole, coachView, announcementCount = 0 }) {
   const router = useRouter();
   const currentPath = router.pathname;
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -403,6 +427,7 @@ export default function AppLayout({ children, userRole, coachView }) {
           {getBottomNav(effectiveRole).filter(i => !i.key).map((item) => {
             const Icon = item.icon;
             const isActive = currentPath === item.href;
+            const isAnnouncements = item.href === '/announcements';
             return (
               <a
                 key={item.href}
@@ -427,8 +452,22 @@ export default function AppLayout({ children, userRole, coachView }) {
                   backgroundColor: isActive ? `${item.color}22` : '#1e293b',
                   border: `1px solid ${isActive ? `${item.color}44` : '#334155'}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  position: 'relative',
                 }}>
                   <Icon size={16} color={isActive ? item.color : '#64748b'} />
+                  {isAnnouncements && announcementCount > 0 && !isActive && (
+                    <span style={{
+                      position: 'absolute', top: '-4px', right: '-4px',
+                      backgroundColor: '#ef4444', color: 'white',
+                      fontSize: '8px', fontWeight: '800',
+                      width: '14px', height: '14px',
+                      borderRadius: '50%',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      border: '1.5px solid #0d1526',
+                    }}>
+                      {announcementCount > 9 ? '9+' : announcementCount}
+                    </span>
+                  )}
                 </div>
                 <span style={{ fontSize: '13px', fontWeight: isActive ? '700' : '500', color: isActive ? '#f1f5f9' : '#94a3b8' }}>
                   {item.label}
@@ -499,6 +538,7 @@ export default function AppLayout({ children, userRole, coachView }) {
           currentPath={currentPath}
           userRole={effectiveRole}
           onMoreClick={() => setDrawerOpen(true)}
+          announcementCount={announcementCount}
         />
       </div>
 
