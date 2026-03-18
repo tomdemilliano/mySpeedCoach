@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { UserFactory } from '../constants/dbSchema';
+import { UserFactory, AuthFactory } from '../constants/dbSchema';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import AppLayout from '../components/AppLayout';
 
@@ -9,7 +9,10 @@ const COOKIE_KEY    = 'msc_uid';
 const VIEW_MODE_KEY = 'msc_viewmode';
 
 // Pages accessible without being logged in
-const PUBLIC_PATHS = ['/login'];
+const PUBLIC_PATHS = ['/login', '/register'];
+
+// Pages a logged-in but unverified user CAN access
+const EMAIL_VERIFY_EXEMPT = ['/verify-email', '/login', '/register'];
 
 // ─── Inner shell — runs inside AuthProvider so useAuth works ─────────────────
 function AppShell({ Component, pageProps }) {
@@ -36,10 +39,21 @@ function AppShell({ Component, pageProps }) {
   // ── Auth guard ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (loading) return;
+
+    // Not logged in — send to login
     if (!uid && !isPublicPath) {
       router.replace(`/login?next=${encodeURIComponent(router.asPath)}`);
+      return;
     }
-    if (uid && router.pathname === '/login') {
+
+    // Logged in but email not verified — hard block to /verify-email
+    if (uid && !AuthFactory.isEmailVerified() && !EMAIL_VERIFY_EXEMPT.includes(router.pathname)) {
+      router.replace('/verify-email');
+      return;
+    }
+
+    // Already logged in and on /login or /register — redirect home
+    if (uid && (router.pathname === '/login' || router.pathname === '/register')) {
       const next = router.query.next || '/';
       router.replace(next);
     }
