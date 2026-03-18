@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { UserFactory, ClubFactory, GroupFactory, LiveSessionFactory, ClubJoinRequestFactory, BadgeFactory, ClubMemberFactory, UserMemberLinkFactory } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
+import AnnouncementsWidget from '../components/AnnouncementsWidget';
 import {
   Bluetooth, BluetoothOff, Heart, Settings, Trophy,
   Target, Plus, Edit2, Trash2, Check, X, ChevronRight,
@@ -581,7 +582,9 @@ export default function IndexPage() {
             </div>
           </a>
         )}
-
+        
+        <AnnouncementsWidget memberContext={memberContext} />
+        
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
             <div style={{ fontSize: '14px', fontWeight: '700', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '6px' }}><Clock size={14} /> Recente sessies</div>
