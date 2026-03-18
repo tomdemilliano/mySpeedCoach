@@ -128,6 +128,12 @@ export default function LoginPage() {
         </form>
 
         {/* Forgot password — added in Feature 9.4 */}
+
+        {/* Register link */}
+        <p style={{ textAlign: 'center', fontSize: '13px', color: '#64748b', marginTop: '16px' }}>
+          Nog geen account?{' '}
+          <a href="/register" style={{ color: '#3b82f6', textDecoration: 'none', fontWeight: '600' }}>Account aanmaken</a>
+        </p>
         {/* Register — added in Feature 9.2 */}
       </div>
     </div>
