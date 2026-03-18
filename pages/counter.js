@@ -1,14 +1,19 @@
 import { useState, useEffect, useRef, memo, useCallback } from 'react';
-import { LiveSessionFactory, GroupFactory, ClubFactory, UserFactory, BadgeFactory, CounterBadgeFactory, ClubMemberFactory, UserMemberLinkFactory } from '../constants/dbSchema';
 import {
-  Hash, ChevronRight, Timer, Square, History as HistoryIcon,
+  LiveSessionFactory, GroupFactory, ClubFactory, UserFactory,
+  BadgeFactory, CounterBadgeFactory, ClubMemberFactory, UserMemberLinkFactory,
+} from '../constants/dbSchema';
+import {
+  Hash, Timer, Square, History as HistoryIcon,
   Play, Clock, Users, Building2, Trophy, ArrowLeft,
-  Award, Check, X, Target, Star, Zap, Medal
+  Award, Check, X, Zap, Medal,
 } from 'lucide-react';
+import { db } from '../firebaseConfig';
+import { getDocs, collection, query, where } from 'firebase/firestore';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DISCIPLINE_DURATION = { '30sec': 30, '2min': 120, '3min': 180 };
-const AUTO_STOP_IDLE_MS = 15000;
+const AUTO_STOP_IDLE_MS   = 15000;
 
 const COOKIE_KEY = 'msc_uid';
 const getCookie = () => {
@@ -18,20 +23,20 @@ const getCookie = () => {
 };
 
 if (typeof document !== 'undefined') {
-  const styleId = 'newcounter-keyframes';
+  const styleId = 'counter-keyframes';
   if (!document.getElementById(styleId)) {
     const style = document.createElement('style');
-    style.id = styleId;
+    style.id    = styleId;
     style.textContent = `
-      @keyframes sparkFlyA { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(-120px,-200px) scale(0); opacity:0; } }
-      @keyframes sparkFlyB { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(80px,-250px) scale(0); opacity:0; } }
-      @keyframes sparkFlyC { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(150px,-180px) scale(0); opacity:0; } }
-      @keyframes sparkFlyD { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(-80px,-220px) scale(0); opacity:0; } }
-      @keyframes sparkFlyE { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(30px,-300px) scale(0); opacity:0; } }
-      @keyframes sparkFlyF { 0% { transform:translate(0,0) scale(1); opacity:1; } 100% { transform:translate(-200px,-150px) scale(0); opacity:0; } }
-      @keyframes pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.08); } }
-      @keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
-      @keyframes counterPop { 0% { transform:scale(1); } 50% { transform:scale(1.15); } 100% { transform:scale(1); } }
+      @keyframes sparkFlyA { 0%{transform:translate(0,0) scale(1);opacity:1} 100%{transform:translate(-120px,-200px) scale(0);opacity:0} }
+      @keyframes sparkFlyB { 0%{transform:translate(0,0) scale(1);opacity:1} 100%{transform:translate(80px,-250px) scale(0);opacity:0} }
+      @keyframes sparkFlyC { 0%{transform:translate(0,0) scale(1);opacity:1} 100%{transform:translate(150px,-180px) scale(0);opacity:0} }
+      @keyframes sparkFlyD { 0%{transform:translate(0,0) scale(1);opacity:1} 100%{transform:translate(-80px,-220px) scale(0);opacity:0} }
+      @keyframes sparkFlyE { 0%{transform:translate(0,0) scale(1);opacity:1} 100%{transform:translate(30px,-300px) scale(0);opacity:0} }
+      @keyframes sparkFlyF { 0%{transform:translate(0,0) scale(1);opacity:1} 100%{transform:translate(-200px,-150px) scale(0);opacity:0} }
+      @keyframes pulse     { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+      @keyframes fadeInUp  { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes spin      { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
     `;
     document.head.appendChild(style);
   }
@@ -41,27 +46,24 @@ const SPARK_ANIMS = ['sparkFlyA','sparkFlyB','sparkFlyC','sparkFlyD','sparkFlyE'
 
 // ─── Celebration Overlay ──────────────────────────────────────────────────────
 function CelebrationOverlay({ type, data, onAccept, onDecline }) {
-  const isBadge  = type === 'badge';
-  const isRecord = type === 'record';
+  const isBadge     = type === 'badge';
   const accentColor = isBadge ? '#f59e0b' : '#facc15';
-  const Icon = isBadge ? Medal : Award;
+  const Icon        = isBadge ? Medal : Award;
 
   return (
     <>
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 3000, overflow: 'hidden' }}>
         {Array.from({ length: 24 }).map((_, i) => (
           <div key={i} style={{
-            position: 'absolute',
-            left: `${10 + (i * 3.5) % 80}%`, top: `${15 + (i * 7) % 70}%`,
-            width: `${5 + (i % 4) * 3}px`, height: `${5 + (i % 4) * 3}px`,
-            borderRadius: '50%',
+            position: 'absolute', left: `${10 + (i * 3.5) % 80}%`, top: `${15 + (i * 7) % 70}%`,
+            width: `${5 + (i % 4) * 3}px`, height: `${5 + (i % 4) * 3}px`, borderRadius: '50%',
             backgroundColor: ['#facc15','#f97316','#ef4444','#22c55e','#60a5fa','#a78bfa'][i % 6],
             animation: `${SPARK_ANIMS[i % 6]} ${0.9 + (i % 5) * 0.2}s ease-out ${(i % 8) * 0.12}s forwards`,
           }} />
         ))}
       </div>
-      <div style={styles.modalOverlay}>
-        <div style={{ ...styles.modalContent, borderColor: accentColor, animation: 'fadeInUp 0.4s ease-out' }}>
+      <div style={st.modalOverlay}>
+        <div style={{ ...st.modalContent, borderColor: accentColor, animation: 'fadeInUp 0.4s ease-out' }}>
           {isBadge && data.badgeImageUrl ? (
             <img src={data.badgeImageUrl} alt={data.badgeName} style={{ width: '90px', height: '90px', borderRadius: '50%', objectFit: 'cover', margin: '0 auto 16px', display: 'block', border: `3px solid ${accentColor}` }} />
           ) : (
@@ -97,12 +99,8 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
             <>
               <p style={{ color: '#cbd5e1', textAlign: 'center', fontSize: '14px', marginBottom: '20px' }}>Wil je dit als officieel record registreren?</p>
               <div style={{ display: 'flex', gap: '12px' }}>
-                <button onClick={onAccept} style={{ flex: 1, padding: '14px', backgroundColor: '#22c55e', border: 'none', borderRadius: '10px', color: 'white', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                  <Check size={20} /> JA
-                </button>
-                <button onClick={onDecline} style={{ flex: 1, padding: '14px', backgroundColor: '#475569', border: 'none', borderRadius: '10px', color: 'white', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                  <X size={20} /> NEE
-                </button>
+                <button onClick={onAccept}  style={{ flex: 1, padding: '14px', backgroundColor: '#22c55e', border: 'none', borderRadius: '10px', color: 'white', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}><Check size={20} /> JA</button>
+                <button onClick={onDecline} style={{ flex: 1, padding: '14px', backgroundColor: '#475569', border: 'none', borderRadius: '10px', color: 'white', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}><X size={20} /> NEE</button>
               </div>
             </>
           )}
@@ -114,16 +112,16 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
 
 // ─── Isolated Timer ────────────────────────────────────────────────────────────
 const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished }) => {
-  const [display, setDisplay] = useState('0:00');
+  const [display,    setDisplay]    = useState('0:00');
   const [isOvertime, setIsOvertime] = useState(false);
 
   useEffect(() => {
     if (!isRecording && !isFinished) { setDisplay('0:00'); setIsOvertime(false); return; }
     const interval = setInterval(() => {
       if (isRecording && startTime) {
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const elapsed   = Math.floor((Date.now() - startTime) / 1000);
         const remaining = durationSeconds - elapsed;
-        const abs = Math.abs(remaining);
+        const abs  = Math.abs(remaining);
         const mins = Math.floor(abs / 60);
         const secs = abs % 60;
         setIsOvertime(remaining < 0);
@@ -141,80 +139,146 @@ const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished })
   );
 });
 
-// ─── Main Component ────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ════════════════════════════════════════════════════════════════════════════
 export default function CounterPage() {
-  const [clubs, setClubs] = useState([]);
-  const [groups, setGroups] = useState([]);
-  // Feature 8.3: skippers now have { id (=memberId), memberId, isSkipper, isCoach, … }
-  const [skippers, setSkippers] = useState([]);
-  // Feature 8.4: we also need ClubMember profiles to get names
-  const [clubMembers, setClubMembers] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [selectedClubId, setSelectedClubId] = useState('');
-  const [selectedGroupId, setSelectedGroupId] = useState('');
-  // Feature 8.3: selectedSkipper now carries { memberId, firstName, lastName, clubId }
-  const [selectedSkipper, setSelectedSkipper] = useState(null);
-
-  const [showConfigModal, setShowConfigModal] = useState(false);
-  const [sessionType, setSessionType] = useState('Training');
-  const [discipline, setDiscipline] = useState('30sec');
-
-  const [currentData, setCurrentData] = useState(null);
-  const [liveBpm, setLiveBpm] = useState(0);
-  const [sessionHistory, setSessionHistory] = useState([]);
-  const [bestRecord, setBestRecord] = useState(null);
-
-  const [pendingQueue, setPendingQueue] = useState([]);
-  const [isProcessingQueue, setIsProcessingQueue] = useState(false);
-
+  // ── Current user (counter) ───────────────────────────────────────────────
   const [counterUser, setCounterUser] = useState(null);
-  const [newlyEarnedBadges, setNewlyEarnedBadges] = useState([]);
 
-  const telemetryRef    = useRef([]);
-  const sessionStartRef = useRef(null);
+  // ── Member-scoped club/group data ────────────────────────────────────────
+  // The clubs and groups the CURRENT USER belongs to (as a member/coach)
+  const [memberClubs,  setMemberClubs]  = useState([]); // [{ id, name, logoUrl, … }]
+  const [memberGroups, setMemberGroups] = useState([]); // groups in the selected club that the user is in
+  const [bootstrapDone, setBootstrapDone] = useState(false);
+
+  // Selection state
+  const [selectedClubId,  setSelectedClubId]  = useState('');
+  const [selectedGroupId, setSelectedGroupId] = useState('');
+
+  // Skippers in the selected group (all members of that group, not just the current user)
+  const [skippers,    setSkippers]    = useState([]); // group member docs { memberId, isSkipper, … }
+  const [clubMembers, setClubMembers] = useState([]); // ClubMember profiles for name resolution
+
+  // Selected skipper to count for
+  const [selectedSkipper, setSelectedSkipper] = useState(null); // { memberId, clubId, firstName, lastName, rtdbUid }
+
+  // Session config modal
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [sessionType,     setSessionType]     = useState('Training');
+  const [discipline,      setDiscipline]      = useState('30sec');
+
+  // Live session
+  const [currentData,   setCurrentData]   = useState(null);
+  const [liveBpm,       setLiveBpm]       = useState(0);
+  const [sessionHistory,setSessionHistory]= useState([]);
+  const [bestRecord,    setBestRecord]    = useState(null);
+
+  // Post-session queue
+  const [pendingQueue,       setPendingQueue]       = useState([]);
+  const [isProcessingQueue,  setIsProcessingQueue]  = useState(false);
+  const [newlyEarnedBadges,  setNewlyEarnedBadges]  = useState([]);
+
+  const telemetryRef     = useRef([]);
+  const sessionStartRef  = useRef(null);
   const autoStopTimerRef = useRef(null);
 
+  // ── Bootstrap: load counter user + their club/group memberships ──────────
   useEffect(() => {
-    const unsubClubs = ClubFactory.getAll(setClubs);
-    const unsubUsers = UserFactory.getAll(setUsers);
-    return () => { unsubClubs(); unsubUsers(); };
+    const uid = getCookie();
+    if (!uid) { setBootstrapDone(true); return; }
+
+    // Load user profile for display + badge awarding
+    UserFactory.get(uid).then(snap => {
+      if (snap.exists()) setCounterUser({ id: uid, ...snap.data() });
+    });
+
+    // Resolve which clubs/groups this user is a member of via UserMemberLink
+    const unsub = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
+      if (profiles.length === 0) { setBootstrapDone(true); return; }
+
+      // Collect unique clubIds the user belongs to
+      const clubIdSet = new Set(profiles.map(p => p.member.clubId));
+
+      // Fetch full club objects so we have names/logos
+      const allClubSnaps = await Promise.all(
+        [...clubIdSet].map(id => ClubFactory.getById(id))
+      );
+      const resolvedClubs = allClubSnaps
+        .filter(s => s.exists())
+        .map(s => ({ id: s.id, ...s.data() }));
+
+      setMemberClubs(resolvedClubs);
+      setBootstrapDone(true);
+    });
+    return () => unsub();
   }, []);
 
+  // ── Auto-select club if only one ──────────────────────────────────────────
+  useEffect(() => {
+    if (!bootstrapDone || memberClubs.length === 0) return;
+    if (memberClubs.length === 1) {
+      setSelectedClubId(memberClubs[0].id);
+    }
+  }, [bootstrapDone, memberClubs]);
+
+  // ── Load groups the user is in for the selected club ─────────────────────
   useEffect(() => {
     if (!selectedClubId) return;
-    const unsub = GroupFactory.getGroupsByClub(selectedClubId, (data) => {
-      setGroups(data); setSelectedGroupId(''); setSkippers([]); setClubMembers([]);
+    setSelectedGroupId('');
+    setSkippers([]);
+    setClubMembers([]);
+
+    const uid = getCookie();
+    if (!uid) return;
+
+    // Get all groups in this club, then filter to only those the user is a member of
+    const unsub = GroupFactory.getGroupsByClub(selectedClubId, async (allGroups) => {
+      const memberGroupIds = new Set();
+      await Promise.all(
+        allGroups.map(group =>
+          new Promise(resolve => {
+            const unsub2 = GroupFactory.getMembersByGroup(selectedClubId, group.id, members => {
+              const isMember = members.some(m => (m.memberId || m.id) === uid);
+              if (isMember) memberGroupIds.add(group.id);
+              unsub2();
+              resolve();
+            });
+          })
+        )
+      );
+      const filteredGroups = allGroups.filter(g => memberGroupIds.has(g.id));
+      setMemberGroups(filteredGroups);
+
+      // Auto-select if only one group
+      if (filteredGroups.length === 1) {
+        setSelectedGroupId(filteredGroups[0].id);
+      }
     });
     return () => unsub();
   }, [selectedClubId]);
 
+  // ── Load all skippers in the selected group ───────────────────────────────
+  // We show ALL skippers in the group, not just the current user
   useEffect(() => {
     if (!selectedClubId || !selectedGroupId) return;
-    // Feature 8.3: group members are now keyed by memberId
-    const unsubGroup = GroupFactory.getSkippersByGroup(selectedClubId, selectedGroupId, (data) => {
-      setSkippers(data);
-    });
-    // Feature 8.4: also subscribe to ClubMember profiles for names
-    const unsubMembers = ClubMemberFactory.getAll(selectedClubId, setClubMembers);
-    return () => { unsubGroup(); unsubMembers(); };
+    const u1 = GroupFactory.getSkippersByGroup(selectedClubId, selectedGroupId, setSkippers);
+    const u2 = ClubMemberFactory.getAll(selectedClubId, setClubMembers);
+    return () => { u1(); u2(); };
   }, [selectedClubId, selectedGroupId]);
 
-  // Feature 8.4: live session still keyed by uid (RTDB unchanged)
-  // but we need to resolve uid from the UserMemberLink for the selected skipper
+  // ── Live session subscription ─────────────────────────────────────────────
   useEffect(() => {
-    if (!selectedSkipper) return;
-    // selectedSkipper.rtdbUid is the uid used in live_sessions (resolved at selection time)
-    const uid = selectedSkipper.rtdbUid;
-    if (!uid) return;
-    const unsubLive = LiveSessionFactory.subscribeToLive(uid, (data) => {
+    if (!selectedSkipper?.rtdbUid) return;
+    const unsub = LiveSessionFactory.subscribeToLive(selectedSkipper.rtdbUid, data => {
       if (!data) return;
       setLiveBpm(data.bpm || 0);
       setCurrentData(data.session || null);
     });
-    return () => unsubLive();
+    return () => unsub();
   }, [selectedSkipper]);
 
-  // Feature 8.4: session history now from ClubMemberFactory
+  // ── Session history ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedSkipper) return;
     const { clubId, memberId } = selectedSkipper;
@@ -222,7 +286,7 @@ export default function CounterPage() {
     return () => unsub();
   }, [selectedSkipper]);
 
-  // Feature 8.4: records now from ClubMemberFactory
+  // ── Best record ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedSkipper) return;
     const { clubId, memberId } = selectedSkipper;
@@ -230,6 +294,7 @@ export default function CounterPage() {
     return () => unsub();
   }, [selectedSkipper, discipline, sessionType]);
 
+  // ── Auto-stop on idle ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!currentData?.isActive) { clearTimeout(autoStopTimerRef.current); return; }
     clearTimeout(autoStopTimerRef.current);
@@ -237,24 +302,36 @@ export default function CounterPage() {
     return () => clearTimeout(autoStopTimerRef.current);
   }, [currentData?.lastStepTime, currentData?.isActive]);
 
+  // ── Trigger post-session flow when finished ───────────────────────────────
   useEffect(() => {
     if (currentData?.isFinished && !isProcessingQueue && pendingQueue.length === 0) {
       triggerPostSessionFlow();
     }
   }, [currentData?.isFinished]);
 
-  useEffect(() => {
-    if (!users.length) return;
-    const uid = getCookie();
-    if (!uid) return;
-    const u = users.find(x => x.id === uid);
-    if (u) setCounterUser(u);
-  }, [users]);
+  // ── Resolve skipper profile + RTDB uid ───────────────────────────────────
+  const resolveSkipperProfile = async (groupMember) => {
+    const memberId  = groupMember.memberId || groupMember.id;
+    const profile   = clubMembers.find(m => m.id === memberId);
+    const firstName = profile?.firstName || '?';
+    const lastName  = profile?.lastName  || '';
 
-  // ─── Handlers ────────────────────────────────────────────────────────────────
+    // Resolve uid for RTDB via UserMemberLink
+    const linksSnap = await getDocs(
+      query(
+        collection(db, 'userMemberLinks'),
+        where('clubId',       '==', selectedClubId),
+        where('memberId',     '==', memberId),
+        where('relationship', '==', 'self'),
+      )
+    );
+    const rtdbUid = linksSnap.empty ? null : linksSnap.docs[0].data().uid;
+    return { memberId, clubId: selectedClubId, firstName, lastName, rtdbUid };
+  };
 
+  // ── Handlers ─────────────────────────────────────────────────────────────
   const handleStartSession = async () => {
-    telemetryRef.current = [];
+    telemetryRef.current    = [];
     sessionStartRef.current = null;
     await LiveSessionFactory.startCounter(selectedSkipper.rtdbUid, discipline, sessionType);
     setShowConfigModal(false);
@@ -265,9 +342,9 @@ export default function CounterPage() {
     if (!sessionStartRef.current) sessionStartRef.current = Date.now();
     LiveSessionFactory.incrementSteps(selectedSkipper.rtdbUid, liveBpm, sessionStartRef.current);
     telemetryRef.current.push({
-      time: Date.now() - sessionStartRef.current,
-      steps: (currentData?.steps || 0) + 1,
-      heartRate: liveBpm
+      time:      Date.now() - sessionStartRef.current,
+      steps:     (currentData?.steps || 0) + 1,
+      heartRate: liveBpm,
     });
   };
 
@@ -279,47 +356,41 @@ export default function CounterPage() {
 
   const triggerPostSessionFlow = async () => {
     if (!selectedSkipper || !currentData) return;
-
     const { clubId, memberId } = selectedSkipper;
-    const score    = currentData.steps || 0;
-    const disc     = currentData.discipline  || discipline;
-    const sType    = currentData.sessionType || sessionType;
+    const score     = currentData.steps || 0;
+    const disc      = currentData.discipline  || discipline;
+    const sType     = currentData.sessionType || sessionType;
     const telemetry = telemetryRef.current;
     const bpmValues = telemetry.map(t => t.heartRate).filter(b => b > 0);
-    const avgBpm = bpmValues.length ? Math.round(bpmValues.reduce((a, b) => a + b, 0) / bpmValues.length) : liveBpm;
-    const maxBpm = bpmValues.length ? Math.max(...bpmValues) : liveBpm;
+    const avgBpm    = bpmValues.length ? Math.round(bpmValues.reduce((a, b) => a + b, 0) / bpmValues.length) : liveBpm;
+    const maxBpm    = bpmValues.length ? Math.max(...bpmValues) : liveBpm;
 
-    // Feature 8.4: save session history to ClubMember path
     try {
       await ClubMemberFactory.saveSessionHistory(clubId, memberId, {
         discipline: disc, sessionType: sType, score, avgBpm, maxBpm,
-        sessionStart: currentData.startTime || sessionStartRef.current,
+        sessionStart:  currentData.startTime || sessionStartRef.current,
         telemetry,
         countedBy:     counterUser?.id   || null,
         countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
       });
     } catch (e) { console.error('Failed to save session history:', e); }
 
-    // Feature 8.4: fresh history from ClubMember path
     const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, memberId);
 
-    // Feature 8.4: badge check on ClubMember path
     try {
       const newBadges = await BadgeFactory.checkAndAward(
         clubId, memberId,
         { score, discipline: disc, sessionType: sType },
-        freshHistory
+        freshHistory,
       );
       if (newBadges.length > 0) setNewlyEarnedBadges(newBadges);
     } catch (e) { console.error('Badge check failed:', e); }
 
     if (counterUser) {
-      try {
-        await CounterBadgeFactory.checkAndAward(counterUser.id, { discipline: disc, sessionType: sType, score });
-      } catch (e) { console.error('Counter badge check failed:', e); }
+      try { await CounterBadgeFactory.checkAndAward(counterUser.id, { discipline: disc, sessionType: sType, score }); }
+      catch (e) { console.error('Counter badge check failed:', e); }
     }
 
-    // Feature 8.4: record check on ClubMember path
     const previousBest = bestRecord?.score || 0;
     if (score > previousBest) {
       setPendingQueue([{ type: 'record', data: { score, discipline: disc, sessionType: sType, previousBest, telemetry } }]);
@@ -337,8 +408,6 @@ export default function CounterPage() {
     }
     advanceQueue();
   };
-
-  const handleQueueDecline = () => advanceQueue();
 
   const advanceQueue = () => {
     setPendingQueue(prev => {
@@ -369,84 +438,144 @@ export default function CounterPage() {
     setNewlyEarnedBadges([]);
   };
 
-  // ─── Render helpers ───────────────────────────────────────────────────────────
+  // ── Derived ───────────────────────────────────────────────────────────────
   const isRecording  = currentData?.isActive === true;
   const isFinished   = currentData?.isFinished === true && !currentData?.isActive;
   const isStartklaar = currentData !== null && currentData !== undefined && !isRecording && !isFinished;
 
-  // Helper: resolve ClubMember name + rtdbUid for skipper selection
-  // Group member doc has { memberId, isSkipper, isCoach }
-  // ClubMember profile has { firstName, lastName }
-  // UserMemberLink gives us the uid for RTDB
-  const resolveSkipperProfile = async (groupMember) => {
-    const memberId = groupMember.memberId || groupMember.id;
-    const profile  = clubMembers.find(m => m.id === memberId);
-    const firstName = profile?.firstName || '?';
-    const lastName  = profile?.lastName  || '';
+  const showClubPicker  = memberClubs.length > 1;
+  const showGroupPicker = memberGroups.length > 1;
+  const selectedClub    = memberClubs.find(c => c.id === selectedClubId);
+  const selectedGroup   = memberGroups.find(g => g.id === selectedGroupId);
 
-    // Resolve uid for RTDB — find a "self" link for this member
-    const { getDocs, collection, query, where } = await import('firebase/firestore');
-    const { db } = await import('../firebaseConfig');
-    const linksSnap = await getDocs(
-      query(collection(db, 'userMemberLinks'),
-        where('clubId',   '==', selectedClubId),
-        where('memberId', '==', memberId),
-        where('relationship', '==', 'self')
-      )
+  // ── Loading state ─────────────────────────────────────────────────────────
+  if (!bootstrapDone) {
+    return (
+      <div style={{ ...st.container, alignItems: 'center', justifyContent: 'center' }}>
+        <div style={st.spinner} />
+      </div>
     );
-    const rtdbUid = linksSnap.empty ? null : linksSnap.docs[0].data().uid;
+  }
 
-    return { memberId, clubId: selectedClubId, firstName, lastName, rtdbUid };
-  };
+  // ── No memberships ────────────────────────────────────────────────────────
+  if (bootstrapDone && memberClubs.length === 0) {
+    return (
+      <div style={{ ...st.container, alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
+        <Users size={40} color="#334155" />
+        <p style={{ color: '#64748b', fontSize: '14px', textAlign: 'center', maxWidth: '280px' }}>
+          Je bent nog geen lid van een club. Vraag toegang aan via je profiel.
+        </p>
+        <a href="/" style={{ padding: '10px 20px', backgroundColor: '#3b82f6', color: 'white', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '14px' }}>
+          Naar profiel
+        </a>
+      </div>
+    );
+  }
 
-  // ─── Screen 1: Skipper Selection ──────────────────────────────────────────────
+  // ── Screen 1: Skipper Selection ───────────────────────────────────────────
   if (!selectedSkipper) {
     return (
-      <div style={styles.container}>
-        <div style={styles.header}>
+      <div style={st.container}>
+        <div style={st.header}>
           <h1 style={{ fontSize: '20px', display: 'flex', alignItems: 'center', gap: '10px', margin: 0 }}>
             <Users size={24} color="#3b82f6" /> Skipper Selectie
           </h1>
         </div>
-        <div style={styles.selectionPanel}>
-          <div style={styles.field}>
-            <label style={styles.label}><Building2 size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />1. Selecteer Club</label>
-            <select style={styles.select} value={selectedClubId} onChange={(e) => setSelectedClubId(e.target.value)}>
-              <option value="">-- Kies een club --</option>
-              {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div style={styles.field}>
-            <label style={styles.label}><Users size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />2. Selecteer Groep</label>
-            <select style={styles.select} value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)} disabled={!selectedClubId}>
-              <option value="">-- Kies een groep --</option>
-              {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
-          </div>
-          <div style={{ marginTop: '30px' }}>
-            <label style={styles.label}><Hash size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />3. Kies de Skipper</label>
-            {selectedGroupId ? (
-              skippers.length > 0 ? (
-                <div style={styles.grid}>
+        <div style={st.selectionPanel}>
+
+          {/* Club picker — only when user is in multiple clubs */}
+          {showClubPicker && (
+            <div style={st.field}>
+              <label style={st.label}>
+                <Building2 size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+                1. Selecteer Club
+              </label>
+              <div style={st.clubGrid}>
+                {memberClubs.map(club => (
+                  <button
+                    key={club.id}
+                    style={{ ...st.clubCard, ...(selectedClubId === club.id ? st.clubCardActive : {}) }}
+                    onClick={() => setSelectedClubId(club.id)}
+                  >
+                    {club.logoUrl
+                      ? <img src={club.logoUrl} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', marginBottom: '8px' }} alt={club.name} />
+                      : <Building2 size={28} color={selectedClubId === club.id ? '#3b82f6' : '#475569'} style={{ marginBottom: '8px' }} />
+                    }
+                    <div style={{ fontSize: '13px', fontWeight: '600', textAlign: 'center' }}>{club.name}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Single-club context label (no picker, just a subtle indicator) */}
+          {!showClubPicker && selectedClub && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '18px', padding: '8px 12px', backgroundColor: '#1e293b', borderRadius: '8px', border: '1px solid #334155' }}>
+              {selectedClub.logoUrl
+                ? <img src={selectedClub.logoUrl} style={{ width: '22px', height: '22px', borderRadius: '5px', objectFit: 'cover' }} alt={selectedClub.name} />
+                : <Building2 size={16} color="#475569" />
+              }
+              <span style={{ fontSize: '13px', color: '#64748b' }}>{selectedClub.name}</span>
+            </div>
+          )}
+
+          {/* Group picker — only when user is in multiple groups */}
+          {selectedClubId && showGroupPicker && (
+            <div style={st.field}>
+              <label style={st.label}>
+                <Users size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+                {showClubPicker ? '2.' : '1.'} Selecteer Groep
+              </label>
+              <div style={st.groupGrid}>
+                {memberGroups.map(group => (
+                  <button
+                    key={group.id}
+                    style={{ ...st.groupCard, ...(selectedGroupId === group.id ? st.groupCardActive : {}) }}
+                    onClick={() => setSelectedGroupId(group.id)}
+                  >
+                    <Users size={22} color={selectedGroupId === group.id ? '#22c55e' : '#475569'} style={{ marginBottom: '6px' }} />
+                    <div style={{ fontSize: '13px', fontWeight: '600', textAlign: 'center' }}>{group.name}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Single-group context label */}
+          {selectedClubId && !showGroupPicker && selectedGroup && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '18px', padding: '8px 12px', backgroundColor: '#1e293b', borderRadius: '8px', border: '1px solid #334155' }}>
+              <Users size={16} color="#475569" />
+              <span style={{ fontSize: '13px', color: '#64748b' }}>{selectedGroup.name}</span>
+            </div>
+          )}
+
+          {/* Skipper grid */}
+          {selectedClubId && selectedGroupId && (
+            <div style={st.field}>
+              <label style={st.label}>
+                <Hash size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+                {showClubPicker && showGroupPicker ? '3.' : showClubPicker || showGroupPicker ? '2.' : '1.'} Kies de Skipper
+              </label>
+              {skippers.length > 0 ? (
+                <div style={st.grid}>
                   {skippers.map(s => {
-                    // Feature 8.3: s.id is now memberId; resolve name from clubMembers
-                    const memberId = s.memberId || s.id;
-                    const profile  = clubMembers.find(m => m.id === memberId);
+                    const memberId  = s.memberId || s.id;
+                    const profile   = clubMembers.find(m => m.id === memberId);
                     const firstName = profile?.firstName || '?';
                     const lastName  = profile?.lastName  || '';
-                    const initials  = `${firstName[0] || '?'}${lastName[0] || ''}`;
+                    const initials  = `${firstName[0] || '?'}${lastName[0] || ''}`.toUpperCase();
                     return (
                       <button
                         key={memberId}
-                        style={styles.card}
+                        style={st.card}
                         onClick={async () => {
                           const resolved = await resolveSkipperProfile(s);
                           setSelectedSkipper(resolved);
                           setShowConfigModal(true);
                         }}
                       >
-                        <div style={styles.avatar}>{initials.toUpperCase()}</div>
-                        <div style={{ marginTop: '10px', fontSize: '14px', fontWeight: '600' }}>
+                        <div style={st.avatar}>{initials}</div>
+                        <div style={{ marginTop: '10px', fontSize: '14px', fontWeight: '600', textAlign: 'center' }}>
                           {firstName} {lastName}
                         </div>
                       </button>
@@ -454,41 +583,53 @@ export default function CounterPage() {
                   })}
                 </div>
               ) : (
-                <p style={styles.infoText}>Geen actieve skippers in deze groep.</p>
-              )
-            ) : (
-              <p style={styles.infoText}>Selecteer eerst een club en groep.</p>
-            )}
-          </div>
+                <p style={st.infoText}>Geen actieve skippers in deze groep.</p>
+              )}
+            </div>
+          )}
+
+          {/* Prompt when no group selected yet and group picker is shown */}
+          {selectedClubId && showGroupPicker && !selectedGroupId && (
+            <p style={st.infoText}>Selecteer een groep om de skippers te zien.</p>
+          )}
+
+          {/* Prompt when club picker is shown but no club selected */}
+          {showClubPicker && !selectedClubId && (
+            <p style={st.infoText}>Selecteer een club om verder te gaan.</p>
+          )}
         </div>
       </div>
     );
   }
 
-  // ─── Screen 2: Config Modal ───────────────────────────────────────────────────
+  // ── Screen 2: Config Modal ────────────────────────────────────────────────
   if (showConfigModal) {
     return (
-      <div style={styles.modalOverlay}>
-        <div style={{ ...styles.modalContent, fontFamily: 'sans-serif' }}>
+      <div style={st.modalOverlay}>
+        <div style={{ ...st.modalContent, fontFamily: 'sans-serif' }}>
           <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-            <div style={{ ...styles.avatar, margin: '0 auto 12px', width: '60px', height: '60px', fontSize: '20px' }}>
+            <div style={{ ...st.avatar, margin: '0 auto 12px', width: '60px', height: '60px', fontSize: '20px' }}>
               {selectedSkipper.firstName[0]}{selectedSkipper.lastName[0]}
             </div>
             <h2 style={{ margin: 0, fontSize: '22px', color: '#f1f5f9' }}>{selectedSkipper.firstName} {selectedSkipper.lastName}</h2>
-            <p style={{ color: '#94a3b8', margin: '4px 0 0', fontFamily: 'sans-serif' }}>Kies sessie-instellingen</p>
+            <p style={{ color: '#94a3b8', margin: '4px 0 0' }}>Kies sessie-instellingen</p>
           </div>
 
-          <label style={{ ...styles.label, fontFamily: 'sans-serif' }}>Type sessie</label>
-          <div style={styles.toggleGroup}>
+          <label style={{ ...st.label, fontFamily: 'sans-serif' }}>Type sessie</label>
+          <div style={st.toggleGroup}>
             {['Training', 'Wedstrijd'].map(t => (
-              <button key={t} onClick={() => setSessionType(t)} style={{ ...styles.toggleBtn, backgroundColor: sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#0f172a', borderColor: sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#334155' }}>{t}</button>
+              <button key={t} onClick={() => setSessionType(t)} style={{ ...st.toggleBtn, backgroundColor: sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#0f172a', borderColor: sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#334155' }}>
+                {t}
+              </button>
             ))}
           </div>
 
-          <label style={{ ...styles.label, fontFamily: 'sans-serif' }}>Onderdeel</label>
-          <div style={styles.toggleGroup}>
+          <label style={{ ...st.label, fontFamily: 'sans-serif' }}>Onderdeel</label>
+          <div style={st.toggleGroup}>
             {['30sec', '2min', '3min'].map(d => (
-              <button key={d} onClick={() => setDiscipline(d)} style={{ ...styles.toggleBtn, backgroundColor: discipline === d ? '#3b82f6' : '#0f172a', borderColor: discipline === d ? '#3b82f6' : '#334155' }}>{d}</button>
+              <button key={d} onClick={() => setDiscipline(d)} style={{ ...st.toggleBtn, backgroundColor: discipline === d ? '#3b82f6' : '#0f172a', borderColor: discipline === d ? '#3b82f6' : '#334155' }}>
+                {d}
+              </button>
             ))}
           </div>
 
@@ -499,24 +640,31 @@ export default function CounterPage() {
             </div>
           )}
 
-          <button onClick={handleStartSession} style={styles.mainStartBtn}><Play size={20} fill="white" /> SESSIE STARTEN</button>
-          <button onClick={() => { setSelectedSkipper(null); setShowConfigModal(false); }} style={{ ...styles.mainStartBtn, backgroundColor: 'transparent', border: '1px solid #334155', marginTop: '10px' }}>Annuleren</button>
+          <button onClick={handleStartSession} style={st.mainStartBtn}><Play size={20} fill="white" /> SESSIE STARTEN</button>
+          <button onClick={() => { setSelectedSkipper(null); setShowConfigModal(false); }} style={{ ...st.mainStartBtn, backgroundColor: 'transparent', border: '1px solid #334155', marginTop: '10px' }}>
+            Annuleren
+          </button>
         </div>
       </div>
     );
   }
 
-  // ─── Screen 3: Counter ────────────────────────────────────────────────────────
+  // ── Screen 3: Counter ─────────────────────────────────────────────────────
   return (
-    <div style={styles.container}>
+    <div style={st.container}>
       {isProcessingQueue && pendingQueue.length > 0 && (
-        <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={handleQueueDecline} />
+        <CelebrationOverlay
+          type={pendingQueue[0].type}
+          data={pendingQueue[0].data}
+          onAccept={handleQueueAccept}
+          onDecline={advanceQueue}
+        />
       )}
 
-      <div style={styles.activeHeader}>
-        <button style={styles.backBtn} onClick={handleReset}><ArrowLeft size={18} /> Andere skipper</button>
-        <div style={styles.userInfo}>
-          <div style={{ ...styles.avatar, width: '44px', height: '44px', fontSize: '15px' }}>
+      <div style={st.activeHeader}>
+        <button style={st.backBtn} onClick={handleReset}><ArrowLeft size={18} /> Andere skipper</button>
+        <div style={st.userInfo}>
+          <div style={{ ...st.avatar, width: '44px', height: '44px', fontSize: '15px' }}>
             {selectedSkipper.firstName[0]}{selectedSkipper.lastName[0]}
           </div>
           <div>
@@ -532,9 +680,19 @@ export default function CounterPage() {
           </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
-          <LiveTimer startTime={currentData?.startTime} durationSeconds={DISCIPLINE_DURATION[currentData?.discipline] || DISCIPLINE_DURATION[discipline]} isRecording={isRecording} isFinished={isFinished} />
+          <LiveTimer
+            startTime={currentData?.startTime}
+            durationSeconds={DISCIPLINE_DURATION[currentData?.discipline] || DISCIPLINE_DURATION[discipline]}
+            isRecording={isRecording}
+            isFinished={isFinished}
+          />
           <div style={{ fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {isRecording ? (<><span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'pulse 1s ease-in-out infinite', display: 'inline-block' }} /><span style={{ color: '#ef4444' }}>OPNAME</span></>) : isFinished ? (<span style={{ color: '#22c55e' }}>KLAAR</span>) : isStartklaar ? (<span style={{ color: '#facc15' }}>STARTKLAAR</span>) : (<span style={{ color: '#64748b' }}>WACHT</span>)}
+            {isRecording
+              ? <><span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'pulse 1s ease-in-out infinite', display: 'inline-block' }} /><span style={{ color: '#ef4444' }}>OPNAME</span></>
+              : isFinished   ? <span style={{ color: '#22c55e' }}>KLAAR</span>
+              : isStartklaar ? <span style={{ color: '#facc15' }}>STARTKLAAR</span>
+              :                <span style={{ color: '#64748b' }}>WACHT</span>
+            }
           </div>
         </div>
       </div>
@@ -563,72 +721,91 @@ export default function CounterPage() {
       )}
 
       <button
-        style={{ ...styles.counterButton, backgroundColor: isFinished ? '#1e293b' : isRecording ? '#1e3a5f' : '#1e293b', border: isRecording ? '3px solid #3b82f6' : isFinished ? '3px solid #22c55e' : '3px solid #334155', boxShadow: isRecording ? '0 0 60px rgba(59, 130, 246, 0.25)' : 'none', cursor: isFinished ? 'default' : 'pointer' }}
+        style={{
+          ...st.counterButton,
+          backgroundColor: isFinished ? '#1e293b' : isRecording ? '#1e3a5f' : '#1e293b',
+          border:      isRecording ? '3px solid #3b82f6' : isFinished ? '3px solid #22c55e' : '3px solid #334155',
+          boxShadow:   isRecording ? '0 0 60px rgba(59, 130, 246, 0.25)' : 'none',
+          cursor:      isFinished ? 'default' : 'pointer',
+        }}
         disabled={isFinished || !selectedSkipper}
-        onPointerDown={(e) => { if (!isFinished) { e.currentTarget.style.transform = 'scale(0.96)'; handleCountStep(); } }}
-        onPointerUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-        onPointerLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+        onPointerDown={e => { if (!isFinished) { e.currentTarget.style.transform = 'scale(0.96)'; handleCountStep(); } }}
+        onPointerUp={e   => { e.currentTarget.style.transform = 'scale(1)'; }}
+        onPointerLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
       >
-        <span style={styles.stepLabel}>STEPS</span>
+        <span style={st.stepLabel}>STEPS</span>
         <span style={{ fontSize: '100px', lineHeight: 1, fontWeight: '900' }}>{currentData?.steps ?? 0}</span>
-        {!isRecording && !isFinished && (<span style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>Tik om te starten</span>)}
+        {!isRecording && !isFinished && (
+          <span style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>Tik om te starten</span>
+        )}
       </button>
 
-      <div style={styles.controls}>
+      <div style={st.controls}>
         {isRecording ? (
-          <button style={styles.stopButton} onClick={handleStopSession}><Square size={18} fill="white" /> STOP</button>
+          <button style={st.stopButton} onClick={handleStopSession}><Square size={18} fill="white" /> STOP</button>
         ) : isFinished ? (
-          <button style={{ ...styles.stopButton, backgroundColor: '#3b82f6' }} onClick={handleNewSession}><Play size={18} fill="white" /> NIEUWE SESSIE</button>
+          <button style={{ ...st.stopButton, backgroundColor: '#3b82f6' }} onClick={handleNewSession}><Play size={18} fill="white" /> NIEUWE SESSIE</button>
         ) : isStartklaar ? (
           <>
             <div style={{ color: '#facc15', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}><Zap size={16} /> Eerste tik start de opname</div>
-            <button style={{ ...styles.stopButton, backgroundColor: '#3b82f6' }} onClick={handleNewSession}><Play size={18} fill="white" /> NIEUWE SESSIE</button>
+            <button style={{ ...st.stopButton, backgroundColor: '#3b82f6' }} onClick={handleNewSession}><Play size={18} fill="white" /> NIEUWE SESSIE</button>
           </>
         ) : (
           <div style={{ color: '#64748b', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}><Zap size={16} /> Selecteer een skipper</div>
         )}
       </div>
 
-      <div style={styles.historySection}>
+      <div style={st.historySection}>
         <h3 style={{ fontSize: '14px', color: '#94a3b8', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}><HistoryIcon size={16} /> Recente sessies</h3>
         {sessionHistory.slice(0, 5).map((item, idx) => (
-          <div key={idx} style={styles.historyItem}>
+          <div key={idx} style={st.historyItem}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', backgroundColor: item.sessionType === 'Wedstrijd' ? '#ef444422' : '#3b82f622', color: item.sessionType === 'Wedstrijd' ? '#ef4444' : '#60a5fa', border: `1px solid ${item.sessionType === 'Wedstrijd' ? '#ef444440' : '#3b82f640'}` }}>{item.sessionType || 'Training'}</span>
+              <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', backgroundColor: item.sessionType === 'Wedstrijd' ? '#ef444422' : '#3b82f622', color: item.sessionType === 'Wedstrijd' ? '#ef4444' : '#60a5fa', border: `1px solid ${item.sessionType === 'Wedstrijd' ? '#ef444440' : '#3b82f640'}` }}>
+                {item.sessionType || 'Training'}
+              </span>
               <span style={{ color: '#94a3b8', fontSize: '12px' }}>{item.discipline}</span>
             </div>
             <span style={{ fontWeight: 'bold', color: '#60a5fa', fontSize: '16px' }}>{item.score} <span style={{ fontSize: '11px', color: '#64748b' }}>steps</span></span>
           </div>
         ))}
-        {sessionHistory.length === 0 && (<p style={{ color: '#475569', fontSize: '13px', textAlign: 'center' }}>Nog geen sessies.</p>)}
+        {sessionHistory.length === 0 && (
+          <p style={{ color: '#475569', fontSize: '13px', textAlign: 'center' }}>Nog geen sessies.</p>
+        )}
       </div>
     </div>
   );
 }
 
-const styles = {
-  container: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
-  header: { width: '100%', maxWidth: '500px', padding: '16px 0', borderBottom: '1px solid #1e293b', marginBottom: '24px' },
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const st = {
+  container:    { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
+  header:       { width: '100%', maxWidth: '500px', padding: '16px 0', borderBottom: '1px solid #1e293b', marginBottom: '24px' },
   selectionPanel: { width: '100%', maxWidth: '500px' },
-  field: { marginBottom: '20px' },
-  label: { display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px', fontWeight: '600' },
-  select: { width: '100%', padding: '12px', borderRadius: '8px', backgroundColor: '#1e293b', border: '1px solid #334155', color: 'white', fontSize: '16px' },
-  grid: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' },
-  card: { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.2s' },
-  avatar: { width: '50px', height: '50px', backgroundColor: '#3b82f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' },
-  infoText: { textAlign: 'center', color: '#64748b', fontSize: '14px', marginTop: '20px' },
+  spinner:      { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
+  field:        { marginBottom: '24px' },
+  label:        { display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '10px', fontWeight: '600' },
+  clubGrid:     { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' },
+  clubCard:     { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px 12px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.15s' },
+  clubCardActive: { borderColor: '#3b82f6', backgroundColor: '#1e3a5f' },
+  groupGrid:    { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' },
+  groupCard:    { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px 12px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.15s' },
+  groupCardActive: { borderColor: '#22c55e', backgroundColor: '#052e16' },
+  grid:         { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' },
+  card:         { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.2s' },
+  avatar:       { width: '50px', height: '50px', backgroundColor: '#3b82f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' },
+  infoText:     { textAlign: 'center', color: '#64748b', fontSize: '14px', marginTop: '20px' },
   modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.92)', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', zIndex: 100 },
   modalContent: { backgroundColor: '#1e293b', padding: '30px', borderRadius: '20px', width: '100%', maxWidth: '400px', border: '1px solid #334155' },
-  toggleGroup: { display: 'flex', gap: '10px', marginBottom: '20px' },
-  toggleBtn: { flex: 1, padding: '12px', border: '1px solid #334155', borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'sans-serif' },
+  toggleGroup:  { display: 'flex', gap: '10px', marginBottom: '20px' },
+  toggleBtn:    { flex: 1, padding: '12px', border: '1px solid #334155', borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'sans-serif' },
   mainStartBtn: { width: '100%', padding: '15px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: 'bold', marginTop: '10px', display: 'flex', justifyContent: 'center', gap: '10px', alignItems: 'center', cursor: 'pointer', fontSize: '16px', fontFamily: 'sans-serif' },
   activeHeader: { backgroundColor: '#1e293b', padding: '16px', borderRadius: '14px', marginBottom: '16px', width: '100%', maxWidth: '440px', border: '1px solid #334155' },
-  backBtn: { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', marginBottom: '12px', padding: 0 },
-  userInfo: { display: 'flex', alignItems: 'center', gap: '14px' },
-  counterButton: { width: '280px', height: '280px', borderRadius: '50%', color: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', touchAction: 'manipulation', userSelect: 'none', transition: 'transform 0.08s, box-shadow 0.2s', margin: '10px 0' },
-  stepLabel: { fontSize: '13px', letterSpacing: '4px', color: 'rgba(255,255,255,0.35)', fontWeight: '700' },
-  controls: { display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', marginTop: '16px', marginBottom: '24px' },
-  stopButton: { backgroundColor: '#ef4444', color: 'white', padding: '14px 32px', borderRadius: '12px', border: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '15px' },
+  backBtn:      { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', marginBottom: '12px', padding: 0 },
+  userInfo:     { display: 'flex', alignItems: 'center', gap: '14px' },
+  counterButton:{ width: '280px', height: '280px', borderRadius: '50%', color: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', touchAction: 'manipulation', userSelect: 'none', transition: 'transform 0.08s, box-shadow 0.2s', margin: '10px 0' },
+  stepLabel:    { fontSize: '13px', letterSpacing: '4px', color: 'rgba(255,255,255,0.35)', fontWeight: '700' },
+  controls:     { display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', marginTop: '16px', marginBottom: '24px' },
+  stopButton:   { backgroundColor: '#ef4444', color: 'white', padding: '14px 32px', borderRadius: '12px', border: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '15px' },
   historySection: { width: '100%', maxWidth: '440px', borderTop: '1px solid #1e293b', paddingTop: '16px' },
-  historyItem: { backgroundColor: '#1e293b', padding: '12px 16px', borderRadius: '10px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderLeft: '3px solid #3b82f6' },
+  historyItem:  { backgroundColor: '#1e293b', padding: '12px 16px', borderRadius: '10px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderLeft: '3px solid #3b82f6' },
 };
