@@ -852,3 +852,58 @@ export const UserMemberLinkFactory = {
   approve: (linkId, approvedByUid) =>
     updateDoc(doc(db, 'userMemberLinks', linkId), { approvedBy: approvedByUid }),
 };
+
+// ==========================================
+// 9. AUTH FACTORY  (Feature 9.1)
+// ==========================================
+// All Firebase Authentication SDK calls go through here.
+// No page or context should import from 'firebase/auth' directly.
+
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  updatePassword,
+  GoogleAuthProvider,
+  signInWithPopup,
+} from 'firebase/auth';
+import { auth } from '../firebaseConfig';
+
+export const AuthFactory = {
+  // ── Session ──────────────────────────────────────────────────────────────
+  /**
+   * Subscribe to auth state changes.
+   * @param {(user: import('firebase/auth').User | null) => void} callback
+   * @returns unsubscribe function
+   */
+  onAuthStateChanged: (callback) =>
+    onAuthStateChanged(auth, callback),
+
+  // ── Sign-in ───────────────────────────────────────────────────────────────
+  signInWithEmail: (email, password) =>
+    signInWithEmailAndPassword(auth, email, password),
+
+  signInWithGoogle: () => {
+    const provider = new GoogleAuthProvider();
+    return signInWithPopup(auth, provider);
+  },
+
+  // ── Registration ──────────────────────────────────────────────────────────
+  registerWithEmail: (email, password) =>
+    createUserWithEmailAndPassword(auth, email, password),
+
+  // ── Sign-out ──────────────────────────────────────────────────────────────
+  signOut: () => signOut(auth),
+
+  // ── Password ──────────────────────────────────────────────────────────────
+  sendPasswordReset: (email) =>
+    sendPasswordResetEmail(auth, email),
+
+  updatePassword: (newPassword) =>
+    updatePassword(auth.currentUser, newPassword),
+
+  // ── Current user ──────────────────────────────────────────────────────────
+  getCurrentUser: () => auth.currentUser,
+};
