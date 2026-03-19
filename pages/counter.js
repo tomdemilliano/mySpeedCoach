@@ -185,7 +185,6 @@ export default function CounterPage() {
   // ── Bootstrap: load counter user + their club/group memberships ──────────
   useEffect(() => {
     const uid = getCookie();
-    console.log('[Counter] bootstrap start — uid:', uid);
     if (!uid) { setBootstrapDone(true); return; }
 
     let unsubClubs = () => {};
@@ -193,7 +192,6 @@ export default function CounterPage() {
 
     const bootstrap = async () => {
       const snap = await UserFactory.get(uid);
-      console.log('[Counter] UserFactory.get — exists:', snap.exists(), 'role:', snap.data()?.role);
       if (!snap.exists() || cancelled) { setBootstrapDone(true); return; }
 
       const user = { id: uid, ...snap.data() };
@@ -201,10 +199,8 @@ export default function CounterPage() {
 
       // ── SuperAdmin: all clubs ─────────────────────────────────────────────
       if (user.role === 'superadmin') {
-        console.log('[Counter] path: superadmin');
         isSuperAdminRef.current = true;
         unsubClubs = ClubFactory.getAll((clubs) => {
-          console.log('[Counter] superadmin ClubFactory.getAll fired — clubs:', clubs.length, 'cancelled:', cancelled);
           if (cancelled || clubs.length === 0) return;
           setMemberClubs(clubs);
           setBootstrapDone(true);
@@ -214,11 +210,9 @@ export default function CounterPage() {
 
       // ── ClubAdmin: clubs where they have a UserMemberLink ────────────────
       if (user.role === 'clubadmin') {
-        console.log('[Counter] path: clubadmin');
         isClubAdminRef.current = true;
 
         unsubClubs = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
-          console.log('[Counter] clubadmin UserMemberLinkFactory.getForUser fired — profiles:', profiles.length, 'cancelled:', cancelled);
           if (cancelled) return;
           if (profiles.length === 0) { setBootstrapDone(true); return; }
 
@@ -231,7 +225,6 @@ export default function CounterPage() {
             .filter(s => s.exists())
             .map(s => ({ id: s.id, ...s.data() }));
 
-          console.log('[Counter] clubadmin clubs:', adminClubs.map(c => c.id));
           setMemberClubs(adminClubs);
           setBootstrapDone(true);
         });
@@ -239,9 +232,7 @@ export default function CounterPage() {
       }
 
       // ── Normal member: clubs via UserMemberLink ───────────────────────────
-      console.log('[Counter] path: normal member');
       unsubClubs = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
-        console.log('[Counter] UserMemberLinkFactory.getForUser fired — profiles:', profiles.length, 'cancelled:', cancelled);
         if (cancelled) return;
         if (profiles.length === 0) { setBootstrapDone(true); return; }
 
@@ -254,26 +245,23 @@ export default function CounterPage() {
           .filter(s => s.exists())
           .map(s => ({ id: s.id, ...s.data() }));
 
-        console.log('[Counter] normal member resolvedClubs:', resolvedClubs.map(c => c.id));
         setMemberClubs(resolvedClubs);
         setBootstrapDone(true);
       });
     };
 
     bootstrap();
-    return () => { console.log('[Counter] bootstrap cleanup'); cancelled = true; unsubClubs(); };
+    return () => { cancelled = true; unsubClubs(); };
   }, []);
 
   // ── Auto-select club if only one ──────────────────────────────────────────
   useEffect(() => {
-    console.log('[Counter] auto-select check — bootstrapDone:', bootstrapDone, 'memberClubs:', memberClubs.length);
     if (!bootstrapDone || memberClubs.length === 0) return;
     if (memberClubs.length === 1) setSelectedClubId(memberClubs[0].id);
   }, [bootstrapDone, memberClubs]);
 
   // ── Load groups the user is in for the selected club ─────────────────────
   useEffect(() => {
-    console.log('[Counter] selectedClubId changed:', selectedClubId, '— isSuperAdminRef:', isSuperAdminRef.current, 'isClubAdminRef:', isClubAdminRef.current);
     if (!selectedClubId) return;
     setSelectedGroupId('');
     setMemberGroups([]);
@@ -288,7 +276,6 @@ export default function CounterPage() {
     const load = async () => {
       try {
         const allGroups = await GroupFactory.getGroupsByClubOnce(selectedClubId);
-        console.log('[Counter] load() allGroups:', allGroups.length);
 
         const groupMembersCache = {};
         await Promise.all(
@@ -300,20 +287,16 @@ export default function CounterPage() {
 
         if (cancelled) return;
 
-        console.log('[Counter] load() role check — isSuperAdminRef:', isSuperAdminRef.current, 'isClubAdminRef:', isClubAdminRef.current);
-
         if (isSuperAdminRef.current || isClubAdminRef.current) {
           const filteredGroups = allGroups.filter(
             g => groupMembersCache[g.id]?.some(m => m.isSkipper === true)
           );
-          console.log('[Counter] admin filteredGroups:', filteredGroups.map(g => g.id));
           setMemberGroups(filteredGroups);
           if (filteredGroups.length === 1) setSelectedGroupId(filteredGroups[0].id);
           return;
         }
 
         const links = await UserMemberLinkFactory.getForUserInClub(uid, selectedClubId);
-        console.log('[Counter] member links:', links.length);
         if (links.length === 0) return;
 
         const myMemberIds = new Set(links.map(l => l.memberId).filter(Boolean));
@@ -330,7 +313,6 @@ export default function CounterPage() {
           .filter(g => memberGroupIds.has(g.id))
           .filter(g => groupMembersCache[g.id]?.some(m => m.isSkipper === true));
 
-        console.log('[Counter] member filteredGroups:', filteredGroups.map(g => g.id));
         setMemberGroups(filteredGroups);
         if (filteredGroups.length === 1) setSelectedGroupId(filteredGroups[0].id);
       } catch (e) {
