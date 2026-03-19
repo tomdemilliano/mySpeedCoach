@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { UserFactory, ClubFactory, GroupFactory, LiveSessionFactory, ClubJoinRequestFactory, BadgeFactory, ClubMemberFactory, UserMemberLinkFactory } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
+import PushPermissionBanner, { PushSettingsToggle } from '../components/PushPermissionBanner';
 import AnnouncementsWidget from '../components/AnnouncementsWidget';
 import {
   Bluetooth, BluetoothOff, Heart, Settings, Trophy,
@@ -584,6 +585,7 @@ export default function IndexPage() {
         )}
         
         <AnnouncementsWidget memberContext={memberContext} />
+        <PushPermissionBanner uid={uid} />
         
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
@@ -638,6 +640,10 @@ export default function IndexPage() {
                 <div><label style={s.fieldLabel}>Achternaam</label><input style={s.input} value={settingsForm.lastName} onChange={e => setSettingsForm({ ...settingsForm, lastName: e.target.value })} /></div>
               </div>
               <div style={{ marginTop: '12px' }}><label style={s.fieldLabel}>E-mailadres</label><input style={s.input} value={settingsForm.email} onChange={e => setSettingsForm({ ...settingsForm, email: e.target.value })} /></div>
+            </div>
+            <div style={{ marginTop: '20px', borderTop: '1px solid #334155', paddingTop: '20px' }}>
+              <h4 style={s.sectionLabel}>Meldingen</h4>
+              <PushSettingsToggle uid={uid} />
             </div>
             <div style={{ marginBottom: '24px' }}>
               <h4 style={s.sectionLabel}>Hartslagzones (BPM)</h4>
