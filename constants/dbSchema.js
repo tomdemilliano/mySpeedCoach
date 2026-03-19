@@ -342,6 +342,20 @@ export const GroupFactory = {
     return onSnapshot(q, (snap) => {
       callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
+  },
+
+  // Get all groups in a club (one-shot)
+  getGroupsByClubOnce: async (clubId) => {
+    const snap = await getDocs(collection(db, `clubs/${clubId}/groups`));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  // Get all members of a group (one-shot)
+  getMembersByGroupOnce: async (clubId, groupId) => {
+    const snap = await getDocs(
+      collection(db, `clubs/${clubId}/groups/${groupId}/members`)
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   }
 };
 
@@ -887,6 +901,28 @@ export const UserMemberLinkFactory = {
 
   approve: (linkId, approvedByUid) =>
     updateDoc(doc(db, 'userMemberLinks', linkId), { approvedBy: approvedByUid }),
+// Get all links for a user in a specific club (one-shot)
+  getForUserInClub: async (uid, clubId) => {
+    const q = query(
+      collection(db, 'userMemberLinks'),
+      where('uid',    '==', uid),
+      where('clubId', '==', clubId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+// Find the uid linked to a memberId with relationship 'self' (one-shot)
+  getUidForMember: async (clubId, memberId) => {
+    const q = query(
+      collection(db, 'userMemberLinks'),
+      where('clubId',       '==', clubId),
+      where('memberId',     '==', memberId),
+      where('relationship', '==', 'self')
+    );
+    const snap = await getDocs(q);
+    return snap.empty ? null : snap.docs[0].data().uid;
+  }
 };
 
 // ==========================================
