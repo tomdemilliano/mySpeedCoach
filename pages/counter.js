@@ -143,8 +143,8 @@ const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished })
 export default function CounterPage() {
   // ── Current user (counter) ───────────────────────────────────────────────
   const [counterUser,   setCounterUser]   = useState(null);
-  const [isSuperAdmin,  setIsSuperAdmin]  = useState(false);
-  const [isClubAdmin,   setIsClubAdmin]   = useState(false);
+  const isSuperAdminRef = useRef(false);
+  const isClubAdminRef  = useRef(false);
 
   // ── Member-scoped club/group data ────────────────────────────────────────
   const [memberClubs,   setMemberClubs]   = useState([]);
@@ -199,7 +199,7 @@ export default function CounterPage() {
 
       // ── SuperAdmin: all clubs ─────────────────────────────────────────────
       if (user.role === 'superadmin') {
-        setIsSuperAdmin(true);
+        isSuperAdminRef.current = true;
         unsubClubs = ClubFactory.getAll((clubs) => {
           if (cancelled || clubs.length === 0) return;
           setMemberClubs(clubs);
@@ -210,7 +210,7 @@ export default function CounterPage() {
 
       // ── ClubAdmin: clubs where they are a coach in at least one group ─────
       if (user.role === 'clubadmin') {
-        setIsClubAdmin(true);
+        isClubAdminRef.current = true;
         unsubClubs = ClubFactory.getAll(async (allClubs) => {
           if (cancelled || allClubs.length === 0) return;
           const adminClubIds = new Set();
@@ -292,7 +292,7 @@ export default function CounterPage() {
 
         if (cancelled) return;
 
-        if (isSuperAdmin || isClubAdmin) {
+        if (isSuperAdminRef.current || isClubAdminRef.current) {
           // SuperAdmin and ClubAdmin see all groups that have at least one skipper
           const filteredGroups = allGroups.filter(
             g => groupMembersCache[g.id]?.some(m => m.isSkipper === true)
