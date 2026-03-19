@@ -467,7 +467,7 @@ export default function AppLayout({ children, userRole, coachView, announcementC
 
 // ─── CSS ──────────────────────────────────────────────────────────────────────
 const layoutCSS = `
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 
   .desktop-sidebar {
     position: fixed;
@@ -478,7 +478,6 @@ const layoutCSS = `
     display: flex;
     flex-direction: column;
     z-index: 100;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
 
   .app-content {
