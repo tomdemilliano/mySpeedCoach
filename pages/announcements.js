@@ -7,9 +7,10 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   Megaphone, Plus, Trash2, Pin, X, ChevronDown, ChevronUp,
   Building2, Users, AlertTriangle, Bell, Edit2, Send,
+  Calendar, Clock, Globe, Shield,
 } from 'lucide-react';
 
-// ─── Announcement type config — no DB access ──────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 export const ANNOUNCEMENT_TYPES = {
   info:     { label: 'Informatie',  color: '#3b82f6', bg: '#3b82f618', emoji: 'ℹ️' },
   cancel:   { label: 'Geannuleerd', color: '#ef4444', bg: '#ef444418', emoji: '❌' },
@@ -17,20 +18,47 @@ export const ANNOUNCEMENT_TYPES = {
   result:   { label: 'Resultaat',   color: '#22c55e', bg: '#22c55e18', emoji: '🏆' },
 };
 
-// ─── Helper: resolve all group IDs a member belongs to ───────────────────────
-// Uses only GroupFactory — no direct Firestore calls anywhere in this file.
+// Special groupId tokens used for superAdmin broadcasts
+const BROADCAST_ALL       = '__ALL_USERS__';
+const BROADCAST_CLUBADMIN = '__ALL_CLUBADMINS__';
+
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+const toDateStr  = (d) => d.toISOString().slice(0, 10);          // → YYYY-MM-DD
+const todayStr   = ()  => toDateStr(new Date());
+const plusDays   = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return toDateStr(d); };
+
+const fmtDate = (val) => {
+  if (!val) return '—';
+  const ms = val?.seconds ? val.seconds * 1000 : new Date(val).getTime();
+  if (isNaN(ms)) return '—';
+  return new Date(ms).toLocaleDateString('nl-BE', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+// Is the announcement currently visible (after start, before expiry)?
+const isLive = (ann) => {
+  const now = Date.now();
+  if (ann.startsAt) {
+    const ms = ann.startsAt?.seconds ? ann.startsAt.seconds * 1000 : new Date(ann.startsAt).getTime();
+    if (!isNaN(ms) && ms > now) return false;
+  }
+  if (ann.expiresAt) {
+    const ms = ann.expiresAt?.seconds ? ann.expiresAt.seconds * 1000 : new Date(ann.expiresAt).getTime();
+    if (!isNaN(ms) && ms < now) return false;
+  }
+  return true;
+};
+
+// ─── Helper: group IDs the given member belongs to (one-shot) ─────────────────
 async function resolveGroupIdsForMember(clubId, memberId) {
   return new Promise((resolve) => {
     const gids = [];
-    // One-shot: get all groups then check membership for each
     const unsub = GroupFactory.getGroupsByClub(clubId, async (groups) => {
       unsub();
       await Promise.all(groups.map(group =>
         new Promise(res => {
           const u = GroupFactory.getMembersByGroup(clubId, group.id, (members) => {
             u();
-            const belongs = members.some(m => (m.memberId || m.id) === memberId);
-            if (belongs) gids.push(group.id);
+            if (members.some(m => (m.memberId || m.id) === memberId)) gids.push(group.id);
             res();
           });
         })
@@ -41,30 +69,19 @@ async function resolveGroupIdsForMember(clubId, memberId) {
 }
 
 // ─── AnnouncementCard ─────────────────────────────────────────────────────────
-function AnnouncementCard({ ann, canEdit, onEdit, onDelete, onTogglePin }) {
+function AnnouncementCard({ ann, canEdit, onEdit, onDelete, onTogglePin, showStatus }) {
   const [expanded, setExpanded] = useState(false);
-  const cfg = ANNOUNCEMENT_TYPES[ann.type] || ANNOUNCEMENT_TYPES.info;
-
-  const dateStr = ann.createdAt?.seconds
-    ? new Date(ann.createdAt.seconds * 1000).toLocaleDateString('nl-BE', {
-        day: '2-digit', month: 'short', year: 'numeric',
-      })
-    : '';
-  const timeStr = ann.createdAt?.seconds
-    ? new Date(ann.createdAt.seconds * 1000).toLocaleTimeString('nl-BE', {
-        hour: '2-digit', minute: '2-digit',
-      })
-    : '';
-
+  const cfg     = ANNOUNCEMENT_TYPES[ann.type] || ANNOUNCEMENT_TYPES.info;
+  const live    = isLive(ann);
   const preview = (ann.body || '').split('\n')[0] || '';
   const hasMore = (ann.body || '').length > 120 || (ann.body || '').includes('\n');
+  const isBroadcast = ann.groupIds?.includes(BROADCAST_ALL) || ann.groupIds?.includes(BROADCAST_CLUBADMIN);
 
   return (
     <div style={{
-      backgroundColor: '#1e293b',
-      borderRadius: '14px',
+      backgroundColor: '#1e293b', borderRadius: '14px',
       border: `1px solid ${ann.pinned ? cfg.color + '55' : '#334155'}`,
-      overflow: 'hidden',
+      overflow: 'hidden', opacity: showStatus && !live ? 0.55 : 1,
     }}>
       <div style={{ height: '3px', backgroundColor: cfg.color }} />
       <div style={{ padding: '14px 16px' }}>
@@ -79,15 +96,30 @@ function AnnouncementCard({ ann, canEdit, onEdit, onDelete, onTogglePin }) {
             {cfg.emoji}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '2px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap', marginBottom: '3px' }}>
               {ann.pinned && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '9px', fontWeight: '800', color: cfg.color, backgroundColor: cfg.bg, border: `1px solid ${cfg.color}44`, padding: '1px 6px', borderRadius: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                <span style={{ ...st.chip, backgroundColor: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}44` }}>
                   <Pin size={8} /> Vastgepind
                 </span>
               )}
-              <span style={{ fontSize: '10px', fontWeight: '700', color: cfg.color, backgroundColor: cfg.bg, border: `1px solid ${cfg.color}33`, padding: '1px 6px', borderRadius: '8px' }}>
+              <span style={{ ...st.chip, backgroundColor: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}33` }}>
                 {cfg.label}
               </span>
+              {isBroadcast && (
+                <span style={{ ...st.chip, backgroundColor: '#7c3aed22', color: '#a78bfa', border: '1px solid #a78bfa33' }}>
+                  <Globe size={8} /> Broadcast
+                </span>
+              )}
+              {showStatus && (
+                <span style={{
+                  ...st.chip,
+                  backgroundColor: live ? '#22c55e22' : '#ef444422',
+                  color: live ? '#22c55e' : '#ef4444',
+                  border: `1px solid ${live ? '#22c55e33' : '#ef444433'}`,
+                }}>
+                  {live ? '● Actief' : '○ Inactief'}
+                </span>
+              )}
             </div>
             <div style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9', lineHeight: 1.3 }}>
               {ann.title}
@@ -95,14 +127,11 @@ function AnnouncementCard({ ann, canEdit, onEdit, onDelete, onTogglePin }) {
           </div>
           {canEdit && (
             <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
-              <button
-                onClick={() => onTogglePin(ann)}
-                title={ann.pinned ? 'Losmaken' : 'Vastpinnen'}
-                style={{ ...bs.ghost, color: ann.pinned ? cfg.color : '#475569', padding: '5px' }}
-              >
+              <button onClick={() => onTogglePin(ann)} title={ann.pinned ? 'Losmaken' : 'Vastpinnen'}
+                style={{ ...bs.ghost, color: ann.pinned ? cfg.color : '#475569', padding: '5px' }}>
                 <Pin size={13} />
               </button>
-              <button onClick={() => onEdit(ann)} style={{ ...bs.ghost, padding: '5px' }}><Edit2 size={13} /></button>
+              <button onClick={() => onEdit(ann)}   style={{ ...bs.ghost, padding: '5px' }}><Edit2  size={13} /></button>
               <button onClick={() => onDelete(ann)} style={{ ...bs.ghost, color: '#ef4444', padding: '5px' }}><Trash2 size={13} /></button>
             </div>
           )}
@@ -114,15 +143,16 @@ function AnnouncementCard({ ann, canEdit, onEdit, onDelete, onTogglePin }) {
             {expanded ? ann.body : (hasMore ? preview.slice(0, 120) + '…' : ann.body)}
           </div>
           {hasMore && (
-            <button
-              onClick={() => setExpanded(v => !v)}
-              style={{ ...bs.ghost, fontSize: '11px', color: '#475569', padding: '4px 0', marginTop: '4px', gap: '3px' }}
-            >
+            <button onClick={() => setExpanded(v => !v)}
+              style={{ ...bs.ghost, fontSize: '11px', color: '#475569', padding: '4px 0', marginTop: '4px', gap: '3px' }}>
               {expanded ? <><ChevronUp size={11} /> Minder</> : <><ChevronDown size={11} /> Meer tonen</>}
             </button>
           )}
-          <div style={{ fontSize: '10px', color: '#475569', marginTop: '8px' }}>
-            {ann.authorName || 'Coach'} · {dateStr} {timeStr}
+          {/* Meta */}
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '8px', fontSize: '10px', color: '#475569' }}>
+            <span>{ann.authorName || 'Coach'} · {fmtDate(ann.createdAt)}</span>
+            {ann.startsAt  && <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><Calendar size={9} /> Vanaf {fmtDate(ann.startsAt)}</span>}
+            {ann.expiresAt && <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><Clock    size={9} /> Verloopt {fmtDate(ann.expiresAt)}</span>}
           </div>
         </div>
       </div>
@@ -131,63 +161,91 @@ function AnnouncementCard({ ann, canEdit, onEdit, onDelete, onTogglePin }) {
 }
 
 // ─── Compose / Edit Modal ─────────────────────────────────────────────────────
-function ComposeModal({ editing, allClubs, adminClubs, isSuperAdmin, onSave, onClose }) {
-  const availableClubs = isSuperAdmin ? allClubs : adminClubs;
+// managedClubs      : [{ id, name }]
+// coachGroupsByClub : { [clubId]: [{ id, name }] | null }  (null = all groups)
+// isSuperAdmin      : boolean
+function ComposeModal({ editing, managedClubs, coachGroupsByClub, isSuperAdmin, onSave, onClose }) {
+  const firstClub = managedClubs[0] || null;
+
+  const initExpiresAt = () => {
+    if (editing?.expiresAt) {
+      return editing.expiresAt?.seconds
+        ? toDateStr(new Date(editing.expiresAt.seconds * 1000))
+        : editing.expiresAt;
+    }
+    return plusDays(30);
+  };
+  const initStartsAt = () => {
+    if (editing?.startsAt) {
+      return editing.startsAt?.seconds
+        ? toDateStr(new Date(editing.startsAt.seconds * 1000))
+        : editing.startsAt;
+    }
+    return todayStr();
+  };
 
   const [form, setForm] = useState({
-    clubId:   editing?.clubId   || availableClubs[0]?.id || '',
-    groupIds: editing?.groupIds || [],
-    title:    editing?.title    || '',
-    body:     editing?.body     || '',
-    type:     editing?.type     || 'info',
-    pinned:   editing?.pinned   || false,
-    expiresAt: null,
+    clubId:    editing?.clubId   || firstClub?.id || '',
+    groupIds:  editing?.groupIds || [],
+    title:     editing?.title    || '',
+    body:      editing?.body     || '',
+    type:      editing?.type     || 'info',
+    pinned:    editing?.pinned   || false,
+    startsAt:  initStartsAt(),
+    expiresAt: initExpiresAt(),
   });
-  const [groups,  setGroups]  = useState([]);
-  const [saving,  setSaving]  = useState(false);
-  const [error,   setError]   = useState('');
+  const [groups, setGroups] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
 
-  // Load groups via GroupFactory
+  const isBroadcastAll    = form.groupIds.includes(BROADCAST_ALL);
+  const isBroadcastAdmin  = form.groupIds.includes(BROADCAST_CLUBADMIN);
+
+  // Load groups for selected club
   useEffect(() => {
-    if (!form.clubId) return;
+    if (!form.clubId) { setGroups([]); return; }
+    const available = coachGroupsByClub[form.clubId]; // null | array
+    if (available !== null && available !== undefined) {
+      setGroups(available);
+      return;
+    }
+    // admin / superadmin → all groups
     const unsub = GroupFactory.getGroupsByClub(form.clubId, setGroups);
     return () => unsub();
-  }, [form.clubId]);
+  }, [form.clubId, coachGroupsByClub]);
 
-  // Auto-select the only group
+  // Auto-select when only one group
   useEffect(() => {
-    if (groups.length === 1 && form.groupIds.length === 0) {
-      setForm(f => ({ ...f, groupIds: [groups[0].id] }));
-    }
+    if (groups.length === 1 && form.groupIds.length === 0) setF('groupIds', [groups[0].id]);
   }, [groups]);
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const setF = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const toggleGroup = (gid) => {
-    setForm(f => ({
-      ...f,
-      groupIds: f.groupIds.includes(gid)
-        ? f.groupIds.filter(id => id !== gid)
-        : [...f.groupIds, gid],
-    }));
+    if (gid === BROADCAST_ALL || gid === BROADCAST_CLUBADMIN) {
+      // Broadcast targets are mutually exclusive with regular groups
+      setF('groupIds', form.groupIds.includes(gid) ? [] : [gid]);
+      return;
+    }
+    // Regular group — strip any broadcast tokens
+    const clean = form.groupIds.filter(id => id !== BROADCAST_ALL && id !== BROADCAST_CLUBADMIN);
+    setF('groupIds', clean.includes(gid) ? clean.filter(id => id !== gid) : [...clean, gid]);
   };
 
   const handleSave = async () => {
     setError('');
-    if (!form.title.trim())         { setError('Geef de aankondiging een titel.'); return; }
-    if (!form.body.trim())          { setError('Inhoud mag niet leeg zijn.'); return; }
-    if (!form.clubId)               { setError('Kies een club.'); return; }
-    if (form.groupIds.length === 0) { setError('Kies minstens één groep.'); return; }
-    setSaving(true);
-    try {
-      await onSave(form);
-      onClose();
-    } catch (e) {
-      console.error(e);
-      setError('Opslaan mislukt. Probeer opnieuw.');
-    } finally {
-      setSaving(false);
+    if (!form.title.trim())         { setError('Geef de aankondiging een titel.');     return; }
+    if (!form.body.trim())          { setError('Inhoud mag niet leeg zijn.');          return; }
+    if (!form.clubId)               { setError('Kies een club.');                      return; }
+    if (form.groupIds.length === 0) { setError('Kies minstens één doelgroep.');       return; }
+    if (form.expiresAt && form.startsAt && form.expiresAt < form.startsAt) {
+      setError('Vervaldatum mag niet vóór de startdatum liggen.');
+      return;
     }
+    setSaving(true);
+    try { await onSave(form); onClose(); }
+    catch (e) { console.error(e); setError('Opslaan mislukt. Probeer opnieuw.'); }
+    finally   { setSaving(false); }
   };
 
   return (
@@ -196,94 +254,130 @@ function ComposeModal({ editing, allClubs, adminClubs, isSuperAdmin, onSave, onC
         <div style={m.header}>
           <h3 style={{ margin: 0, fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#f1f5f9' }}>
             <Megaphone size={18} color="#a78bfa" />
-            {editing ? 'Aankondiging bewerken' : 'Nieuwe aankondiging'}
+            {editing ? 'Bericht bewerken' : 'Nieuw bericht'}
           </h3>
           <button style={bs.icon} onClick={onClose}><X size={18} /></button>
         </div>
 
-        {availableClubs.length > 1 && (
+        {/* Club */}
+        {managedClubs.length > 1 && (
           <div style={m.field}>
-            <label style={m.label}><Building2 size={11} style={{ verticalAlign: 'middle', marginRight: '4px' }} />Club *</label>
-            <select style={m.select} value={form.clubId} onChange={e => { set('clubId', e.target.value); set('groupIds', []); }}>
+            <label style={m.label}><Building2 size={10} style={{ verticalAlign: 'middle', marginRight: '4px' }} />Club *</label>
+            <select style={m.select} value={form.clubId}
+              onChange={e => { setF('clubId', e.target.value); setF('groupIds', []); }}>
               <option value="">-- Kies club --</option>
-              {availableClubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {managedClubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
         )}
 
-        {form.clubId && groups.length > 0 && (
+        {/* Target groups */}
+        {form.clubId && (
           <div style={m.field}>
-            <label style={m.label}><Users size={11} style={{ verticalAlign: 'middle', marginRight: '4px' }} />Groep(en) *</label>
+            <label style={m.label}><Users size={10} style={{ verticalAlign: 'middle', marginRight: '4px' }} />Doelgroep(en) *</label>
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               {groups.map(g => {
                 const sel = form.groupIds.includes(g.id);
                 return (
-                  <button
-                    key={g.id}
-                    type="button"
-                    onClick={() => toggleGroup(g.id)}
-                    style={{
-                      padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
-                      cursor: 'pointer', fontFamily: 'inherit',
-                      border: `1px solid ${sel ? '#a78bfa' : '#334155'}`,
-                      backgroundColor: sel ? '#a78bfa22' : 'transparent',
-                      color: sel ? '#a78bfa' : '#64748b',
-                    }}
-                  >
+                  <button key={g.id} type="button" onClick={() => toggleGroup(g.id)} style={{
+                    ...st.groupChip,
+                    borderColor:     sel ? '#a78bfa' : '#334155',
+                    backgroundColor: sel ? '#a78bfa22' : 'transparent',
+                    color:           sel ? '#a78bfa'  : '#64748b',
+                  }}>
                     {g.name}
                   </button>
                 );
               })}
+              {/* SuperAdmin broadcast */}
+              {isSuperAdmin && (
+                <>
+                  <button type="button" onClick={() => toggleGroup(BROADCAST_ALL)} style={{
+                    ...st.groupChip,
+                    borderColor:     isBroadcastAll ? '#f59e0b' : '#334155',
+                    backgroundColor: isBroadcastAll ? '#f59e0b22' : 'transparent',
+                    color:           isBroadcastAll ? '#f59e0b'  : '#64748b',
+                  }}>
+                    <Globe size={10} /> Alle gebruikers
+                  </button>
+                  <button type="button" onClick={() => toggleGroup(BROADCAST_CLUBADMIN)} style={{
+                    ...st.groupChip,
+                    borderColor:     isBroadcastAdmin ? '#a78bfa' : '#334155',
+                    backgroundColor: isBroadcastAdmin ? '#a78bfa22' : 'transparent',
+                    color:           isBroadcastAdmin ? '#a78bfa'  : '#64748b',
+                  }}>
+                    <Shield size={10} /> Alle clubbeheerders
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}
 
+        {/* Type */}
         <div style={m.field}>
           <label style={m.label}>Type *</label>
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             {Object.entries(ANNOUNCEMENT_TYPES).map(([key, cfg]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => set('type', key)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '5px',
-                  padding: '6px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '600',
-                  cursor: 'pointer', fontFamily: 'inherit',
-                  border: `1px solid ${form.type === key ? cfg.color : '#334155'}`,
-                  backgroundColor: form.type === key ? cfg.bg : 'transparent',
-                  color: form.type === key ? cfg.color : '#64748b',
-                }}
-              >
+              <button key={key} type="button" onClick={() => setF('type', key)} style={{
+                display: 'flex', alignItems: 'center', gap: '5px',
+                padding: '6px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '600',
+                cursor: 'pointer', fontFamily: 'inherit',
+                border:          `1px solid ${form.type === key ? cfg.color : '#334155'}`,
+                backgroundColor: form.type === key ? cfg.bg : 'transparent',
+                color:           form.type === key ? cfg.color : '#64748b',
+              }}>
                 {cfg.emoji} {cfg.label}
               </button>
             ))}
           </div>
         </div>
 
+        {/* Title */}
         <div style={m.field}>
           <label style={m.label}>Titel *</label>
-          <input
-            style={m.input}
-            placeholder="bijv. Training geannuleerd zaterdag 22 maart"
-            value={form.title}
-            onChange={e => set('title', e.target.value)}
-            autoFocus
-          />
+          <input style={m.input} placeholder="bijv. Training geannuleerd zaterdag 22 maart"
+            value={form.title} onChange={e => setF('title', e.target.value)} autoFocus />
         </div>
 
+        {/* Body */}
         <div style={m.field}>
           <label style={m.label}>Bericht *</label>
-          <textarea
-            style={{ ...m.input, minHeight: '100px', resize: 'vertical', lineHeight: 1.6, fontFamily: 'inherit' }}
-            placeholder="Schrijf hier het volledige bericht voor de skippers…"
-            value={form.body}
-            onChange={e => set('body', e.target.value)}
-          />
+          <textarea style={{ ...m.input, minHeight: '90px', resize: 'vertical', lineHeight: 1.6, fontFamily: 'inherit' }}
+            placeholder="Schrijf hier het volledige bericht…"
+            value={form.body} onChange={e => setF('body', e.target.value)} />
         </div>
 
+        {/* Dates */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+          <div>
+            <label style={m.label}>
+              <Calendar size={10} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+              Zichtbaar vanaf *
+            </label>
+            <input type="date" style={m.input} value={form.startsAt}
+              onChange={e => {
+                const v = e.target.value;
+                setF('startsAt', v);
+                if (form.expiresAt && form.expiresAt < v) setF('expiresAt', v);
+              }}
+            />
+          </div>
+          <div>
+            <label style={m.label}>
+              <Clock size={10} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+              Vervaldatum *
+            </label>
+            <input type="date" style={m.input} value={form.expiresAt}
+              min={form.startsAt || todayStr()}
+              onChange={e => setF('expiresAt', e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Pinned */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '18px' }}>
-          <input type="checkbox" id="isPinned" checked={form.pinned} onChange={e => set('pinned', e.target.checked)} />
+          <input type="checkbox" id="isPinned" checked={form.pinned} onChange={e => setF('pinned', e.target.checked)} />
           <label htmlFor="isPinned" style={{ fontSize: '13px', color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
             <Pin size={12} color="#a78bfa" /> Boven aan vastpinnen
           </label>
@@ -306,294 +400,215 @@ function ComposeModal({ editing, allClubs, adminClubs, isSuperAdmin, onSave, onC
   );
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// MAIN PAGE
-// ════════════════════════════════════════════════════════════════════════════
-export default function AnnouncementsPage() {
-  const { uid, loading: authLoading } = useAuth();
-  const [currentUser,  setCurrentUser]  = useState(null);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [isCoach,      setIsCoach]      = useState(false);
-  const [allClubs,     setAllClubs]     = useState([]);
-  const [adminClubs,   setAdminClubs]   = useState([]);
-
-  // Coach manage panel state
-  const [selectedClubId,     setSelectedClubId]     = useState('');
-  const [selectedGroupId,    setSelectedGroupId]    = useState('');
-  const [groups,             setGroups]             = useState([]);
-  const [coachAnnouncements, setCoachAnnouncements] = useState([]);
-
-  // Skipper view state
-  const [memberContext,        setMemberContext]        = useState(null);
-  const [memberGroupIds,       setMemberGroupIds]       = useState([]);
-  const [skipperAnnouncements, setSkipperAnnouncements] = useState([]);
-
-  // Compose modal
-  const [composeOpen, setComposeOpen] = useState(false);
-  const [editingAnn,  setEditingAnn]  = useState(null);
-
-  // ── Bootstrap ──────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (authLoading || !uid) return;
-    UserFactory.get(uid).then(snap => {
-      if (!snap.exists()) return;
-      const user = { id: uid, ...snap.data() };
-      setCurrentUser(user);
-      const role = user.role || 'user';
-      if (role === 'superadmin') { setIsSuperAdmin(true); setIsCoach(true); }
-      if (role === 'clubadmin')  { setIsCoach(true); }
-    });
-    const unsub = ClubFactory.getAll(setAllClubs);
-    return () => unsub();
-  }, [uid, authLoading]);
-
-  // ── Resolve admin clubs & coach status from group memberships ─────────────
-  useEffect(() => {
-    if (!currentUser || allClubs.length === 0) return;
-    if (isSuperAdmin) { setAdminClubs(allClubs); return; }
-    if (currentUser.role === 'clubadmin') { setAdminClubs(allClubs); return; }
-
-    // Regular users: check isCoach flag in any group
-    const found = new Set();
-    const unsubs = [];
-    allClubs.forEach(club => {
-      const u = GroupFactory.getGroupsByClub(club.id, groups => {
-        groups.forEach(group => {
-          const u2 = GroupFactory.getMembersByGroup(club.id, group.id, members => {
-            const me = members.find(m => (m.memberId || m.id) === uid && m.isCoach);
-            if (me) {
-              found.add(club.id);
-              setIsCoach(true);
-              setAdminClubs(allClubs.filter(c => found.has(c.id)));
-            }
-          });
-          unsubs.push(u2);
-        });
-      });
-      unsubs.push(u);
-    });
-    return () => unsubs.forEach(u => u && u());
-  }, [currentUser, allClubs, isSuperAdmin, uid]);
-
-  useEffect(() => {
-    if (adminClubs.length === 1 && !selectedClubId) setSelectedClubId(adminClubs[0].id);
-  }, [adminClubs]);
-
-  // Load groups for selected club
-  useEffect(() => {
-    if (!selectedClubId) return;
-    const unsub = GroupFactory.getGroupsByClub(selectedClubId, setGroups);
-    return () => unsub();
-  }, [selectedClubId]);
-
-  useEffect(() => {
-    if (groups.length === 1 && !selectedGroupId) setSelectedGroupId(groups[0].id);
-  }, [groups]);
-
-  // Coach: subscribe via AnnouncementFactory.subscribeForGroup
-  useEffect(() => {
-    if (!selectedClubId || !selectedGroupId) { setCoachAnnouncements([]); return; }
-    const unsub = AnnouncementFactory.subscribeForGroup(selectedClubId, selectedGroupId, setCoachAnnouncements);
-    return () => unsub();
-  }, [selectedClubId, selectedGroupId]);
-
-  // Skipper: resolve member context via UserMemberLinkFactory
-  useEffect(() => {
-    if (!uid) return;
-    const unsub = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
-      const self = profiles.find(p => p.link.relationship === 'self');
-      if (!self) return;
-      const ctx = { clubId: self.member.clubId, memberId: self.member.id };
-      setMemberContext(ctx);
-      const gids = await resolveGroupIdsForMember(ctx.clubId, ctx.memberId);
-      setMemberGroupIds(gids);
-    });
-    return () => unsub();
-  }, [uid]);
-
-  // Skipper: subscribe via AnnouncementFactory.subscribeForUser
-  useEffect(() => {
-    if (!memberGroupIds || memberGroupIds.length === 0) return;
-    const unsub = AnnouncementFactory.subscribeForUser(memberGroupIds, setSkipperAnnouncements);
-    return () => unsub();
-  }, [memberGroupIds]);
-
-  // ── Handlers ──────────────────────────────────────────────────────────────
-  const authorName = currentUser
-    ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim()
-    : 'Coach';
-
-  const handleSave = async (form) => {
-    if (editingAnn) {
-      await AnnouncementFactory.update(editingAnn.id, {
-        title:    form.title,
-        body:     form.body,
-        type:     form.type,
-        groupIds: form.groupIds,
-        pinned:   form.pinned,
-      });
-    } else {
-      await AnnouncementFactory.create(form, uid, authorName);
-    }
-    setEditingAnn(null);
-  };
-
-  const handleDelete = async (ann) => {
-    if (!confirm(`"${ann.title}" verwijderen?`)) return;
-    await AnnouncementFactory.delete(ann.id);
-  };
-
-  const handleTogglePin = async (ann) => {
-    await AnnouncementFactory.pin(ann.id, !ann.pinned);
-  };
-
-  // ── Derived ────────────────────────────────────────────────────────────────
-  const selectedClub  = allClubs.find(c => c.id === selectedClubId);
-  const selectedGroup = groups.find(g => g.id === selectedGroupId);
-
-  if (authLoading) return (
-    <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <style>{pageCSS}</style>
+// ─── Tab: Mijn Berichten ──────────────────────────────────────────────────────
+function MyMessagesTab({ memberGroupIds, announcements, loading }) {
+  if (loading) return (
+    <div style={{ display: 'flex', justifyContent: 'center', padding: '60px' }}>
       <div style={sp.spinner} />
     </div>
   );
 
-  return (
-    <div style={sp.page}>
-      <style>{pageCSS}</style>
+  if (memberGroupIds.length === 0) return (
+    <div style={sp.empty}>
+      <Bell size={40} color="#334155" style={{ marginBottom: '12px' }} />
+      <p style={{ color: '#475569', fontSize: '14px' }}>Je bent nog niet gekoppeld aan een groep.</p>
+    </div>
+  );
 
-      <header style={sp.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ width: '34px', height: '34px', borderRadius: '9px', backgroundColor: '#a78bfa22', border: '1px solid #a78bfa44', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Megaphone size={17} color="#a78bfa" />
-          </div>
-          <div>
-            <div style={{ fontWeight: '800', fontSize: '15px', color: '#f1f5f9' }}>Aankondigingen</div>
-            <div style={{ fontSize: '10px', color: '#475569' }}>
-              {isCoach ? 'Beheer & publiceer berichten' : `${skipperAnnouncements.length} bericht${skipperAnnouncements.length !== 1 ? 'en' : ''}`}
-            </div>
+  const visible = announcements.filter(isLive);
+
+  if (visible.length === 0) return (
+    <div style={sp.empty}>
+      <Bell size={40} color="#334155" style={{ marginBottom: '12px' }} />
+      <p style={{ color: '#475569', fontSize: '14px' }}>Geen actieve berichten voor jou.</p>
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      {visible.map(ann => (
+        <AnnouncementCard key={ann.id} ann={ann} canEdit={false}
+          onEdit={() => {}} onDelete={() => {}} onTogglePin={() => {}} showStatus={false} />
+      ))}
+    </div>
+  );
+}
+
+// ─── Tab: Beheer Berichten ────────────────────────────────────────────────────
+function ManageMessagesTab({ managedClubs, coachGroupsByClub, isSuperAdmin, uid, authorName }) {
+  const [selectedClubId,  setSelectedClubId]  = useState(managedClubs.length === 1 ? managedClubs[0].id : '');
+  const [selectedGroupId, setSelectedGroupId] = useState('');
+  const [groups,          setGroups]          = useState([]);
+  const [announcements,   setAnnouncements]   = useState([]);
+  const [composeOpen,     setComposeOpen]     = useState(false);
+  const [editingAnn,      setEditingAnn]      = useState(null);
+  const [filter,          setFilter]          = useState('all'); // 'all'|'active'|'inactive'
+
+  // Groups for selected club
+  useEffect(() => {
+    if (!selectedClubId) { setGroups([]); setSelectedGroupId(''); return; }
+    const available = coachGroupsByClub[selectedClubId]; // null | array
+    if (available !== null && available !== undefined) {
+      setGroups(available);
+      if (available.length === 1) setSelectedGroupId(available[0].id);
+      return;
+    }
+    const unsub = GroupFactory.getGroupsByClub(selectedClubId, (gs) => {
+      setGroups(gs);
+      if (gs.length === 1) setSelectedGroupId(gs[0].id);
+    });
+    return () => unsub();
+  }, [selectedClubId, coachGroupsByClub]);
+
+  // Announcements for selected group
+  useEffect(() => {
+    if (!selectedClubId || !selectedGroupId) { setAnnouncements([]); return; }
+    const unsub = AnnouncementFactory.subscribeForGroup(selectedClubId, selectedGroupId, setAnnouncements);
+    return () => unsub();
+  }, [selectedClubId, selectedGroupId]);
+
+  const handleSave = async (form) => {
+    const payload = {
+      title:    form.title,
+      body:     form.body,
+      type:     form.type,
+      clubId:   form.clubId,
+      groupIds: form.groupIds,
+      pinned:   form.pinned,
+      startsAt:  form.startsAt  || null,
+      expiresAt: form.expiresAt || null,
+    };
+    if (editingAnn) await AnnouncementFactory.update(editingAnn.id, payload);
+    else            await AnnouncementFactory.create(payload, uid, authorName);
+    setEditingAnn(null);
+  };
+
+  const handleDelete     = async (ann) => { if (!confirm(`"${ann.title}" verwijderen?`)) return; await AnnouncementFactory.delete(ann.id); };
+  const handleTogglePin  = async (ann) => { await AnnouncementFactory.pin(ann.id, !ann.pinned); };
+
+  const selectedClub  = managedClubs.find(c => c.id === selectedClubId);
+  const selectedGroup = groups.find(g => g.id === selectedGroupId);
+
+  const filtered = announcements.filter(ann =>
+    filter === 'active'   ? isLive(ann)  :
+    filter === 'inactive' ? !isLive(ann) : true
+  );
+
+  return (
+    <div>
+      {/* Club selector */}
+      {managedClubs.length > 1 && (
+        <div style={{ marginBottom: '16px' }}>
+          <label style={sp.label}><Building2 size={11} style={{ verticalAlign: 'middle', marginRight: '5px' }} />Club</label>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {managedClubs.map(c => (
+              <button key={c.id} onClick={() => { setSelectedClubId(c.id); setSelectedGroupId(''); }}
+                style={{
+                  ...st.groupChip,
+                  borderColor:     selectedClubId === c.id ? '#3b82f6' : '#334155',
+                  backgroundColor: selectedClubId === c.id ? '#3b82f622' : 'transparent',
+                  color:           selectedClubId === c.id ? '#60a5fa'  : '#64748b',
+                }}>
+                {c.name}
+              </button>
+            ))}
           </div>
         </div>
-        {isCoach && (
-          <button onClick={() => { setEditingAnn(null); setComposeOpen(true); }} style={{ ...bs.primary, gap: '6px' }}>
-            <Plus size={14} /> Nieuw bericht
-          </button>
-        )}
-      </header>
+      )}
 
-      <div style={sp.content}>
-
-        {/* ════ COACH PANEL ════ */}
-        {isCoach && (
-          <div>
-            {adminClubs.length > 1 && (
-              <div style={{ marginBottom: '14px' }}>
-                <label style={sp.label}><Building2 size={11} style={{ verticalAlign: 'middle', marginRight: '5px' }} />Club</label>
-                <select style={sp.select} value={selectedClubId} onChange={e => { setSelectedClubId(e.target.value); setSelectedGroupId(''); }}>
-                  <option value="">-- Kies club --</option>
-                  {adminClubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-            )}
-
-            {selectedClubId && groups.length > 1 && (
-              <div style={{ marginBottom: '16px' }}>
-                <label style={sp.label}><Users size={11} style={{ verticalAlign: 'middle', marginRight: '5px' }} />Groep</label>
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {groups.map(g => (
-                    <button
-                      key={g.id}
-                      onClick={() => setSelectedGroupId(g.id)}
-                      style={{
-                        padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
-                        cursor: 'pointer', fontFamily: 'inherit',
-                        border: `1px solid ${selectedGroupId === g.id ? '#a78bfa' : '#334155'}`,
-                        backgroundColor: selectedGroupId === g.id ? '#a78bfa22' : 'transparent',
-                        color: selectedGroupId === g.id ? '#a78bfa' : '#64748b',
-                      }}
-                    >
-                      {g.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {selectedClubId && selectedGroupId ? (
-              <>
-                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '600', marginBottom: '14px' }}>
-                  {selectedClub?.name} · {selectedGroup?.name} · {coachAnnouncements.length} aankondiging{coachAnnouncements.length !== 1 ? 'en' : ''}
-                </div>
-                {coachAnnouncements.length === 0 ? (
-                  <div style={sp.empty}>
-                    <Megaphone size={40} color="#334155" style={{ marginBottom: '12px' }} />
-                    <p style={{ color: '#475569', fontSize: '14px', margin: '0 0 16px' }}>Nog geen aankondigingen voor deze groep.</p>
-                    <button onClick={() => { setEditingAnn(null); setComposeOpen(true); }} style={bs.primary}>
-                      <Plus size={14} /> Eerste aankondiging maken
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {coachAnnouncements.map(ann => (
-                      <AnnouncementCard
-                        key={ann.id} ann={ann} canEdit
-                        onEdit={a => { setEditingAnn(a); setComposeOpen(true); }}
-                        onDelete={handleDelete}
-                        onTogglePin={handleTogglePin}
-                      />
-                    ))}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div style={sp.empty}>
-                <Users size={40} color="#334155" style={{ marginBottom: '12px' }} />
-                <p style={{ color: '#475569', fontSize: '14px' }}>
-                  {!selectedClubId ? 'Selecteer een club om aankondigingen te beheren.' : 'Selecteer een groep.'}
-                </p>
-              </div>
-            )}
-
-            {/* Coach's own skipper announcements */}
-            {memberGroupIds.length > 0 && skipperAnnouncements.length > 0 && (
-              <div style={{ marginTop: '32px', borderTop: '1px solid #1e293b', paddingTop: '24px' }}>
-                <div style={{ fontWeight: '700', fontSize: '13px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Bell size={13} /> Jouw aankondigingen als skipper
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {skipperAnnouncements.map(ann => (
-                    <AnnouncementCard key={ann.id} ann={ann} canEdit={false} onEdit={() => {}} onDelete={() => {}} onTogglePin={() => {}} />
-                  ))}
-                </div>
-              </div>
-            )}
+      {/* Group selector */}
+      {selectedClubId && groups.length > 1 && (
+        <div style={{ marginBottom: '16px' }}>
+          <label style={sp.label}><Users size={11} style={{ verticalAlign: 'middle', marginRight: '5px' }} />Groep</label>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {groups.map(g => (
+              <button key={g.id} onClick={() => setSelectedGroupId(g.id)} style={{
+                ...st.groupChip,
+                borderColor:     selectedGroupId === g.id ? '#a78bfa' : '#334155',
+                backgroundColor: selectedGroupId === g.id ? '#a78bfa22' : 'transparent',
+                color:           selectedGroupId === g.id ? '#a78bfa'  : '#64748b',
+              }}>
+                {g.name}
+              </button>
+            ))}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* ════ SKIPPER VIEW ════ */}
-        {!isCoach && (
-          <div>
-            {skipperAnnouncements.length === 0 ? (
-              <div style={sp.empty}>
-                <Bell size={40} color="#334155" style={{ marginBottom: '12px' }} />
-                <p style={{ color: '#475569', fontSize: '14px' }}>Geen aankondigingen van je coach.</p>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {skipperAnnouncements.map(ann => (
-                  <AnnouncementCard key={ann.id} ann={ann} canEdit={false} onEdit={() => {}} onDelete={() => {}} onTogglePin={() => {}} />
-                ))}
-              </div>
-            )}
+      {/* Prompt */}
+      {(!selectedClubId || !selectedGroupId) && (
+        <div style={sp.empty}>
+          <Users size={36} color="#334155" style={{ marginBottom: '12px' }} />
+          <p style={{ color: '#475569', fontSize: '14px' }}>
+            {!selectedClubId ? 'Selecteer een club.' : 'Selecteer een groep.'}
+          </p>
+        </div>
+      )}
+
+      {/* Messages list */}
+      {selectedClubId && selectedGroupId && (
+        <>
+          {/* Toolbar */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>
+              {selectedClub?.name} · {selectedGroup?.name} · {announcements.length} bericht{announcements.length !== 1 ? 'en' : ''}
+            </div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              {[['all', 'Alle'], ['active', 'Actief'], ['inactive', 'Inactief']].map(([k, l]) => (
+                <button key={k} onClick={() => setFilter(k)} style={{
+                  padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  border:          `1px solid ${filter === k ? '#a78bfa' : '#334155'}`,
+                  backgroundColor: filter === k ? '#a78bfa22' : 'transparent',
+                  color:           filter === k ? '#a78bfa'  : '#64748b',
+                }}>
+                  {l}
+                </button>
+              ))}
+            </div>
           </div>
-        )}
-      </div>
 
+          {filtered.length === 0 ? (
+            <div style={sp.empty}>
+              <Megaphone size={36} color="#334155" style={{ marginBottom: '12px' }} />
+              <p style={{ color: '#475569', fontSize: '14px', margin: '0 0 16px' }}>
+                {filter === 'all'
+                  ? 'Nog geen berichten voor deze groep.'
+                  : `Geen ${filter === 'active' ? 'actieve' : 'inactieve'} berichten.`}
+              </p>
+              {filter === 'all' && (
+                <button onClick={() => { setEditingAnn(null); setComposeOpen(true); }} style={bs.primary}>
+                  <Plus size={14} /> Eerste bericht maken
+                </button>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {filtered.map(ann => (
+                <AnnouncementCard key={ann.id} ann={ann} canEdit showStatus
+                  onEdit={a => { setEditingAnn(a); setComposeOpen(true); }}
+                  onDelete={handleDelete}
+                  onTogglePin={handleTogglePin}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Floating action button */}
+      {selectedClubId && selectedGroupId && (
+        <button onClick={() => { setEditingAnn(null); setComposeOpen(true); }} style={st.fab} title="Nieuw bericht">
+          <Plus size={22} color="white" />
+        </button>
+      )}
+
+      {/* Compose / edit modal */}
       {composeOpen && (
         <ComposeModal
           editing={editingAnn}
-          allClubs={allClubs}
-          adminClubs={adminClubs}
+          managedClubs={managedClubs}
+          coachGroupsByClub={coachGroupsByClub}
           isSuperAdmin={isSuperAdmin}
           onSave={handleSave}
           onClose={() => { setComposeOpen(false); setEditingAnn(null); }}
@@ -603,32 +618,293 @@ export default function AnnouncementsPage() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// MAIN PAGE
+// ════════════════════════════════════════════════════════════════════════════
+export default function AnnouncementsPage() {
+  const { uid, loading: authLoading } = useAuth();
+
+  // ── Current user ──────────────────────────────────────────────────────────
+  const [currentUser,  setCurrentUser]  = useState(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  // ── Management scope ──────────────────────────────────────────────────────
+  // managedClubs      : clubs the user may post to
+  // coachGroupsByClub : { [clubId]: [{ id, name }] | null }
+  //   null  → unrestricted (clubadmin / superadmin: access to all groups in the club)
+  //   array → restricted to specific groups (coach)
+  const [managedClubs,      setManagedClubs]      = useState([]);
+  const [coachGroupsByClub, setCoachGroupsByClub] = useState({});
+  const [canManage,         setCanManage]         = useState(false);
+  const [bootstrapDone,     setBootstrapDone]     = useState(false);
+
+  // ── "Mijn berichten" data ─────────────────────────────────────────────────
+  const [memberGroupIds,  setMemberGroupIds]  = useState([]);
+  const [myAnnouncements, setMyAnnouncements] = useState([]);
+  const [loadingMine,     setLoadingMine]     = useState(true);
+
+  // ── UI ────────────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState('mine');
+
+  // ── Bootstrap: resolve role + management scope ────────────────────────────
+  useEffect(() => {
+    if (authLoading || !uid) return;
+    let cancelled = false;
+
+    const run = async () => {
+      const snap = await UserFactory.get(uid);
+      if (!snap.exists() || cancelled) { setBootstrapDone(true); return; }
+
+      const user = { id: uid, ...snap.data() };
+      setCurrentUser(user);
+      const role = user.role || 'user';
+
+      // ── SuperAdmin ────────────────────────────────────────────────────────
+      if (role === 'superadmin') {
+        setIsSuperAdmin(true);
+        const unsubClubs = ClubFactory.getAll((clubs) => {
+          if (cancelled) return;
+          setManagedClubs(clubs);
+          const map = {};
+          clubs.forEach(c => { map[c.id] = null; }); // null = all groups
+          setCoachGroupsByClub(map);
+          setCanManage(true);
+          setBootstrapDone(true);
+        });
+        return () => unsubClubs();
+      }
+
+      // ── ClubAdmin ─────────────────────────────────────────────────────────
+      if (role === 'clubadmin') {
+        // Resolve the clubs this clubadmin is linked to
+        const profiles = await new Promise(resolve => {
+          const unsub = UserMemberLinkFactory.getForUser(uid, (p) => { unsub(); resolve(p); });
+        });
+        if (cancelled) return;
+
+        const clubIdSet = new Set(profiles.map(p => p.member.clubId));
+        const snaps     = await Promise.all([...clubIdSet].map(id => ClubFactory.getById(id)));
+        const clubs     = snaps.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() }));
+
+        if (!cancelled) {
+          setManagedClubs(clubs);
+          const map = {};
+          clubs.forEach(c => { map[c.id] = null; }); // null = all groups
+          setCoachGroupsByClub(map);
+          setCanManage(true);
+        }
+        setBootstrapDone(true);
+        return;
+      }
+
+      // ── Normal user: find groups where isCoach === true ───────────────────
+      const profiles = await new Promise(resolve => {
+        const unsub = UserMemberLinkFactory.getForUser(uid, (p) => { unsub(); resolve(p); });
+      });
+      if (cancelled || profiles.length === 0) { setBootstrapDone(true); return; }
+
+      const clubIdSet = new Set(profiles.map(p => p.member.clubId));
+      const snaps     = await Promise.all([...clubIdSet].map(id => ClubFactory.getById(id)));
+      const memberClubs = snaps.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() }));
+
+      // memberId per club
+      const memberIdByClub = {};
+      profiles.forEach(p => { memberIdByClub[p.member.clubId] = p.member.id; });
+
+      const coachMap   = {};
+      const coachClubs = [];
+
+      await Promise.all(memberClubs.map(async club => {
+        const memberId = memberIdByClub[club.id];
+        if (!memberId) return;
+
+        const allGroups  = await GroupFactory.getGroupsByClubOnce(club.id);
+        const coachGroups = [];
+
+        await Promise.all(allGroups.map(async group => {
+          const members = await GroupFactory.getMembersByGroupOnce(club.id, group.id);
+          const me = members.find(m => (m.memberId || m.id) === memberId);
+          if (me?.isCoach) coachGroups.push(group);
+        }));
+
+        if (coachGroups.length > 0) {
+          coachMap[club.id] = coachGroups; // restricted to coach groups
+          coachClubs.push(club);
+        }
+      }));
+
+      if (!cancelled && coachClubs.length > 0) {
+        setManagedClubs(coachClubs);
+        setCoachGroupsByClub(coachMap);
+        setCanManage(true);
+      }
+      setBootstrapDone(true);
+    };
+
+    run();
+  }, [uid, authLoading]);
+
+  // ── "Mijn berichten": resolve member's groups then subscribe ──────────────
+  useEffect(() => {
+    if (!uid) return;
+    let cancelled = false;
+    setLoadingMine(true);
+
+    const unsub = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
+      if (cancelled) return;
+      const self = profiles.find(p => p.link?.relationship === 'self');
+      if (!self) { setLoadingMine(false); return; }
+
+      const gids = await resolveGroupIdsForMember(self.member.clubId, self.member.id);
+      if (!cancelled) setMemberGroupIds(gids);
+    });
+
+    return () => { cancelled = true; unsub(); };
+  }, [uid]);
+
+  useEffect(() => {
+    if (memberGroupIds.length === 0) { setLoadingMine(false); return; }
+    const unsub = AnnouncementFactory.subscribeForUser(memberGroupIds, (items) => {
+      setMyAnnouncements(items);
+      setLoadingMine(false);
+    });
+    return () => unsub();
+  }, [memberGroupIds]);
+
+  // ── Author name ───────────────────────────────────────────────────────────
+  const authorName = currentUser
+    ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim()
+    : '';
+
+  // ── Guards ────────────────────────────────────────────────────────────────
+  if (authLoading || !bootstrapDone) return (
+    <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <style>{pageCSS}</style>
+      <div style={sp.spinner} />
+    </div>
+  );
+
+  const activeMineCount = myAnnouncements.filter(isLive).length;
+
+  return (
+    <div style={sp.page}>
+      <style>{pageCSS}</style>
+
+      {/* ── Sticky header ── */}
+      <header style={sp.header}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ width: '34px', height: '34px', borderRadius: '9px', backgroundColor: '#a78bfa22', border: '1px solid #a78bfa44', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Megaphone size={17} color="#a78bfa" />
+          </div>
+          <div>
+            <div style={{ fontWeight: '800', fontSize: '15px', color: '#f1f5f9' }}>Aankondigingen</div>
+            <div style={{ fontSize: '10px', color: '#475569' }}>
+              {activeMineCount > 0 ? `${activeMineCount} actief bericht${activeMineCount !== 1 ? 'en' : ''}` : 'Berichten van je coach'}
+            </div>
+          </div>
+        </div>
+        {/* Header action button for manage tab */}
+        {canManage && activeTab === 'manage' && (
+          <div style={{ fontSize: '11px', color: '#64748b' }}>Selecteer groep → druk op +</div>
+        )}
+      </header>
+
+      {/* ── Tabs ── */}
+      <div style={sp.tabBar}>
+        <button onClick={() => setActiveTab('mine')} style={{ ...sp.tab, ...(activeTab === 'mine' ? sp.tabActive : {}) }}>
+          <Bell size={14} />
+          Mijn berichten
+          {activeMineCount > 0 && (
+            <span style={{ ...st.chip, backgroundColor: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa44', marginLeft: '4px' }}>
+              {activeMineCount}
+            </span>
+          )}
+        </button>
+        {canManage && (
+          <button onClick={() => setActiveTab('manage')} style={{ ...sp.tab, ...(activeTab === 'manage' ? sp.tabActive : {}) }}>
+            <Edit2 size={14} />
+            Beheer berichten
+          </button>
+        )}
+      </div>
+
+      {/* ── Tab content ── */}
+      <div style={sp.content}>
+        {activeTab === 'mine' && (
+          <MyMessagesTab
+            memberGroupIds={memberGroupIds}
+            announcements={myAnnouncements}
+            loading={loadingMine}
+          />
+        )}
+        {activeTab === 'manage' && canManage && (
+          <ManageMessagesTab
+            managedClubs={managedClubs}
+            coachGroupsByClub={coachGroupsByClub}
+            isSuperAdmin={isSuperAdmin}
+            uid={uid}
+            authorName={authorName}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Shared styles ────────────────────────────────────────────────────────────
+const st = {
+  chip: {
+    display: 'inline-flex', alignItems: 'center', gap: '3px',
+    fontSize: '9px', fontWeight: '800',
+    padding: '1px 6px', borderRadius: '8px',
+    textTransform: 'uppercase', letterSpacing: '0.4px',
+  },
+  groupChip: {
+    padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
+    cursor: 'pointer', fontFamily: 'inherit', border: '1px solid',
+    display: 'inline-flex', alignItems: 'center', gap: '5px',
+    backgroundColor: 'transparent',
+  },
+  fab: {
+    position: 'fixed', bottom: '90px', right: '20px',
+    width: '52px', height: '52px', borderRadius: '50%',
+    backgroundColor: '#a78bfa', border: 'none', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    boxShadow: '0 4px 20px rgba(167,139,250,0.4)', zIndex: 50,
+  },
+};
+
 const bs = {
   primary:   { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '9px 14px', backgroundColor: '#a78bfa', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
   secondary: { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '9px 14px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '8px', color: '#94a3b8', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
   ghost:     { display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 6px', backgroundColor: 'transparent', border: 'none', borderRadius: '6px', color: '#64748b', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' },
   icon:      { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' },
 };
+
 const m = {
   overlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 500 },
   sheet:   { backgroundColor: '#1e293b', borderRadius: '20px 20px 0 0', padding: '24px', width: '100%', maxWidth: '560px', border: '1px solid #334155' },
   header:  { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' },
   field:   { marginBottom: '14px' },
   label:   { display: 'block', fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '6px' },
-  input:   { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px', boxSizing: 'border-box' },
-  select:  { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px' },
+  input:   { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px', boxSizing: 'border-box', fontFamily: 'inherit' },
+  select:  { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px', fontFamily: 'inherit' },
 };
+
 const sp = {
-  page:    { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif' },
-  spinner: { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #a78bfa', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
-  header:  { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 50 },
-  content: { maxWidth: '760px', margin: '0 auto', padding: '20px 16px 40px' },
-  label:   { display: 'block', fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '6px' },
-  select:  { width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white', fontSize: '14px' },
-  empty:   { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', textAlign: 'center' },
+  page:      { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif' },
+  spinner:   { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #a78bfa', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
+  header:    { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 50 },
+  tabBar:    { display: 'flex', borderBottom: '1px solid #1e293b', backgroundColor: '#0f172a', position: 'sticky', top: '57px', zIndex: 49, padding: '0 16px' },
+  tab:       { display: 'flex', alignItems: 'center', gap: '6px', padding: '12px 16px', fontSize: '13px', fontWeight: '600', color: '#64748b', background: 'none', border: 'none', borderBottom: '2px solid transparent', cursor: 'pointer', fontFamily: 'inherit', transition: 'color 0.15s', whiteSpace: 'nowrap' },
+  tabActive: { color: '#a78bfa', borderBottomColor: '#a78bfa' },
+  content:   { maxWidth: '760px', margin: '0 auto', padding: '20px 16px 100px' },
+  label:     { display: 'block', fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '6px' },
+  empty:     { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', textAlign: 'center' },
 };
+
 const pageCSS = `
   * { box-sizing: border-box; }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
 `;
