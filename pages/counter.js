@@ -8,8 +8,6 @@ import {
   Play, Clock, Users, Building2, Trophy, ArrowLeft,
   Award, Check, X, Zap, Medal,
 } from 'lucide-react';
-import { db } from '../firebaseConfig';
-import { getDocs, collection, query, where } from 'firebase/firestore';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DISCIPLINE_DURATION = { '30sec': 30, '2min': 120, '3min': 180 };
@@ -147,21 +145,20 @@ export default function CounterPage() {
   const [counterUser, setCounterUser] = useState(null);
 
   // ── Member-scoped club/group data ────────────────────────────────────────
-  // The clubs and groups the CURRENT USER belongs to (as a member/coach)
-  const [memberClubs,  setMemberClubs]  = useState([]); // [{ id, name, logoUrl, … }]
-  const [memberGroups, setMemberGroups] = useState([]); // groups in the selected club that the user is in
+  const [memberClubs,   setMemberClubs]   = useState([]);
+  const [memberGroups,  setMemberGroups]  = useState([]);
   const [bootstrapDone, setBootstrapDone] = useState(false);
 
   // Selection state
   const [selectedClubId,  setSelectedClubId]  = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState('');
 
-  // Skippers in the selected group (all members of that group, not just the current user)
-  const [skippers,    setSkippers]    = useState([]); // group member docs { memberId, isSkipper, … }
-  const [clubMembers, setClubMembers] = useState([]); // ClubMember profiles for name resolution
+  // Skippers in the selected group
+  const [skippers,    setSkippers]    = useState([]);
+  const [clubMembers, setClubMembers] = useState([]);
 
   // Selected skipper to count for
-  const [selectedSkipper, setSelectedSkipper] = useState(null); // { memberId, clubId, firstName, lastName, rtdbUid }
+  const [selectedSkipper, setSelectedSkipper] = useState(null);
 
   // Session config modal
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -169,15 +166,15 @@ export default function CounterPage() {
   const [discipline,      setDiscipline]      = useState('30sec');
 
   // Live session
-  const [currentData,   setCurrentData]   = useState(null);
-  const [liveBpm,       setLiveBpm]       = useState(0);
-  const [sessionHistory,setSessionHistory]= useState([]);
-  const [bestRecord,    setBestRecord]    = useState(null);
+  const [currentData,    setCurrentData]    = useState(null);
+  const [liveBpm,        setLiveBpm]        = useState(0);
+  const [sessionHistory, setSessionHistory] = useState([]);
+  const [bestRecord,     setBestRecord]     = useState(null);
 
   // Post-session queue
-  const [pendingQueue,       setPendingQueue]       = useState([]);
-  const [isProcessingQueue,  setIsProcessingQueue]  = useState(false);
-  const [newlyEarnedBadges,  setNewlyEarnedBadges]  = useState([]);
+  const [pendingQueue,      setPendingQueue]      = useState([]);
+  const [isProcessingQueue, setIsProcessingQueue] = useState(false);
+  const [newlyEarnedBadges, setNewlyEarnedBadges] = useState([]);
 
   const telemetryRef     = useRef([]);
   const sessionStartRef  = useRef(null);
@@ -188,19 +185,15 @@ export default function CounterPage() {
     const uid = getCookie();
     if (!uid) { setBootstrapDone(true); return; }
 
-    // Load user profile for display + badge awarding
     UserFactory.get(uid).then(snap => {
       if (snap.exists()) setCounterUser({ id: uid, ...snap.data() });
     });
 
-    // Resolve which clubs/groups this user is a member of via UserMemberLink
     const unsub = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
       if (profiles.length === 0) { setBootstrapDone(true); return; }
 
-      // Collect unique clubIds the user belongs to
       const clubIdSet = new Set(profiles.map(p => p.member.clubId));
 
-      // Fetch full club objects so we have names/logos
       const allClubSnaps = await Promise.all(
         [...clubIdSet].map(id => ClubFactory.getById(id))
       );
@@ -217,9 +210,7 @@ export default function CounterPage() {
   // ── Auto-select club if only one ──────────────────────────────────────────
   useEffect(() => {
     if (!bootstrapDone || memberClubs.length === 0) return;
-    if (memberClubs.length === 1) {
-      setSelectedClubId(memberClubs[0].id);
-    }
+    if (memberClubs.length === 1) setSelectedClubId(memberClubs[0].id);
   }, [bootstrapDone, memberClubs]);
 
   // ── Load groups the user is in for the selected club ─────────────────────
@@ -237,50 +228,38 @@ export default function CounterPage() {
 
     const load = async () => {
       try {
-        // 1. Find the current user's memberId in this club via UserMemberLink
-        const linksSnap = await getDocs(
-          query(
-            collection(db, 'userMemberLinks'),
-            where('uid',    '==', uid),
-            where('clubId', '==', selectedClubId),
-          )
-        );
-        if (linksSnap.empty) return; // user has no link in this club
+        // 1. Find the current user's memberIds in this club via factory
+        const links = await UserMemberLinkFactory.getForUserInClub(uid, selectedClubId);
+        if (links.length === 0) return;
 
-        // Collect all memberIds this user is linked to in this club
-        const myMemberIds = new Set(
-          linksSnap.docs.map(d => d.data().memberId).filter(Boolean)
-        );
+        const myMemberIds = new Set(links.map(l => l.memberId).filter(Boolean));
 
-        // 2. Get all groups in this club (one-shot)
-        const groupsSnap = await getDocs(
-          collection(db, `clubs/${selectedClubId}/groups`)
-        );
-        const allGroups = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // 2. Get all groups in this club via factory (one-shot)
+        const allGroups = await GroupFactory.getGroupsByClubOnce(selectedClubId);
 
-        // 3. For each group, check if any of the user's memberIds appear
-        const memberGroupIds = new Set();
+        // 3. For each group, check membership and cache members for skipper filter
+        const memberGroupIds   = new Set();
+        const groupMembersCache = {};
+
         await Promise.all(
           allGroups.map(async group => {
-            const membersSnap = await getDocs(
-              collection(db, `clubs/${selectedClubId}/groups/${group.id}/members`)
-            );
-            const isMember = membersSnap.docs.some(
-              d => myMemberIds.has(d.data().memberId || d.id)
-            );
+            const members = await GroupFactory.getMembersByGroupOnce(selectedClubId, group.id);
+            groupMembersCache[group.id] = members;
+            const isMember = members.some(d => myMemberIds.has(d.memberId || d.id));
             if (isMember) memberGroupIds.add(group.id);
           })
         );
 
         if (cancelled) return;
 
-        const filteredGroups = allGroups.filter(g => memberGroupIds.has(g.id));
+        // 4. Filter to groups the user is in AND that have at least one skipper
+        const filteredGroups = allGroups
+          .filter(g => memberGroupIds.has(g.id))
+          .filter(g => groupMembersCache[g.id]?.some(m => m.isSkipper === true));
+
         setMemberGroups(filteredGroups);
 
-        // Auto-select if only one group
-        if (filteredGroups.length === 1) {
-          setSelectedGroupId(filteredGroups[0].id);
-        }
+        if (filteredGroups.length === 1) setSelectedGroupId(filteredGroups[0].id);
       } catch (e) {
         console.error('Failed to load member groups:', e);
       }
@@ -291,7 +270,6 @@ export default function CounterPage() {
   }, [selectedClubId]);
 
   // ── Load all skippers in the selected group ───────────────────────────────
-  // We show ALL skippers in the group, not just the current user
   useEffect(() => {
     if (!selectedClubId || !selectedGroupId) return;
     const u1 = GroupFactory.getSkippersByGroup(selectedClubId, selectedGroupId, setSkippers);
@@ -348,16 +326,8 @@ export default function CounterPage() {
     const firstName = profile?.firstName || '?';
     const lastName  = profile?.lastName  || '';
 
-    // Resolve uid for RTDB via UserMemberLink
-    const linksSnap = await getDocs(
-      query(
-        collection(db, 'userMemberLinks'),
-        where('clubId',       '==', selectedClubId),
-        where('memberId',     '==', memberId),
-        where('relationship', '==', 'self'),
-      )
-    );
-    const rtdbUid = linksSnap.empty ? null : linksSnap.docs[0].data().uid;
+    // Resolve uid for RTDB via factory
+    const rtdbUid = await UserMemberLinkFactory.getUidForMember(selectedClubId, memberId);
     return { memberId, clubId: selectedClubId, firstName, lastName, rtdbUid };
   };
 
@@ -477,8 +447,6 @@ export default function CounterPage() {
 
   const showClubPicker  = memberClubs.length > 1;
   const showGroupPicker = memberGroups.length > 1;
-  const selectedClub    = memberClubs.find(c => c.id === selectedClubId);
-  const selectedGroup   = memberGroups.find(g => g.id === selectedGroupId);
 
   // ── Loading state ─────────────────────────────────────────────────────────
   if (!bootstrapDone) {
@@ -540,17 +508,6 @@ export default function CounterPage() {
             </div>
           )}
 
-          {/* Single-club context label (no picker, just a subtle indicator) */}
-          {!showClubPicker && selectedClub && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '18px', padding: '8px 12px', backgroundColor: '#1e293b', borderRadius: '8px', border: '1px solid #334155' }}>
-              {selectedClub.logoUrl
-                ? <img src={selectedClub.logoUrl} style={{ width: '22px', height: '22px', borderRadius: '5px', objectFit: 'cover' }} alt={selectedClub.name} />
-                : <Building2 size={16} color="#475569" />
-              }
-              <span style={{ fontSize: '13px', color: '#64748b' }}>{selectedClub.name}</span>
-            </div>
-          )}
-
           {/* Group picker — only when user is in multiple groups */}
           {selectedClubId && showGroupPicker && (
             <div style={st.field}>
@@ -570,14 +527,6 @@ export default function CounterPage() {
                   </button>
                 ))}
               </div>
-            </div>
-          )}
-
-          {/* Single-group context label */}
-          {selectedClubId && !showGroupPicker && selectedGroup && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '18px', padding: '8px 12px', backgroundColor: '#1e293b', borderRadius: '8px', border: '1px solid #334155' }}>
-              <Users size={16} color="#475569" />
-              <span style={{ fontSize: '13px', color: '#64748b' }}>{selectedGroup.name}</span>
             </div>
           )}
 
@@ -810,34 +759,34 @@ export default function CounterPage() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const st = {
-  container:    { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
-  header:       { width: '100%', maxWidth: '500px', padding: '16px 0', borderBottom: '1px solid #1e293b', marginBottom: '24px' },
+  container:      { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
+  header:         { width: '100%', maxWidth: '500px', padding: '16px 0', borderBottom: '1px solid #1e293b', marginBottom: '24px' },
   selectionPanel: { width: '100%', maxWidth: '500px' },
-  spinner:      { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
-  field:        { marginBottom: '24px' },
-  label:        { display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '10px', fontWeight: '600' },
-  clubGrid:     { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' },
-  clubCard:     { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px 12px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.15s' },
+  spinner:        { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
+  field:          { marginBottom: '24px' },
+  label:          { display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '10px', fontWeight: '600' },
+  clubGrid:       { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' },
+  clubCard:       { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px 12px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.15s' },
   clubCardActive: { borderColor: '#3b82f6', backgroundColor: '#1e3a5f' },
-  groupGrid:    { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' },
-  groupCard:    { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px 12px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.15s' },
-  groupCardActive: { borderColor: '#22c55e', backgroundColor: '#052e16' },
-  grid:         { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' },
-  card:         { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.2s' },
-  avatar:       { width: '50px', height: '50px', backgroundColor: '#3b82f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' },
-  infoText:     { textAlign: 'center', color: '#64748b', fontSize: '14px', marginTop: '20px' },
-  modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.92)', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', zIndex: 100 },
-  modalContent: { backgroundColor: '#1e293b', padding: '30px', borderRadius: '20px', width: '100%', maxWidth: '400px', border: '1px solid #334155' },
-  toggleGroup:  { display: 'flex', gap: '10px', marginBottom: '20px' },
-  toggleBtn:    { flex: 1, padding: '12px', border: '1px solid #334155', borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'sans-serif' },
-  mainStartBtn: { width: '100%', padding: '15px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: 'bold', marginTop: '10px', display: 'flex', justifyContent: 'center', gap: '10px', alignItems: 'center', cursor: 'pointer', fontSize: '16px', fontFamily: 'sans-serif' },
-  activeHeader: { backgroundColor: '#1e293b', padding: '16px', borderRadius: '14px', marginBottom: '16px', width: '100%', maxWidth: '440px', border: '1px solid #334155' },
-  backBtn:      { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', marginBottom: '12px', padding: 0 },
-  userInfo:     { display: 'flex', alignItems: 'center', gap: '14px' },
-  counterButton:{ width: '280px', height: '280px', borderRadius: '50%', color: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', touchAction: 'manipulation', userSelect: 'none', transition: 'transform 0.08s, box-shadow 0.2s', margin: '10px 0' },
-  stepLabel:    { fontSize: '13px', letterSpacing: '4px', color: 'rgba(255,255,255,0.35)', fontWeight: '700' },
-  controls:     { display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', marginTop: '16px', marginBottom: '24px' },
-  stopButton:   { backgroundColor: '#ef4444', color: 'white', padding: '14px 32px', borderRadius: '12px', border: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '15px' },
+  groupGrid:      { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' },
+  groupCard:      { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px 12px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.15s' },
+  groupCardActive:{ borderColor: '#22c55e', backgroundColor: '#052e16' },
+  grid:           { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' },
+  card:           { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.2s' },
+  avatar:         { width: '50px', height: '50px', backgroundColor: '#3b82f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' },
+  infoText:       { textAlign: 'center', color: '#64748b', fontSize: '14px', marginTop: '20px' },
+  modalOverlay:   { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.92)', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', zIndex: 100 },
+  modalContent:   { backgroundColor: '#1e293b', padding: '30px', borderRadius: '20px', width: '100%', maxWidth: '400px', border: '1px solid #334155' },
+  toggleGroup:    { display: 'flex', gap: '10px', marginBottom: '20px' },
+  toggleBtn:      { flex: 1, padding: '12px', border: '1px solid #334155', borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'sans-serif' },
+  mainStartBtn:   { width: '100%', padding: '15px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: 'bold', marginTop: '10px', display: 'flex', justifyContent: 'center', gap: '10px', alignItems: 'center', cursor: 'pointer', fontSize: '16px', fontFamily: 'sans-serif' },
+  activeHeader:   { backgroundColor: '#1e293b', padding: '16px', borderRadius: '14px', marginBottom: '16px', width: '100%', maxWidth: '440px', border: '1px solid #334155' },
+  backBtn:        { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', marginBottom: '12px', padding: 0 },
+  userInfo:       { display: 'flex', alignItems: 'center', gap: '14px' },
+  counterButton:  { width: '280px', height: '280px', borderRadius: '50%', color: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', touchAction: 'manipulation', userSelect: 'none', transition: 'transform 0.08s, box-shadow 0.2s', margin: '10px 0' },
+  stepLabel:      { fontSize: '13px', letterSpacing: '4px', color: 'rgba(255,255,255,0.35)', fontWeight: '700' },
+  controls:       { display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', marginTop: '16px', marginBottom: '24px' },
+  stopButton:     { backgroundColor: '#ef4444', color: 'white', padding: '14px 32px', borderRadius: '12px', border: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '15px' },
   historySection: { width: '100%', maxWidth: '440px', borderTop: '1px solid #1e293b', paddingTop: '16px' },
-  historyItem:  { backgroundColor: '#1e293b', padding: '12px 16px', borderRadius: '10px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderLeft: '3px solid #3b82f6' },
+  historyItem:    { backgroundColor: '#1e293b', padding: '12px 16px', borderRadius: '10px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderLeft: '3px solid #3b82f6' },
 };
