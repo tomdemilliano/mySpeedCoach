@@ -142,7 +142,8 @@ const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished })
 // ════════════════════════════════════════════════════════════════════════════
 export default function CounterPage() {
   // ── Current user (counter) ───────────────────────────────────────────────
-  const [counterUser, setCounterUser] = useState(null);
+  const [counterUser,   setCounterUser]   = useState(null);
+  const [isSuperAdmin,  setIsSuperAdmin]  = useState(false);
 
   // ── Member-scoped club/group data ────────────────────────────────────────
   const [memberClubs,   setMemberClubs]   = useState([]);
@@ -186,10 +187,27 @@ export default function CounterPage() {
     if (!uid) { setBootstrapDone(true); return; }
 
     UserFactory.get(uid).then(snap => {
-      if (snap.exists()) setCounterUser({ id: uid, ...snap.data() });
+      if (!snap.exists()) return;
+      const user = { id: uid, ...snap.data() };
+      setCounterUser(user);
+
+      if (user.role === 'superadmin') {
+        // SuperAdmin sees all clubs directly — no UserMemberLink needed
+        setIsSuperAdmin(true);
+        const unsub = ClubFactory.getAll((clubs) => {
+          setMemberClubs(clubs);
+          setBootstrapDone(true);
+        });
+        return () => unsub();
+      }
     });
 
+    // Normal member path via UserMemberLink
     const unsub = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
+      // Skip if this user turned out to be superadmin (handled above)
+      const snap = await UserFactory.get(uid);
+      if (snap.exists() && snap.data().role === 'superadmin') return;
+
       if (profiles.length === 0) { setBootstrapDone(true); return; }
 
       const clubIdSet = new Set(profiles.map(p => p.member.clubId));
@@ -228,37 +246,50 @@ export default function CounterPage() {
 
     const load = async () => {
       try {
+        // 2. Get all groups in this club via factory (one-shot)
+        const allGroups = await GroupFactory.getGroupsByClubOnce(selectedClubId);
+
+        // 3. For each group, fetch members and cache them
+        const groupMembersCache = {};
+        await Promise.all(
+          allGroups.map(async group => {
+            const members = await GroupFactory.getMembersByGroupOnce(selectedClubId, group.id);
+            groupMembersCache[group.id] = members;
+          })
+        );
+
+        if (cancelled) return;
+
+        if (isSuperAdmin) {
+          // SuperAdmin sees all groups that have at least one skipper
+          const filteredGroups = allGroups.filter(
+            g => groupMembersCache[g.id]?.some(m => m.isSkipper === true)
+          );
+          setMemberGroups(filteredGroups);
+          if (filteredGroups.length === 1) setSelectedGroupId(filteredGroups[0].id);
+          return;
+        }
+
         // 1. Find the current user's memberIds in this club via factory
         const links = await UserMemberLinkFactory.getForUserInClub(uid, selectedClubId);
         if (links.length === 0) return;
 
         const myMemberIds = new Set(links.map(l => l.memberId).filter(Boolean));
 
-        // 2. Get all groups in this club via factory (one-shot)
-        const allGroups = await GroupFactory.getGroupsByClubOnce(selectedClubId);
-
-        // 3. For each group, check membership and cache members for skipper filter
-        const memberGroupIds   = new Set();
-        const groupMembersCache = {};
-
-        await Promise.all(
-          allGroups.map(async group => {
-            const members = await GroupFactory.getMembersByGroupOnce(selectedClubId, group.id);
-            groupMembersCache[group.id] = members;
-            const isMember = members.some(d => myMemberIds.has(d.memberId || d.id));
-            if (isMember) memberGroupIds.add(group.id);
-          })
-        );
-
-        if (cancelled) return;
-
         // 4. Filter to groups the user is in AND that have at least one skipper
+        const memberGroupIds = new Set();
+        allGroups.forEach(group => {
+          const isMember = groupMembersCache[group.id]?.some(
+            d => myMemberIds.has(d.memberId || d.id)
+          );
+          if (isMember) memberGroupIds.add(group.id);
+        });
+
         const filteredGroups = allGroups
           .filter(g => memberGroupIds.has(g.id))
           .filter(g => groupMembersCache[g.id]?.some(m => m.isSkipper === true));
 
         setMemberGroups(filteredGroups);
-
         if (filteredGroups.length === 1) setSelectedGroupId(filteredGroups[0].id);
       } catch (e) {
         console.error('Failed to load member groups:', e);
@@ -478,7 +509,7 @@ export default function CounterPage() {
       <div style={st.container}>
         <div style={st.header}>
           <h1 style={{ fontSize: '20px', display: 'flex', alignItems: 'center', gap: '10px', margin: 0 }}>
-            <Users size={24} color="#3b82f6" /> Skipper Selectie
+            <Users size={24} color="#3b82f6" /> Voor wie ga jij tellen?
           </h1>
         </div>
         <div style={st.selectionPanel}>
@@ -488,7 +519,7 @@ export default function CounterPage() {
             <div style={st.field}>
               <label style={st.label}>
                 <Building2 size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
-                1. Selecteer Club
+                Club
               </label>
               <div style={st.clubGrid}>
                 {memberClubs.map(club => (
@@ -513,7 +544,7 @@ export default function CounterPage() {
             <div style={st.field}>
               <label style={st.label}>
                 <Users size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
-                {showClubPicker ? '2.' : '1.'} Selecteer Groep
+                Groep
               </label>
               <div style={st.groupGrid}>
                 {memberGroups.map(group => (
@@ -535,7 +566,7 @@ export default function CounterPage() {
             <div style={st.field}>
               <label style={st.label}>
                 <Hash size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
-                {showClubPicker && showGroupPicker ? '3.' : showClubPicker || showGroupPicker ? '2.' : '1.'} Kies de Skipper
+                Skipper
               </label>
               {skippers.length > 0 ? (
                 <div style={st.grid}>
