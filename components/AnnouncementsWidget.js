@@ -1,8 +1,8 @@
 /**
  * AnnouncementsWidget
  *
- * Compact home-screen widget showing the most recent announcements
- * for a skipper's groups.
+ * Compact home-screen widget showing the most recent *active* announcements
+ * for a skipper's groups. Active = current date is between startsAt and expiresAt.
  *
  * All data access goes through AnnouncementFactory and GroupFactory
  * from constants/dbSchema.js — no direct Firestore calls.
@@ -20,6 +20,24 @@ const ANNOUNCEMENT_TYPES = {
   cancel:   { color: '#ef4444', emoji: '❌' },
   reminder: { color: '#f59e0b', emoji: '🔔' },
   result:   { color: '#22c55e', emoji: '🏆' },
+};
+
+// Is the announcement currently visible (after startsAt, before expiresAt)?
+const isLive = (ann) => {
+  const now = Date.now();
+  if (ann.startsAt) {
+    const ms = ann.startsAt?.seconds
+      ? ann.startsAt.seconds * 1000
+      : new Date(ann.startsAt).getTime();
+    if (!isNaN(ms) && ms > now) return false;
+  }
+  if (ann.expiresAt) {
+    const ms = ann.expiresAt?.seconds
+      ? ann.expiresAt.seconds * 1000
+      : new Date(ann.expiresAt).getTime();
+    if (!isNaN(ms) && ms < now) return false;
+  }
+  return true;
 };
 
 // Resolve which groups the member belongs to using GroupFactory
@@ -53,7 +71,6 @@ export default function AnnouncementsWidget({ memberContext }) {
 
     resolveGroupIdsForMember(clubId, memberId).then(gids => {
       if (gids.length === 0) { setLoading(false); return; }
-      // Subscribe via AnnouncementFactory — no direct Firestore call
       unsub = AnnouncementFactory.subscribeForUser(gids, (items) => {
         setAnnouncements(items);
         setLoading(false);
@@ -63,9 +80,10 @@ export default function AnnouncementsWidget({ memberContext }) {
     return () => unsub();
   }, [memberContext]);
 
-  const visible = announcements.slice(0, 3);
+  // Filter to active announcements only, then take the first 3
+  const visible = announcements.filter(isLive).slice(0, 3);
 
-  if (loading || !memberContext || announcements.length === 0) return null;
+  if (loading || !memberContext || visible.length === 0) return null;
 
   return (
     <div style={{ marginBottom: '24px' }}>
@@ -75,7 +93,7 @@ export default function AnnouncementsWidget({ memberContext }) {
           <Megaphone size={14} color="#a78bfa" />
           <span>Aankondigingen</span>
           <span style={{ fontSize: '10px', fontWeight: '800', color: '#a78bfa', backgroundColor: '#a78bfa22', border: '1px solid #a78bfa44', padding: '1px 6px', borderRadius: '8px' }}>
-            {announcements.length}
+            {visible.length}
           </span>
         </div>
         <a href="/announcements" style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
