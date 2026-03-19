@@ -188,28 +188,31 @@ export default function CounterPage() {
     if (!uid) { setBootstrapDone(true); return; }
 
     let unsubClubs = () => {};
+    let cancelled  = false;
 
-    UserFactory.get(uid).then(snap => {
-      if (!snap.exists()) return;
+    const bootstrap = async () => {
+      const snap = await UserFactory.get(uid);
+      if (!snap.exists() || cancelled) { setBootstrapDone(true); return; }
+
       const user = { id: uid, ...snap.data() };
       setCounterUser(user);
 
+      // ── SuperAdmin: all clubs ─────────────────────────────────────────────
       if (user.role === 'superadmin') {
-        // SuperAdmin sees all clubs — one-shot fetch avoids empty first emission
         setIsSuperAdmin(true);
-        ClubFactory.getAll((clubs) => {
-          if (clubs.length === 0) return; // wait for real data
+        unsubClubs = ClubFactory.getAll((clubs) => {
+          if (cancelled || clubs.length === 0) return;
           setMemberClubs(clubs);
           setBootstrapDone(true);
         });
         return;
       }
 
+      // ── ClubAdmin: clubs where they are a coach in at least one group ─────
       if (user.role === 'clubadmin') {
-        // ClubAdmin: find clubs where they are a coach in any group
         setIsClubAdmin(true);
-        ClubFactory.getAll(async (allClubs) => {
-          if (allClubs.length === 0) return; // wait for real data
+        unsubClubs = ClubFactory.getAll(async (allClubs) => {
+          if (cancelled || allClubs.length === 0) return;
           const adminClubIds = new Set();
           await Promise.all(
             allClubs.map(async club => {
@@ -223,6 +226,7 @@ export default function CounterPage() {
               );
             })
           );
+          if (cancelled) return;
           const adminClubs = allClubs.filter(c => adminClubIds.has(c.id));
           setMemberClubs(adminClubs);
           setBootstrapDone(true);
@@ -230,14 +234,16 @@ export default function CounterPage() {
         return;
       }
 
-      // Normal member path via UserMemberLink
-      const unsubLinks = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
+      // ── Normal member: clubs via UserMemberLink ───────────────────────────
+      unsubClubs = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
+        if (cancelled) return;
         if (profiles.length === 0) { setBootstrapDone(true); return; }
 
-        const clubIdSet = new Set(profiles.map(p => p.member.clubId));
+        const clubIdSet    = new Set(profiles.map(p => p.member.clubId));
         const allClubSnaps = await Promise.all(
           [...clubIdSet].map(id => ClubFactory.getById(id))
         );
+        if (cancelled) return;
         const resolvedClubs = allClubSnaps
           .filter(s => s.exists())
           .map(s => ({ id: s.id, ...s.data() }));
@@ -245,10 +251,10 @@ export default function CounterPage() {
         setMemberClubs(resolvedClubs);
         setBootstrapDone(true);
       });
-      unsubClubs = unsubLinks;
-    });
+    };
 
-    return () => unsubClubs();
+    bootstrap();
+    return () => { cancelled = true; unsubClubs(); };
   }, []);
 
   // ── Auto-select club if only one ──────────────────────────────────────────
