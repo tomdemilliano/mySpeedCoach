@@ -25,6 +25,14 @@ const DEFAULT_ZONES = [
 
 const DISCIPLINE_DURATION = { '30sec': 30, '2min': 120, '3min': 180 };
 
+// ─── Cookie helper (mirrors counter.js) ──────────────────────────────────────
+const COOKIE_KEY = 'msc_uid';
+const getCookie = () => {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${COOKIE_KEY}=([^;]*)`));
+  return match ? match[1] : null;
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const getZoneColor = (bpm, zones) => {
   const z = (zones || DEFAULT_ZONES).find(z => bpm >= z.min && bpm < z.max);
@@ -94,9 +102,6 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 // ─── Skipper Card ─────────────────────────────────────────────────────────────
-// uid       = Firebase RTDB key (may be null if member has no account)
-// member    = ClubMember profile { id (memberId), firstName, lastName, … }
-// clubId    = needed for ClubMember PB lookup (handled by parent)
 function SkipperCard({
   uid, member, liveData, history, personalBest,
   ghostCurve, showGhost, onToggleGhost, buildChartData,
@@ -104,12 +109,8 @@ function SkipperCard({
 }) {
   const session = liveData?.session || {};
   const currentBpm = liveData?.bpm || 0;
-
-  // Use the member's heart-rate zones if available (would require loading full
-  // user profile — for now fall back to defaults since zones live on users doc)
   const zones = DEFAULT_ZONES;
   const bpmColor = getZoneColor(currentBpm, zones);
-
   const hist = history || [];
   const latestPoint = hist[hist.length - 1] || {};
   const currentTempo = latestPoint.tempo || 0;
@@ -121,7 +122,6 @@ function SkipperCard({
   const disciplineDuration = DISCIPLINE_DURATION[session.discipline] || 30;
   const expectedScore = calcExpected(session);
 
-  // Display name — always from ClubMember profile
   const displayName = member
     ? `${member.firstName || ''} ${member.lastName || ''}`.trim()
     : uid || '?';
@@ -341,38 +341,47 @@ function SkipperCard({
 // MAIN DASHBOARD
 // ════════════════════════════════════════════════════════════════════════════
 export default function Dashboard() {
-  const [view, setView] = useState('select-club');
-  const [clubs, setClubs] = useState([]);
-  const [groups, setGroups] = useState([]);
+  // ── Current user ─────────────────────────────────────────────────────────
+  const [currentUser,   setCurrentUser]   = useState(null);
+  const isSuperAdminRef = useRef(false);
+  const isClubAdminRef  = useRef(false);
 
-  // Feature 8.11: group members are now ClubMember-keyed docs { memberId, isSkipper, … }
-  const [groupMembers, setGroupMembers] = useState([]);
+  // ── Bootstrap state ───────────────────────────────────────────────────────
+  const [bootstrapDone, setBootstrapDone] = useState(false);
 
-  // Feature 8.11: ClubMember profiles for name resolution
-  const [clubMemberProfiles, setClubMemberProfiles] = useState([]); // [{ id: memberId, firstName, lastName, … }]
+  // ── Role-scoped club / group data ─────────────────────────────────────────
+  const [memberClubs,  setMemberClubs]  = useState([]);
+  const [memberGroups, setMemberGroups] = useState([]);
 
-  // Feature 8.11: memberId → uid map (resolved from UserMemberLink, needed for RTDB)
-  const [memberUidMap, setMemberUidMap] = useState({}); // { [memberId]: uid | null }
+  // ── Selection state ───────────────────────────────────────────────────────
+  const [selectedClubId,  setSelectedClubId]  = useState('');
+  const [selectedGroupId, setSelectedGroupId] = useState('');
 
-  const [selectedClub, setSelectedClub] = useState(null);
-  const [selectedGroup, setSelectedGroup] = useState(null);
+  // Derived objects (for display / passing down)
+  const selectedClub  = memberClubs.find(c => c.id === selectedClubId)  || null;
+  const selectedGroup = memberGroups.find(g => g.id === selectedGroupId) || null;
 
-  // Feature 8.11: selectedSkipperIds stays uid-based for RTDB subscriptions,
-  // but each entry is now a uid that was resolved from a memberId.
-  // We keep a parallel selectedSkipperMemberIds array to look up ClubMember data.
-  const [selectedSkipperUids, setSelectedSkipperUids] = useState([]);
+  // ── Group members & ClubMember profiles ───────────────────────────────────
+  const [groupMembers,        setGroupMembers]        = useState([]);
+  const [clubMemberProfiles,  setClubMemberProfiles]  = useState([]);
+  const [memberUidMap,        setMemberUidMap]        = useState({});
+
+  // ── Skipper selection (memberId-based; uid resolved separately) ───────────
   const [selectedSkipperMemberIds, setSelectedSkipperMemberIds] = useState([]);
+  const [selectedSkipperUids,      setSelectedSkipperUids]      = useState([]);
 
+  // ── Live data ─────────────────────────────────────────────────────────────
   const [liveSessions, setLiveSessions] = useState({});
   const liveRef = useRef({});
-
-  const [history, setHistory] = useState({});
+  const [history,       setHistory]       = useState({});
   const [personalBests, setPersonalBests] = useState({});
-  const [ghostCurves, setGhostCurves] = useState({});
-  const [showGhost, setShowGhost] = useState({});
+  const [ghostCurves,   setGhostCurves]   = useState({});
+  const [showGhost,     setShowGhost]     = useState({});
 
+  // ── UI state ──────────────────────────────────────────────────────────────
+  const [view,            setView]            = useState('selection');   // 'selection' | 'monitoring'
   const [expandedSkipper, setExpandedSkipper] = useState(null);
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobile,        setIsMobile]        = useState(false);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -381,50 +390,163 @@ export default function Dashboard() {
     return () => window.removeEventListener('resize', check);
   }, []);
 
+  // ── Bootstrap: identical role logic to counter.js ────────────────────────
   useEffect(() => {
-    const u1 = ClubFactory.getAll(setClubs);
-    return () => u1();
+    const uid = getCookie();
+    if (!uid) { setBootstrapDone(true); return; }
+
+    let unsubClubs = () => {};
+    let cancelled  = false;
+
+    const bootstrap = async () => {
+      const snap = await UserFactory.get(uid);
+      if (!snap.exists() || cancelled) { setBootstrapDone(true); return; }
+
+      const user = { id: uid, ...snap.data() };
+      setCurrentUser(user);
+
+      // SuperAdmin: all clubs
+      if (user.role === 'superadmin') {
+        isSuperAdminRef.current = true;
+        unsubClubs = ClubFactory.getAll((clubs) => {
+          if (cancelled || clubs.length === 0) return;
+          setMemberClubs(clubs);
+          setBootstrapDone(true);
+        });
+        return;
+      }
+
+      // ClubAdmin: clubs where they have a UserMemberLink
+      if (user.role === 'clubadmin') {
+        isClubAdminRef.current = true;
+        unsubClubs = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
+          if (cancelled) return;
+          if (profiles.length === 0) { setBootstrapDone(true); return; }
+          const clubIdSet = new Set(profiles.map(p => p.member.clubId));
+          const allClubSnaps = await Promise.all([...clubIdSet].map(id => ClubFactory.getById(id)));
+          if (cancelled) return;
+          const adminClubs = allClubSnaps.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() }));
+          setMemberClubs(adminClubs);
+          setBootstrapDone(true);
+        });
+        return;
+      }
+
+      // Normal member: clubs via UserMemberLink
+      unsubClubs = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
+        if (cancelled) return;
+        if (profiles.length === 0) { setBootstrapDone(true); return; }
+        const clubIdSet    = new Set(profiles.map(p => p.member.clubId));
+        const allClubSnaps = await Promise.all([...clubIdSet].map(id => ClubFactory.getById(id)));
+        if (cancelled) return;
+        const resolvedClubs = allClubSnaps.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() }));
+        setMemberClubs(resolvedClubs);
+        setBootstrapDone(true);
+      });
+    };
+
+    bootstrap();
+    return () => { cancelled = true; unsubClubs(); };
   }, []);
 
+  // Auto-select club when there is exactly one
   useEffect(() => {
-    if (!selectedClub) return;
-    const u = GroupFactory.getGroupsByClub(selectedClub.id, setGroups);
-    return () => u();
-  }, [selectedClub]);
+    if (!bootstrapDone || memberClubs.length === 0) return;
+    if (memberClubs.length === 1) setSelectedClubId(memberClubs[0].id);
+  }, [bootstrapDone, memberClubs]);
 
-  // Feature 8.11: load group members (memberId-keyed) + ClubMember profiles for names
+  // ── Load groups scoped to role + selected club ────────────────────────────
   useEffect(() => {
-    if (!selectedClub || !selectedGroup) return;
+    if (!selectedClubId) return;
+    setSelectedGroupId('');
+    setMemberGroups([]);
+    setGroupMembers([]);
+    setClubMemberProfiles([]);
+    setMemberUidMap({});
 
-    const u1 = GroupFactory.getMembersByGroup(selectedClub.id, selectedGroup.id, setGroupMembers);
-    const u2 = ClubMemberFactory.getAll(selectedClub.id, setClubMemberProfiles);
-
-    return () => { u1(); u2(); };
-  }, [selectedClub, selectedGroup]);
-
-  // Feature 8.11: whenever group members change, resolve memberId → uid via UserMemberLink
-  useEffect(() => {
-    if (groupMembers.length === 0) return;
-
+    const uid = getCookie();
+    if (!uid) return;
     let cancelled = false;
-    const resolve = async () => {
-      const { getDocs, collection, query, where } = await import('firebase/firestore');
-      const { db } = await import('../firebaseConfig');
 
+    const load = async () => {
+      try {
+        const allGroups = await GroupFactory.getGroupsByClubOnce(selectedClubId);
+
+        // Cache all group members upfront (one pass)
+        const groupMembersCache = {};
+        await Promise.all(
+          allGroups.map(async group => {
+            const members = await GroupFactory.getMembersByGroupOnce(selectedClubId, group.id);
+            groupMembersCache[group.id] = members;
+          })
+        );
+
+        if (cancelled) return;
+
+        // SuperAdmin & ClubAdmin: all groups that contain at least one skipper
+        if (isSuperAdminRef.current || isClubAdminRef.current) {
+          const filteredGroups = allGroups.filter(
+            g => groupMembersCache[g.id]?.some(m => m.isSkipper === true)
+          );
+          setMemberGroups(filteredGroups);
+          if (filteredGroups.length === 1) setSelectedGroupId(filteredGroups[0].id);
+          return;
+        }
+
+        // Normal member: only groups they belong to that have at least one skipper
+        const links = await UserMemberLinkFactory.getForUserInClub(uid, selectedClubId);
+        if (links.length === 0) return;
+
+        const myMemberIds = new Set(links.map(l => l.memberId).filter(Boolean));
+
+        const memberGroupIds = new Set();
+        allGroups.forEach(group => {
+          const isMember = groupMembersCache[group.id]?.some(
+            d => myMemberIds.has(d.memberId || d.id)
+          );
+          if (isMember) memberGroupIds.add(group.id);
+        });
+
+        const filteredGroups = allGroups
+          .filter(g => memberGroupIds.has(g.id))
+          .filter(g => groupMembersCache[g.id]?.some(m => m.isSkipper === true));
+
+        setMemberGroups(filteredGroups);
+        if (filteredGroups.length === 1) setSelectedGroupId(filteredGroups[0].id);
+      } catch (e) {
+        console.error('[Dashboard] Failed to load groups:', e);
+      }
+    };
+
+    load();
+    return () => { cancelled = true; };
+  }, [selectedClubId]);
+
+  // ── Load group members + ClubMember profiles when group is selected ───────
+  useEffect(() => {
+    if (!selectedClubId || !selectedGroupId) return;
+    // Reset skipper selection when group changes
+    setSelectedSkipperMemberIds([]);
+    setSelectedSkipperUids([]);
+
+    const u1 = GroupFactory.getMembersByGroup(selectedClubId, selectedGroupId, setGroupMembers);
+    const u2 = ClubMemberFactory.getAll(selectedClubId, setClubMemberProfiles);
+    return () => { u1(); u2(); };
+  }, [selectedClubId, selectedGroupId]);
+
+  // ── Resolve memberId → uid via UserMemberLink ─────────────────────────────
+  useEffect(() => {
+    if (groupMembers.length === 0 || !selectedClubId) return;
+    let cancelled = false;
+
+    const resolve = async () => {
       const map = {};
       await Promise.all(
         groupMembers.map(async (m) => {
           const memberId = m.memberId || m.id;
           try {
-            const snap = await getDocs(
-              query(
-                collection(db, 'userMemberLinks'),
-                where('clubId',       '==', selectedClub.id),
-                where('memberId',     '==', memberId),
-                where('relationship', '==', 'self'),
-              )
-            );
-            map[memberId] = snap.empty ? null : snap.docs[0].data().uid;
+            const uid = await UserMemberLinkFactory.getUidForMember(selectedClubId, memberId);
+            map[memberId] = uid || null;
           } catch {
             map[memberId] = null;
           }
@@ -435,9 +557,9 @@ export default function Dashboard() {
 
     resolve();
     return () => { cancelled = true; };
-  }, [groupMembers, selectedClub]);
+  }, [groupMembers, selectedClubId]);
 
-  // RTDB live subscriptions — still uid-based, unchanged
+  // ── RTDB live subscriptions ───────────────────────────────────────────────
   useEffect(() => {
     if (selectedSkipperUids.length === 0) return;
     const unsubs = selectedSkipperUids.map(uid =>
@@ -450,11 +572,11 @@ export default function Dashboard() {
     return () => unsubs.forEach(u => u && u());
   }, [selectedSkipperUids]);
 
-  // Feature 8.11: personal best now reads from ClubMember path
+  // ── Personal best loader ──────────────────────────────────────────────────
   const loadPersonalBest = useCallback(async (uid, memberId, discipline, sessionType) => {
-    if (!memberId || !discipline || !selectedClub) return;
+    if (!memberId || !discipline || !selectedClubId) return;
     const rec = await ClubMemberFactory.getBestRecord(
-      selectedClub.id, memberId, discipline, sessionType || 'Training'
+      selectedClubId, memberId, discipline, sessionType || 'Training'
     );
     if (!rec) return;
     setPersonalBests(prev => ({ ...prev, [uid]: rec }));
@@ -463,7 +585,7 @@ export default function Dashboard() {
     if (rec.telemetry && Object.keys(ghost).length > 1) {
       setShowGhost(prev => ({ ...prev, [uid]: true }));
     }
-  }, [selectedClub]);
+  }, [selectedClubId]);
 
   // Watch live sessions to trigger PB loads when discipline changes
   const disciplineRef = useRef({});
@@ -474,14 +596,13 @@ export default function Dashboard() {
       const key   = `${uid}-${disc}-${sType}`;
       if (disc && disciplineRef.current[uid] !== key) {
         disciplineRef.current[uid] = key;
-        // Resolve memberId for this uid
         const memberId = Object.keys(memberUidMap).find(mid => memberUidMap[mid] === uid) || null;
         loadPersonalBest(uid, memberId, disc, sType);
       }
     });
   }, [liveSessions, selectedSkipperUids, memberUidMap, loadPersonalBest]);
 
-  // Live history ticker — unchanged, uid-keyed
+  // ── Live history ticker ───────────────────────────────────────────────────
   const sessionStartRef = useRef({});
   useEffect(() => {
     const interval = setInterval(() => {
@@ -515,6 +636,7 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [selectedSkipperUids]);
 
+  // ── Helpers ───────────────────────────────────────────────────────────────
   const buildChartData = (uid) => {
     const hist  = history[uid] || [];
     const ghost = ghostCurves[uid] || {};
@@ -525,17 +647,14 @@ export default function Dashboard() {
     });
   };
 
-  // Feature 8.11: look up ClubMember profile by memberId
   const getMember = (memberId) =>
     clubMemberProfiles.find(m => m.id === memberId) || null;
 
-  // Feature 8.11: skippers available for selection — those with isSkipper: true
-  const availableSkippers = groupMembers.filter(m => m.isSkipper);
+  // Only skippers are selectable
+  const availableSkippers = groupMembers.filter(m => m.isSkipper === true);
 
-  // Toggle a skipper: uses uid for RTDB, memberId for ClubMember lookups
   const toggleSkipper = (memberId) => {
     const uid = memberUidMap[memberId] ?? null;
-
     const alreadySelected = selectedSkipperMemberIds.includes(memberId);
 
     if (alreadySelected) {
@@ -551,171 +670,84 @@ export default function Dashboard() {
     }
   };
 
-  // ── Selection screens ────────────────────────────────────────────────────────
-  if (view === 'select-club') {
+  // Derived display helpers
+  const showClubPicker  = memberClubs.length > 1;
+  const showGroupPicker = memberGroups.length > 1;
+  const canStartMonitoring = selectedSkipperMemberIds.length > 0;
+
+  // ── Loading state ─────────────────────────────────────────────────────────
+  if (!bootstrapDone) {
     return (
-      <div style={css.page}>
-        <style>{responsiveCSS}</style>
-        <div style={css.selectionWrap}>
-          <div style={css.selectionHeader}>
-            <Building2 size={20} color="#3b82f6" />
-            <h2 style={{ margin: 0, fontSize: isMobile ? '18px' : '22px' }}>Selecteer Club</h2>
-          </div>
-          <div style={css.cardGrid}>
-            {clubs.map(club => (
-              <button key={club.id} style={css.selectCard} onClick={() => {
-                setSelectedClub(club);
-                setGroups([]);
-                setSelectedGroup(null);
-                setGroupMembers([]);
-                setClubMemberProfiles([]);
-                setMemberUidMap({});
-                setView('select-group');
-              }}>
-                <Building2 size={28} color="#3b82f6" style={{ marginBottom: '8px' }} />
-                <div style={css.selectCardName}>{club.name}</div>
-                <ChevronRight size={14} color="#475569" />
-              </button>
-            ))}
-          </div>
-          {clubs.length === 0 && <p style={css.infoText}>Geen clubs gevonden.</p>}
-        </div>
+      <div style={{ ...css.page, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={css.spinner} />
       </div>
     );
   }
 
-  if (view === 'select-group') {
+  // ── No memberships ────────────────────────────────────────────────────────
+  if (bootstrapDone && memberClubs.length === 0) {
     return (
-      <div style={css.page}>
-        <style>{responsiveCSS}</style>
-        <div style={css.selectionWrap}>
-          <button style={css.backBtn} onClick={() => setView('select-club')}>
-            <ArrowLeft size={15} /> Terug naar clubs
-          </button>
-          <div style={css.selectionHeader}>
-            <Users size={20} color="#3b82f6" />
-            <h2 style={{ margin: 0, fontSize: isMobile ? '16px' : '20px' }}>{selectedClub?.name} — Groep</h2>
-          </div>
-          <div style={css.cardGrid}>
-            {groups.map(group => (
-              <button key={group.id} style={css.selectCard} onClick={() => {
-                setSelectedGroup(group);
-                setGroupMembers([]);
-                setClubMemberProfiles([]);
-                setMemberUidMap({});
-                setSelectedSkipperUids([]);
-                setSelectedSkipperMemberIds([]);
-                setHistory({});
-                setView('select-skippers');
-              }}>
-                <Users size={28} color="#22c55e" style={{ marginBottom: '8px' }} />
-                <div style={css.selectCardName}>{group.name}</div>
-                <ChevronRight size={14} color="#475569" />
-              </button>
-            ))}
-          </div>
-          {groups.length === 0 && <p style={css.infoText}>Geen groepen gevonden.</p>}
-        </div>
+      <div style={{ ...css.page, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
+        <Users size={40} color="#334155" />
+        <p style={{ color: '#64748b', fontSize: '14px', textAlign: 'center', maxWidth: '280px' }}>
+          Je bent nog geen lid van een club. Vraag toegang aan via je profiel.
+        </p>
+        <a href="/" style={{ padding: '10px 20px', backgroundColor: '#3b82f6', color: 'white', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '14px' }}>
+          Naar profiel
+        </a>
       </div>
     );
   }
 
-  if (view === 'select-skippers') {
+  // ── Monitoring view ───────────────────────────────────────────────────────
+  if (view === 'monitoring') {
+    const monitoredSkippers = selectedSkipperMemberIds.map(memberId => ({
+      memberId,
+      uid:    memberUidMap[memberId] ?? null,
+      member: getMember(memberId),
+    }));
+
     return (
       <div style={css.page}>
         <style>{responsiveCSS}</style>
-        <div style={css.selectionWrap}>
-          <button style={css.backBtn} onClick={() => setView('select-group')}>
-            <ArrowLeft size={15} /> Terug naar groepen
+        <div style={css.header}>
+          <button style={css.backBtn} onClick={() => setView('selection')}>
+            <ArrowLeft size={15} /> {isMobile ? 'Terug' : 'Wijzig selectie'}
           </button>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-            <div style={css.selectionHeader}>
-              <Trophy size={20} color="#facc15" />
-              <h2 style={{ margin: 0, fontSize: isMobile ? '15px' : '18px' }}>
-                {selectedGroup?.name} ({selectedSkipperMemberIds.length}/4)
-              </h2>
-            </div>
-            <button
-              disabled={selectedSkipperMemberIds.length === 0}
-              onClick={() => { setExpandedSkipper(null); setView('monitoring'); }}
-              style={{ ...css.primaryBtn, opacity: selectedSkipperMemberIds.length === 0 ? 0.4 : 1, width: 'auto', padding: '10px 20px' }}
-            >
-              Start Monitoring →
-            </button>
+          <h1 style={{ margin: 0, fontSize: isMobile ? '14px' : '18px', fontWeight: '800', color: '#f1f5f9', textAlign: 'center' }}>
+            {isMobile ? 'MONITORING' : 'SPEED MONITORING LIVE'}
+          </h1>
+          <div style={{ fontSize: '11px', color: '#475569', textAlign: 'right', display: isMobile ? 'none' : 'block' }}>
+            {selectedClub?.name} · {selectedGroup?.name}
           </div>
-          <div style={css.skipperGrid}>
-            {availableSkippers.map(s => {
-              const memberId  = s.memberId || s.id;
-              const member    = getMember(memberId);
-              const uid       = memberUidMap[memberId] ?? null;
-              const isSelected = selectedSkipperMemberIds.includes(memberId);
-              const liveData  = uid ? liveSessions[uid] : null;
-              const isOnline  = liveData?.connectionStatus === 'online';
+        </div>
 
-              const firstName = member?.firstName || '?';
-              const lastName  = member?.lastName  || '';
-              const initials  = `${firstName[0] || '?'}${lastName[0] || ''}`.toUpperCase();
-
+        {isMobile ? (
+          <div style={{ padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px', paddingBottom: '24px' }}>
+            {monitoredSkippers.map(({ memberId, uid, member }) => {
+              const isExpanded = expandedSkipper === memberId;
               return (
-                <button
+                <SkipperCard
                   key={memberId}
-                  style={{ ...css.skipperCard, borderColor: isSelected ? '#3b82f6' : '#1e293b', backgroundColor: isSelected ? '#1e3a5f' : '#1e293b' }}
-                  onClick={() => toggleSkipper(memberId)}
-                >
-                  {isSelected && <CheckCircle2 style={{ position: 'absolute', top: 8, right: 8, color: '#3b82f6' }} size={16} />}
-                  <div style={{ ...css.avatar, backgroundColor: isSelected ? '#3b82f6' : '#334155', width: '44px', height: '44px' }}>
-                    {initials}
-                  </div>
-                  <div style={{ fontWeight: '600', marginTop: '8px', fontSize: '13px' }}>
-                    {firstName} {lastName}
-                  </div>
-                  {/* Online indicator — only available when member has a linked account */}
-                  <div style={{ fontSize: '11px', color: isOnline ? '#22c55e' : '#475569', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    {uid
-                      ? (isOnline ? <><Wifi size={10} />{liveData?.bpm || '--'} BPM</> : <><WifiOff size={10} />Offline</>)
-                      : <span style={{ color: '#334155' }}>Geen account</span>
-                    }
-                  </div>
-                </button>
+                  uid={uid}
+                  member={member}
+                  liveData={uid ? (liveSessions[uid] || {}) : {}}
+                  history={uid ? (history[uid] || []) : []}
+                  personalBest={uid ? (personalBests[uid] || null) : null}
+                  ghostCurve={uid ? (ghostCurves[uid] || {}) : {}}
+                  showGhost={uid ? (showGhost[uid] || false) : false}
+                  onToggleGhost={() => uid && setShowGhost(prev => ({ ...prev, [uid]: !prev[uid] }))}
+                  buildChartData={buildChartData}
+                  isMobile={true}
+                  isExpanded={isExpanded}
+                  onToggleExpand={() => setExpandedSkipper(isExpanded ? null : memberId)}
+                />
               );
             })}
           </div>
-          {availableSkippers.length === 0 && <p style={css.infoText}>Geen skippers in deze groep.</p>}
-        </div>
-      </div>
-    );
-  }
-
-  // ── Monitoring view ───────────────────────────────────────────────────────────
-  // Build display list: we iterate over selectedSkipperMemberIds so members without
-  // a uid (no app account) can still appear as cards (with no live data).
-  const monitoredSkippers = selectedSkipperMemberIds.map(memberId => ({
-    memberId,
-    uid:    memberUidMap[memberId] ?? null,
-    member: getMember(memberId),
-  }));
-
-  return (
-    <div style={css.page}>
-      <style>{responsiveCSS}</style>
-
-      <div style={css.header}>
-        <button style={css.backBtn} onClick={() => setView('select-skippers')}>
-          <ArrowLeft size={15} /> {isMobile ? 'Terug' : 'Wijzig selectie'}
-        </button>
-        <h1 style={{ margin: 0, fontSize: isMobile ? '14px' : '18px', fontWeight: '800', color: '#f1f5f9', textAlign: 'center' }}>
-          {isMobile ? 'MONITORING' : 'SPEED MONITORING LIVE'}
-        </h1>
-        <div style={{ fontSize: '11px', color: '#475569', textAlign: 'right', display: isMobile ? 'none' : 'block' }}>
-          {selectedClub?.name} · {selectedGroup?.name}
-        </div>
-      </div>
-
-      {isMobile ? (
-        <div style={{ padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px', paddingBottom: '24px' }}>
-          {monitoredSkippers.map(({ memberId, uid, member }) => {
-            const isExpanded = expandedSkipper === memberId;
-            return (
+        ) : (
+          <div style={css.monitorGrid}>
+            {monitoredSkippers.map(({ memberId, uid, member }) => (
               <SkipperCard
                 key={memberId}
                 uid={uid}
@@ -727,34 +759,161 @@ export default function Dashboard() {
                 showGhost={uid ? (showGhost[uid] || false) : false}
                 onToggleGhost={() => uid && setShowGhost(prev => ({ ...prev, [uid]: !prev[uid] }))}
                 buildChartData={buildChartData}
-                isMobile={true}
-                isExpanded={isExpanded}
-                onToggleExpand={() => setExpandedSkipper(isExpanded ? null : memberId)}
+                isMobile={false}
+                isExpanded={true}
+                onToggleExpand={() => {}}
               />
-            );
-          })}
-        </div>
-      ) : (
-        <div style={css.monitorGrid}>
-          {monitoredSkippers.map(({ memberId, uid, member }) => (
-            <SkipperCard
-              key={memberId}
-              uid={uid}
-              member={member}
-              liveData={uid ? (liveSessions[uid] || {}) : {}}
-              history={uid ? (history[uid] || []) : []}
-              personalBest={uid ? (personalBests[uid] || null) : null}
-              ghostCurve={uid ? (ghostCurves[uid] || {}) : {}}
-              showGhost={uid ? (showGhost[uid] || false) : false}
-              onToggleGhost={() => uid && setShowGhost(prev => ({ ...prev, [uid]: !prev[uid] }))}
-              buildChartData={buildChartData}
-              isMobile={false}
-              isExpanded={true}
-              onToggleExpand={() => {}}
-            />
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Selection view (single page with inline pickers, mirrors counter.js) ──
+  return (
+    <div style={css.page}>
+      <style>{responsiveCSS}</style>
+      <div style={css.header}>
+        <h1 style={{ margin: 0, fontSize: isMobile ? '16px' : '20px', fontWeight: '800', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Users size={22} color="#3b82f6" /> Wie wil je monitoren?
+        </h1>
+        <button
+          disabled={!canStartMonitoring}
+          onClick={() => { setExpandedSkipper(null); setView('monitoring'); }}
+          style={{ ...css.primaryBtn, opacity: canStartMonitoring ? 1 : 0.35, padding: '9px 18px', fontSize: '13px' }}
+        >
+          Start →
+        </button>
+      </div>
+
+      <div style={css.selectionWrap}>
+
+        {/* ── Club picker ── */}
+        {showClubPicker && (
+          <div style={css.field}>
+            <label style={css.label}>
+              <Building2 size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+              Club
+            </label>
+            <div style={css.clubGrid}>
+              {memberClubs.map(club => (
+                <button
+                  key={club.id}
+                  style={{ ...css.clubCard, ...(selectedClubId === club.id ? css.clubCardActive : {}) }}
+                  onClick={() => setSelectedClubId(club.id)}
+                >
+                  {club.logoUrl
+                    ? <img src={club.logoUrl} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', marginBottom: '8px' }} alt={club.name} />
+                    : <Building2 size={28} color={selectedClubId === club.id ? '#3b82f6' : '#475569'} style={{ marginBottom: '8px' }} />
+                  }
+                  <div style={{ fontSize: '13px', fontWeight: '600', textAlign: 'center' }}>{club.name}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Prompt when club picker is shown but no club selected */}
+        {showClubPicker && !selectedClubId && (
+          <p style={css.infoText}>Selecteer een club om verder te gaan.</p>
+        )}
+
+        {/* ── Group picker ── */}
+        {selectedClubId && showGroupPicker && (
+          <div style={css.field}>
+            <label style={css.label}>
+              <Users size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+              Groep
+            </label>
+            <div style={css.groupGrid}>
+              {memberGroups.map(group => (
+                <button
+                  key={group.id}
+                  style={{ ...css.groupCard, ...(selectedGroupId === group.id ? css.groupCardActive : {}) }}
+                  onClick={() => setSelectedGroupId(group.id)}
+                >
+                  <Users size={22} color={selectedGroupId === group.id ? '#22c55e' : '#475569'} style={{ marginBottom: '6px' }} />
+                  <div style={{ fontSize: '13px', fontWeight: '600', textAlign: 'center' }}>{group.name}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Prompt when group picker is shown but no group selected */}
+        {selectedClubId && showGroupPicker && !selectedGroupId && (
+          <p style={css.infoText}>Selecteer een groep om de skippers te zien.</p>
+        )}
+
+        {/* ── Skipper picker ── */}
+        {selectedClubId && selectedGroupId && (
+          <div style={css.field}>
+            <label style={css.label}>
+              <Trophy size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+              Skippers ({selectedSkipperMemberIds.length}/4)
+            </label>
+
+            {availableSkippers.length > 0 ? (
+              <div style={css.skipperGrid}>
+                {availableSkippers.map(s => {
+                  const memberId   = s.memberId || s.id;
+                  const member     = getMember(memberId);
+                  const uid        = memberUidMap[memberId] ?? null;
+                  const isSelected = selectedSkipperMemberIds.includes(memberId);
+                  const liveData   = uid ? liveSessions[uid] : null;
+                  const isOnline   = liveData?.connectionStatus === 'online';
+
+                  const firstName = member?.firstName || '?';
+                  const lastName  = member?.lastName  || '';
+                  const initials  = `${firstName[0] || '?'}${lastName[0] || ''}`.toUpperCase();
+
+                  return (
+                    <button
+                      key={memberId}
+                      style={{
+                        ...css.skipperCard,
+                        borderColor:     isSelected ? '#3b82f6' : '#1e293b',
+                        backgroundColor: isSelected ? '#1e3a5f' : '#1e293b',
+                      }}
+                      onClick={() => toggleSkipper(memberId)}
+                    >
+                      {isSelected && (
+                        <CheckCircle2 style={{ position: 'absolute', top: 8, right: 8, color: '#3b82f6' }} size={16} />
+                      )}
+                      <div style={{ ...css.avatar, backgroundColor: isSelected ? '#3b82f6' : '#334155', width: '44px', height: '44px' }}>
+                        {initials}
+                      </div>
+                      <div style={{ fontWeight: '600', marginTop: '8px', fontSize: '13px', textAlign: 'center' }}>
+                        {firstName} {lastName}
+                      </div>
+                      <div style={{ fontSize: '11px', color: isOnline ? '#22c55e' : '#475569', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        {uid
+                          ? (isOnline ? <><Wifi size={10} />{liveData?.bpm || '--'} BPM</> : <><WifiOff size={10} />Offline</>)
+                          : <span style={{ color: '#334155' }}>Geen account</span>
+                        }
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p style={css.infoText}>Geen actieve skippers in deze groep.</p>
+            )}
+
+            {/* Start button repeated at bottom for convenience */}
+            {canStartMonitoring && (
+              <button
+                onClick={() => { setExpandedSkipper(null); setView('monitoring'); }}
+                style={{ ...css.primaryBtn, marginTop: '20px', width: '100%', padding: '14px' }}
+              >
+                Start Monitoring ({selectedSkipperMemberIds.length} skipper{selectedSkipperMemberIds.length > 1 ? 's' : ''}) →
+              </button>
+            )}
+          </div>
+        )}
+
+      </div>
     </div>
   );
 }
@@ -767,26 +926,43 @@ const responsiveCSS = `
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const css = {
-  page: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 50, gap: '8px' },
-  backBtn: { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', padding: '4px 0', flexShrink: 0 },
-  selectionWrap: { maxWidth: '700px', margin: '0 auto', padding: '24px 16px' },
-  selectionHeader: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px', color: '#f1f5f9' },
-  cardGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '12px' },
-  selectCard: { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '20px 12px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center' },
-  selectCardName: { fontWeight: '700', fontSize: '14px', marginBottom: '6px', textAlign: 'center' },
+  page:        { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif' },
+  header:      { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 50, gap: '8px' },
+  backBtn:     { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', padding: '4px 0', flexShrink: 0 },
+  selectionWrap: { maxWidth: '600px', margin: '0 auto', padding: '24px 16px' },
+  spinner:     { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
+
+  // Field / label
+  field:       { marginBottom: '28px' },
+  label:       { display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '10px', fontWeight: '600' },
+
+  // Club picker
+  clubGrid:       { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' },
+  clubCard:       { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px 12px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.15s' },
+  clubCardActive: { borderColor: '#3b82f6', backgroundColor: '#1e3a5f' },
+
+  // Group picker
+  groupGrid:       { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' },
+  groupCard:       { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px 12px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.15s' },
+  groupCardActive: { borderColor: '#22c55e', backgroundColor: '#052e16' },
+
+  // Skipper picker
   skipperGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' },
   skipperCard: { borderRadius: '10px', padding: '14px 10px', border: '2px solid', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', color: 'white' },
-  avatar: { width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '15px', flexShrink: 0 },
-  infoText: { textAlign: 'center', color: '#475569', marginTop: '24px' },
-  primaryBtn: { backgroundColor: '#22c55e', color: 'white', border: 'none', borderRadius: '8px', padding: '10px 16px', fontWeight: '700', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' },
+
+  // Shared
+  avatar:      { width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '15px', flexShrink: 0 },
+  infoText:    { textAlign: 'center', color: '#475569', marginTop: '8px', fontSize: '14px' },
+  primaryBtn:  { backgroundColor: '#22c55e', color: 'white', border: 'none', borderRadius: '8px', padding: '10px 16px', fontWeight: '700', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' },
+
+  // Monitoring grid
   monitorGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: '16px', padding: '16px' },
-  card: { backgroundColor: '#1e293b', borderRadius: '14px', padding: '16px', border: '1px solid #334155' },
-  mobileCard: { borderRadius: '12px', padding: '14px' },
+  card:        { backgroundColor: '#1e293b', borderRadius: '14px', padding: '16px', border: '1px solid #334155' },
+  mobileCard:  { borderRadius: '12px', padding: '14px' },
   mobileCardCollapsed: { backgroundColor: '#1e293b', borderRadius: '12px', padding: '12px 14px', border: '1px solid #334155', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', width: '100%' },
   collapseBtn: { background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', padding: '0 0 8px 0', marginBottom: '4px', borderBottom: '1px solid #1e293b', width: '100%' },
-  statBox: { backgroundColor: '#0f172a', borderRadius: '8px', padding: '8px 6px', textAlign: 'center', border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px' },
-  statLabel: { display: 'flex', alignItems: 'center', gap: '3px', color: '#64748b', fontSize: '8px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.3px' },
-  statValue: { fontSize: '22px', fontWeight: '900', lineHeight: 1.1 },
+  statBox:     { backgroundColor: '#0f172a', borderRadius: '8px', padding: '8px 6px', textAlign: 'center', border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px' },
+  statLabel:   { display: 'flex', alignItems: 'center', gap: '3px', color: '#64748b', fontSize: '8px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.3px' },
+  statValue:   { fontSize: '22px', fontWeight: '900', lineHeight: 1.1 },
   ghostToggle: { display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', borderRadius: '7px', border: '1px solid', cursor: 'pointer', fontSize: '11px', fontWeight: '600', marginBottom: '4px', width: '100%', justifyContent: 'center' },
 };
