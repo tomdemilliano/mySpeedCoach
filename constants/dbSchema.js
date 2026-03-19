@@ -981,7 +981,7 @@ export const AuthFactory = {
 };
 
 // ==========================================
-// 10. ANNOUNCEMENT FACTORY  (Feature 12.1)
+// 10. ANNOUNCEMENT FACTORY  (Feature 12.1 — updated)
 // ==========================================
 // Schema (top-level collection):
 //
@@ -990,11 +990,13 @@ export const AuthFactory = {
 //   body:       string
 //   type:       "info" | "cancel" | "reminder" | "result"
 //   clubId:     string
-//   groupIds:   string[]   — group IDs this announcement targets
+//   groupIds:   string[]   — group IDs this announcement targets.
+//                            Special tokens: "__ALL_USERS__", "__ALL_CLUBADMINS__"
 //   authorUid:  string
 //   authorName: string
 //   pinned:     boolean
-//   expiresAt:  timestamp | null
+//   startsAt:   YYYY-MM-DD string | null   — visible from this date (default: today)
+//   expiresAt:  YYYY-MM-DD string | null   — hidden after this date (default: +30 days)
 //   createdAt:  timestamp
 //   updatedAt:  timestamp
 
@@ -1011,7 +1013,8 @@ export const AnnouncementFactory = {
       authorUid,
       authorName,
       pinned:     data.pinned     || false,
-      expiresAt:  data.expiresAt  || null,
+      startsAt:   data.startsAt   || null,   // YYYY-MM-DD string or null
+      expiresAt:  data.expiresAt  || null,   // YYYY-MM-DD string or null
       createdAt:  serverTimestamp(),
       updatedAt:  serverTimestamp(),
     }),
@@ -1033,12 +1036,11 @@ export const AnnouncementFactory = {
 
   // ── Read ──────────────────────────────────────────────────────────────────
 
-  // One-shot fetch: returns announcements for the given groupIds,
-  // pinned first then createdAt desc.
-  // groupIds is pre-resolved by the caller from GroupFactory.
+  // One-shot fetch for given groupIds (pinned first, then createdAt desc).
+  // Start/expiry filtering is done client-side (isLive helper) so future-scheduled
+  // announcements are returned but hidden by the UI until their startsAt date.
   getForUser: async (groupIds) => {
     if (!groupIds || groupIds.length === 0) return [];
-    // array-contains-any supports up to 30 values per query
     const snap = await getDocs(
       query(
         collection(db, 'announcements'),
@@ -1054,7 +1056,7 @@ export const AnnouncementFactory = {
       });
   },
 
-  // Real-time subscription for a skipper: returns unsubscribe function.
+  // Real-time subscription for a skipper.
   subscribeForUser: (groupIds, callback) => {
     if (!groupIds || groupIds.length === 0) {
       callback([]);
@@ -1075,14 +1077,12 @@ export const AnnouncementFactory = {
           });
         callback(items);
       },
-      (err) => {
-        console.error('AnnouncementFactory.subscribeForUser error:', err);
-        callback([]);
-      }
+      (err) => { console.error('AnnouncementFactory.subscribeForUser error:', err); callback([]); }
     );
   },
 
-  // Coach helper: subscribe to all announcements for a specific group.
+  // Coach / manage panel: subscribe to all announcements for a specific group.
+  // Returns ALL (including inactive), so the manage panel can show/filter them.
   subscribeForGroup: (clubId, groupId, callback) =>
     onSnapshot(
       query(
@@ -1100,9 +1100,6 @@ export const AnnouncementFactory = {
           });
         callback(items);
       },
-      (err) => {
-        console.error('AnnouncementFactory.subscribeForGroup error:', err);
-        callback([]);
-      }
+      (err) => { console.error('AnnouncementFactory.subscribeForGroup error:', err); callback([]); }
     ),
 };
