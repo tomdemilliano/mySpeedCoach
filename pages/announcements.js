@@ -467,21 +467,41 @@ function ManageMessagesTab({ managedClubs, coachGroupsByClub, isSuperAdmin, uid,
     return () => unsub();
   }, [selectedClubId, selectedGroupId]);
 
-  const handleSave = async (form) => {
-    const payload = {
-      title:    form.title,
-      body:     form.body,
-      type:     form.type,
-      clubId:   form.clubId,
-      groupIds: form.groupIds,
-      pinned:   form.pinned,
-      startsAt:  form.startsAt  || null,
-      expiresAt: form.expiresAt || null,
-    };
-    if (editingAnn) await AnnouncementFactory.update(editingAnn.id, payload);
-    else            await AnnouncementFactory.create(payload, uid, authorName);
-    setEditingAnn(null);
+const handleSave = async (form) => {
+  const payload = {
+    title:    form.title,
+    body:     form.body,
+    type:     form.type,
+    clubId:   form.clubId,
+    groupIds: form.groupIds,
+    pinned:   form.pinned,
+    startsAt:  form.startsAt  || null,
+    expiresAt: form.expiresAt || null,
   };
+ 
+  if (editingAnn) {
+    // Silent update — no push notification
+    await AnnouncementFactory.update(editingAnn.id, payload);
+  } else {
+    // New announcement — save then push
+    await AnnouncementFactory.create(payload, uid, authorName);
+ 
+    // Fire-and-forget push — don't let a push failure block the UI
+    fetch('/api/push/send', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title:    form.title,
+        body:     (form.body || '').split('\n')[0].slice(0, 120), // first line, max 120 chars
+        groupIds: form.groupIds,
+        clubId:   form.clubId,
+        url:      '/announcements',
+      }),
+    }).catch(err => console.warn('[push] Failed to trigger push notification:', err));
+  }
+ 
+  setEditingAnn(null);
+};
 
   const handleDelete     = async (ann) => { if (!confirm(`"${ann.title}" verwijderen?`)) return; await AnnouncementFactory.delete(ann.id); };
   const handleTogglePin  = async (ann) => { await AnnouncementFactory.pin(ann.id, !ann.pinned); };
