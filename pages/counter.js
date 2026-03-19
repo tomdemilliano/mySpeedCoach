@@ -144,6 +144,7 @@ export default function CounterPage() {
   // ── Current user (counter) ───────────────────────────────────────────────
   const [counterUser,   setCounterUser]   = useState(null);
   const [isSuperAdmin,  setIsSuperAdmin]  = useState(false);
+  const [isClubAdmin,   setIsClubAdmin]   = useState(false);
 
   // ── Member-scoped club/group data ────────────────────────────────────────
   const [memberClubs,   setMemberClubs]   = useState([]);
@@ -186,43 +187,66 @@ export default function CounterPage() {
     const uid = getCookie();
     if (!uid) { setBootstrapDone(true); return; }
 
+    let unsubClubs = () => {};
+
     UserFactory.get(uid).then(snap => {
       if (!snap.exists()) return;
       const user = { id: uid, ...snap.data() };
       setCounterUser(user);
 
       if (user.role === 'superadmin') {
-        // SuperAdmin sees all clubs directly — no UserMemberLink needed
+        // SuperAdmin sees all clubs directly
         setIsSuperAdmin(true);
-        const unsub = ClubFactory.getAll((clubs) => {
+        unsubClubs = ClubFactory.getAll((clubs) => {
           setMemberClubs(clubs);
           setBootstrapDone(true);
         });
-        return () => unsub();
+        return;
       }
+
+      if (user.role === 'clubadmin') {
+        // ClubAdmin: find clubs where they are a coach in any group
+        setIsClubAdmin(true);
+        unsubClubs = ClubFactory.getAll(async (allClubs) => {
+          const adminClubIds = new Set();
+          await Promise.all(
+            allClubs.map(async club => {
+              const groups = await GroupFactory.getGroupsByClubOnce(club.id);
+              await Promise.all(
+                groups.map(async group => {
+                  const members = await GroupFactory.getMembersByGroupOnce(club.id, group.id);
+                  const isCoach = members.some(m => (m.memberId || m.id) === uid && m.isCoach);
+                  if (isCoach) adminClubIds.add(club.id);
+                })
+              );
+            })
+          );
+          const adminClubs = allClubs.filter(c => adminClubIds.has(c.id));
+          setMemberClubs(adminClubs);
+          setBootstrapDone(true);
+        });
+        return;
+      }
+
+      // Normal member path via UserMemberLink
+      const unsubLinks = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
+        if (profiles.length === 0) { setBootstrapDone(true); return; }
+
+        const clubIdSet = new Set(profiles.map(p => p.member.clubId));
+        const allClubSnaps = await Promise.all(
+          [...clubIdSet].map(id => ClubFactory.getById(id))
+        );
+        const resolvedClubs = allClubSnaps
+          .filter(s => s.exists())
+          .map(s => ({ id: s.id, ...s.data() }));
+
+        setMemberClubs(resolvedClubs);
+        setBootstrapDone(true);
+      });
+      unsubClubs = unsubLinks;
     });
 
-    // Normal member path via UserMemberLink
-    const unsub = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
-      // Skip if this user turned out to be superadmin (handled above)
-      const snap = await UserFactory.get(uid);
-      if (snap.exists() && snap.data().role === 'superadmin') return;
-
-      if (profiles.length === 0) { setBootstrapDone(true); return; }
-
-      const clubIdSet = new Set(profiles.map(p => p.member.clubId));
-
-      const allClubSnaps = await Promise.all(
-        [...clubIdSet].map(id => ClubFactory.getById(id))
-      );
-      const resolvedClubs = allClubSnaps
-        .filter(s => s.exists())
-        .map(s => ({ id: s.id, ...s.data() }));
-
-      setMemberClubs(resolvedClubs);
-      setBootstrapDone(true);
-    });
-    return () => unsub();
+    return () => unsubClubs();
   }, []);
 
   // ── Auto-select club if only one ──────────────────────────────────────────
@@ -260,8 +284,8 @@ export default function CounterPage() {
 
         if (cancelled) return;
 
-        if (isSuperAdmin) {
-          // SuperAdmin sees all groups that have at least one skipper
+        if (isSuperAdmin || isClubAdmin) {
+          // SuperAdmin and ClubAdmin see all groups that have at least one skipper
           const filteredGroups = allGroups.filter(
             g => groupMembersCache[g.id]?.some(m => m.isSkipper === true)
           );
