@@ -195,9 +195,10 @@ export default function CounterPage() {
       setCounterUser(user);
 
       if (user.role === 'superadmin') {
-        // SuperAdmin sees all clubs directly
+        // SuperAdmin sees all clubs — one-shot fetch avoids empty first emission
         setIsSuperAdmin(true);
-        unsubClubs = ClubFactory.getAll((clubs) => {
+        ClubFactory.getAll((clubs) => {
+          if (clubs.length === 0) return; // wait for real data
           setMemberClubs(clubs);
           setBootstrapDone(true);
         });
@@ -207,7 +208,8 @@ export default function CounterPage() {
       if (user.role === 'clubadmin') {
         // ClubAdmin: find clubs where they are a coach in any group
         setIsClubAdmin(true);
-        unsubClubs = ClubFactory.getAll(async (allClubs) => {
+        ClubFactory.getAll(async (allClubs) => {
+          if (allClubs.length === 0) return; // wait for real data
           const adminClubIds = new Set();
           await Promise.all(
             allClubs.map(async club => {
