@@ -212,31 +212,14 @@ export default function CounterPage() {
         return;
       }
 
-      // ── ClubAdmin: clubs where they are a coach in at least one group ─────
+      // ── ClubAdmin: role is source of truth — load all clubs directly ──────
       if (user.role === 'clubadmin') {
         console.log('[Counter] path: clubadmin');
         isClubAdminRef.current = true;
-        unsubClubs = ClubFactory.getAll(async (allClubs) => {
+        unsubClubs = ClubFactory.getAll((allClubs) => {
           console.log('[Counter] clubadmin ClubFactory.getAll fired — allClubs:', allClubs.length, 'cancelled:', cancelled);
           if (cancelled || allClubs.length === 0) return;
-          const adminClubIds = new Set();
-          await Promise.all(
-            allClubs.map(async club => {
-              const groups = await GroupFactory.getGroupsByClubOnce(club.id);
-              await Promise.all(
-                groups.map(async group => {
-                  const members = await GroupFactory.getMembersByGroupOnce(club.id, group.id);
-                  const isCoach = members.some(m => (m.memberId || m.id) === uid && m.isCoach);
-                  console.log('[Counter] clubadmin coach check —', club.id, group.id, 'isCoach:', isCoach, 'uid:', uid, 'members:', members.map(m => ({ id: m.memberId || m.id, isCoach: m.isCoach })));
-                  if (isCoach) adminClubIds.add(club.id);
-                })
-              );
-            })
-          );
-          if (cancelled) return;
-          const adminClubs = allClubs.filter(c => adminClubIds.has(c.id));
-          console.log('[Counter] clubadmin adminClubs result:', adminClubs.map(c => c.id));
-          setMemberClubs(adminClubs);
+          setMemberClubs(allClubs);
           setBootstrapDone(true);
         });
         return;
