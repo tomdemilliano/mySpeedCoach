@@ -212,14 +212,27 @@ export default function CounterPage() {
         return;
       }
 
-      // ── ClubAdmin: role is source of truth — load all clubs directly ──────
+      // ── ClubAdmin: clubs where they have a UserMemberLink ────────────────
       if (user.role === 'clubadmin') {
         console.log('[Counter] path: clubadmin');
         isClubAdminRef.current = true;
-        unsubClubs = ClubFactory.getAll((allClubs) => {
-          console.log('[Counter] clubadmin ClubFactory.getAll fired — allClubs:', allClubs.length, 'cancelled:', cancelled);
-          if (cancelled || allClubs.length === 0) return;
-          setMemberClubs(allClubs);
+
+        unsubClubs = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
+          console.log('[Counter] clubadmin UserMemberLinkFactory.getForUser fired — profiles:', profiles.length, 'cancelled:', cancelled);
+          if (cancelled) return;
+          if (profiles.length === 0) { setBootstrapDone(true); return; }
+
+          const clubIdSet = new Set(profiles.map(p => p.member.clubId));
+          const allClubSnaps = await Promise.all(
+            [...clubIdSet].map(id => ClubFactory.getById(id))
+          );
+          if (cancelled) return;
+          const adminClubs = allClubSnaps
+            .filter(s => s.exists())
+            .map(s => ({ id: s.id, ...s.data() }));
+
+          console.log('[Counter] clubadmin clubs:', adminClubs.map(c => c.id));
+          setMemberClubs(adminClubs);
           setBootstrapDone(true);
         });
         return;
