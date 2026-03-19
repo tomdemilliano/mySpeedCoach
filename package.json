@@ -18,7 +18,8 @@
     "lucide-react": "latest",
     "clsx": "latest",
     "tailwind-merge": "latest",
-    "next-pwa": "latest"
+    "next-pwa": "latest",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "autoprefixer": "latest",
