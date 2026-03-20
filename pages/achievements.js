@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { BadgeFactory, ClubMemberFactory, UserMemberLinkFactory, UserFactory } from '../constants/dbSchema';
+import { useDisciplines } from '../hooks/useDisciplines';
 import {
   Trophy, Target, Medal, Award, Check, ChevronDown, ChevronUp,
-  Zap, Plus, Trash2, Star
+  Zap, Plus, Trash2, Star, Timer
 } from 'lucide-react';
 import { db } from '../firebaseConfig';
 import { addDoc, collection, deleteDoc, doc } from 'firebase/firestore';
@@ -14,9 +15,7 @@ const getCookie = () => {
   return match ? match[1] : null;
 };
 
-const DISC_LABELS = { '30sec': '30 sec', '2min': '2 min', '3min': '3 min' };
 const SESSION_TYPES = ['Training', 'Wedstrijd'];
-const DISCIPLINES = ['30sec', '2min', '3min'];
 
 const CATEGORY_CONFIG = {
   speed:       { label: 'Snelheid',     color: '#f97316', emoji: '⚡' },
@@ -59,7 +58,6 @@ function BadgeItem({ badge, earned, earnedDate, awardedByName, note }) {
 }
 
 // ─── Badges tab ───────────────────────────────────────────────────────────────
-// Feature 8.4: reads earnedBadges from ClubMember path
 function BadgesTab({ memberContext }) {
   const [earnedBadges, setEarnedBadges] = useState([]);
   const [allBadges, setAllBadges] = useState([]);
@@ -128,29 +126,31 @@ function BadgesTab({ memberContext }) {
 }
 
 // ─── Records tab ──────────────────────────────────────────────────────────────
-// Feature 8.4: reads records from ClubMember path
 function RecordsTab({ memberContext }) {
   const [records, setRecords] = useState([]);
+  const { disciplines } = useDisciplines();
 
   useEffect(() => {
-    if (!memberContext) return;
+    if (!memberContext || disciplines.length === 0) return;
     const { clubId, memberId } = memberContext;
     const unsubs = [];
-    DISCIPLINES.forEach(d => SESSION_TYPES.forEach(st => {
-      const u = ClubMemberFactory.subscribeToRecords(clubId, memberId, d, st, (rec) => {
+
+    disciplines.forEach(disc => SESSION_TYPES.forEach(st => {
+      const u = ClubMemberFactory.subscribeToRecords(clubId, memberId, disc.id, st, (rec) => {
         if (rec) {
           setRecords(prev => {
-            const filtered = prev.filter(r => !(r.discipline === d && r.sessionType === st));
-            return [...filtered, { ...rec, discipline: d, sessionType: st }];
+            const filtered = prev.filter(r => !(r.discipline === disc.id && r.sessionType === st));
+            return [...filtered, { ...rec, discipline: disc.id, disciplineName: disc.name, sessionType: st }];
           });
         } else {
-          setRecords(prev => prev.filter(r => !(r.discipline === d && r.sessionType === st)));
+          setRecords(prev => prev.filter(r => !(r.discipline === disc.id && r.sessionType === st)));
         }
       });
       unsubs.push(u);
     }));
+
     return () => unsubs.forEach(u => u && u());
-  }, [memberContext]);
+  }, [memberContext, disciplines]);
 
   const bestOverall = records.reduce((max, r) => r.score > (max?.score || 0) ? r : max, null);
 
@@ -164,7 +164,7 @@ function RecordsTab({ memberContext }) {
           <div>
             <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Beste persoonlijk record</div>
             <div style={{ fontSize: '32px', fontWeight: '900', color: '#facc15', lineHeight: 1 }}>{bestOverall.score}<span style={{ fontSize: '14px', color: '#94a3b8', fontWeight: '400', marginLeft: '6px' }}>stappen</span></div>
-            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{DISC_LABELS[bestOverall.discipline]} · {bestOverall.sessionType}</div>
+            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{bestOverall.disciplineName || bestOverall.discipline} · {bestOverall.sessionType}</div>
           </div>
         </div>
       )}
@@ -173,12 +173,21 @@ function RecordsTab({ memberContext }) {
         <div style={css.emptyState}><Trophy size={36} color="#334155" /><p style={{ color: '#475569', fontSize: '14px', margin: '12px 0 0' }}>Nog geen records</p></div>
       ) : (
         <div>
-          {DISCIPLINES.map(d => {
-            const discRecords = records.filter(r => r.discipline === d);
+          {disciplines.map(disc => {
+            const discRecords = records.filter(r => r.discipline === disc.id);
             if (discRecords.length === 0) return null;
             return (
-              <div key={d} style={{ marginBottom: '16px' }}>
-                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>{DISC_LABELS[d]}</div>
+              <div key={disc.id} style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ padding: '1px 5px', borderRadius: '3px', fontSize: '9px', backgroundColor: disc.ropeType === 'SR' ? '#3b82f622' : '#a78bfa22', color: disc.ropeType === 'SR' ? '#60a5fa' : '#a78bfa', border: `1px solid ${disc.ropeType === 'SR' ? '#3b82f644' : '#a78bfa44'}` }}>{disc.ropeType}</span>
+                  {disc.name}
+                  {disc.durationSeconds && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '10px', color: '#475569' }}>
+                      <Timer size={9} />
+                      {disc.durationSeconds < 60 ? `${disc.durationSeconds}s` : `${disc.durationSeconds / 60}min`}
+                    </span>
+                  )}
+                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {discRecords.map(rec => (
                     <div key={rec.id} style={{ backgroundColor: '#1e293b', borderRadius: '10px', padding: '12px 14px', border: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -197,42 +206,49 @@ function RecordsTab({ memberContext }) {
 }
 
 // ─── Goals tab ────────────────────────────────────────────────────────────────
-// Feature 8.4: reads and writes goals on ClubMember path
 function GoalsTab({ memberContext }) {
   const [goals, setGoals] = useState([]);
   const [records, setRecords] = useState([]);
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ discipline: '30sec', targetScore: '', targetDate: '' });
+  const [form, setForm] = useState({ disciplineId: '', targetScore: '', targetDate: '' });
+  const { disciplines } = useDisciplines();
 
   useEffect(() => {
-    if (!memberContext) return;
+    if (!memberContext || disciplines.length === 0) return;
     const { clubId, memberId } = memberContext;
     const unsub = ClubMemberFactory.getGoals(clubId, memberId, setGoals);
     const unsubs2 = [];
-    DISCIPLINES.forEach(d => SESSION_TYPES.forEach(st => {
-      const u = ClubMemberFactory.subscribeToRecords(clubId, memberId, d, st, (rec) => {
+    disciplines.forEach(disc => SESSION_TYPES.forEach(st => {
+      const u = ClubMemberFactory.subscribeToRecords(clubId, memberId, disc.id, st, (rec) => {
         if (rec) {
           setRecords(prev => {
-            const f = prev.filter(r => !(r.discipline === d && r.sessionType === st));
-            return [...f, { ...rec, discipline: d, sessionType: st }];
+            const f = prev.filter(r => !(r.discipline === disc.id && r.sessionType === st));
+            return [...f, { ...rec, discipline: disc.id, sessionType: st }];
           });
         }
       });
       unsubs2.push(u);
     }));
     return () => { unsub(); unsubs2.forEach(u => u && u()); };
-  }, [memberContext]);
+  }, [memberContext, disciplines]);
+
+  // Set default discipline when loaded
+  useEffect(() => {
+    if (disciplines.length > 0 && !form.disciplineId) {
+      setForm(f => ({ ...f, disciplineId: disciplines[0].id }));
+    }
+  }, [disciplines]);
 
   const handleAdd = async () => {
-    if (!form.targetScore || !memberContext) return;
+    if (!form.targetScore || !memberContext || !form.disciplineId) return;
     const { clubId, memberId } = memberContext;
     await addDoc(collection(db, `clubs/${clubId}/members/${memberId}/goals`), {
-      discipline: form.discipline,
+      discipline: form.disciplineId,
       targetScore: parseInt(form.targetScore),
       targetDate: form.targetDate ? new Date(form.targetDate) : null,
       achievedAt: null,
     });
-    setForm({ discipline: '30sec', targetScore: '', targetDate: '' });
+    setForm({ disciplineId: disciplines[0]?.id || '', targetScore: '', targetDate: '' });
     setShowModal(false);
   };
 
@@ -242,8 +258,13 @@ function GoalsTab({ memberContext }) {
     await deleteDoc(doc(db, `clubs/${clubId}/members/${memberId}/goals`, goalId));
   };
 
-  const getBestRecord = (discipline) =>
-    records.filter(r => r.discipline === discipline).reduce((best, r) => r.score > (best?.score || 0) ? r : best, null);
+  const getBestRecord = (disciplineId) =>
+    records.filter(r => r.discipline === disciplineId).reduce((best, r) => r.score > (best?.score || 0) ? r : best, null);
+
+  const getDiscName = (disciplineId) => {
+    const disc = disciplines.find(d => d.id === disciplineId);
+    return disc?.name || disciplineId;
+  };
 
   const activeGoals   = goals.filter(g => !g.achievedAt);
   const achievedGoals = goals.filter(g => !!g.achievedAt);
@@ -272,7 +293,7 @@ function GoalsTab({ memberContext }) {
                     <div key={g.id} style={{ backgroundColor: '#1e293b', borderRadius: '12px', padding: '14px', border: '1px solid #334155' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                         <div>
-                          <div style={{ fontWeight: '700', fontSize: '15px', color: '#f1f5f9' }}>{DISC_LABELS[g.discipline]} — {g.targetScore} stappen</div>
+                          <div style={{ fontWeight: '700', fontSize: '15px', color: '#f1f5f9' }}>{getDiscName(g.discipline)} — {g.targetScore} stappen</div>
                           {g.targetDate && <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Deadline: {new Date(g.targetDate?.seconds ? g.targetDate.seconds * 1000 : g.targetDate).toLocaleDateString('nl-BE')}</div>}
                         </div>
                         <button onClick={() => handleDelete(g.id)} style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', padding: '4px' }}><Trash2 size={14} /></button>
@@ -298,7 +319,7 @@ function GoalsTab({ memberContext }) {
                   <div key={g.id} style={{ backgroundColor: '#1e293b', borderRadius: '10px', padding: '12px 14px', border: '1px solid #22c55e33', display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#22c55e22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Check size={14} color="#22c55e" /></div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '14px', fontWeight: '600', color: '#22c55e' }}>{DISC_LABELS[g.discipline]} — {g.targetScore} stappen</div>
+                      <div style={{ fontSize: '14px', fontWeight: '600', color: '#22c55e' }}>{getDiscName(g.discipline)} — {g.targetScore} stappen</div>
                       {g.achievedAt?.seconds && <div style={{ fontSize: '11px', color: '#475569', marginTop: '1px' }}>Bereikt op {new Date(g.achievedAt.seconds * 1000).toLocaleDateString('nl-BE')}</div>}
                     </div>
                     <button onClick={() => handleDelete(g.id)} style={{ background: 'none', border: 'none', color: '#334155', cursor: 'pointer', padding: '4px' }}><Trash2 size={14} /></button>
@@ -318,8 +339,8 @@ function GoalsTab({ memberContext }) {
               <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}>✕</button>
             </div>
             <label style={css.label}>Onderdeel</label>
-            <select style={css.select} value={form.discipline} onChange={e => setForm({ ...form, discipline: e.target.value })}>
-              {DISCIPLINES.map(d => <option key={d} value={d}>{DISC_LABELS[d]}</option>)}
+            <select style={css.select} value={form.disciplineId} onChange={e => setForm({ ...form, disciplineId: e.target.value })}>
+              {disciplines.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
             <label style={{ ...css.label, marginTop: '14px' }}>Doelstelling (stappen)</label>
             <input style={css.input} type="number" placeholder="bijv. 150" value={form.targetScore} onChange={e => setForm({ ...form, targetScore: e.target.value })} />
@@ -340,14 +361,12 @@ function GoalsTab({ memberContext }) {
 // ════════════════════════════════════════════════════════════════════════════
 export default function AchievementsPage() {
   const [activeTab, setActiveTab] = useState('badges');
-  const [memberContext, setMemberContext] = useState(null); // { clubId, memberId }
+  const [memberContext, setMemberContext] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const uid = getCookie();
     if (!uid) { setLoading(false); return; }
-
-    // Feature 8.4: resolve ClubMember via UserMemberLink
     const unsub = UserMemberLinkFactory.getForUser(uid, (profiles) => {
       const selfProfile = profiles.find(p => p.link.relationship === 'self');
       setMemberContext(selfProfile ? { clubId: selfProfile.member.clubId, memberId: selfProfile.member.id } : null);
