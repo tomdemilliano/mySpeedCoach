@@ -103,10 +103,22 @@ function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, onSave, onCl
   const defaultScope = isSuperAdmin ? 'global' : 'club';
   const defaultClubId = !isSuperAdmin && adminClubIds.length === 1 ? adminClubIds[0] : null;
 
+  const defaultScope  = isSuperAdmin ? 'global' : 'club';
+  const defaultClubId = !isSuperAdmin && adminClubIds.length === 1 ? adminClubIds[0] : null;
+
   const [form, setForm] = useState(badge
     ? { ...EMPTY_BADGE, ...badge }
     : { ...EMPTY_BADGE, scope: defaultScope, clubId: defaultClubId, type: 'manual' }
   );
+
+  // Auto-fill clubId whenever adminClubIds resolves to exactly one club
+  // (handles the case where props arrive after initial render)
+  useEffect(() => {
+    if (!isSuperAdmin && adminClubIds.length === 1 && !form.clubId) {
+      set('clubId', adminClubIds[0]);
+    }
+  }, [adminClubIds]);
+  
   const [triggerKind, setTriggerKind] = useState(detectTriggerKind(badge?.trigger));
   const [tv, setTv] = useState({
     discipline:      badge?.trigger?.discipline      || 'any',
@@ -196,12 +208,12 @@ function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, onSave, onCl
           )}
         </div>
 
-        {(form.scope === 'club' || !isSuperAdmin) && availableClubs.length > 0 && (
+        {(form.scope === 'club' || !isSuperAdmin) && availableClubs.length > 1 && (
           <>
             <label style={s.fieldLabel}>Club</label>
-            <select style={{ ...s.input, marginBottom: '12px' }} value={form.clubId || ''} onChange={e => set('clubId', e.target.value || null)}>
-              <option value="">-- Kies club --</option>
-              {availableClubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <select style={{ ...s.input, marginBottom: '12px' }} value={form.clubId || ''} onChange={e => set('clubId', e.target.value || null)}>
+                <option value="">-- Kies club --</option>
+                {availableClubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </>
         )}
