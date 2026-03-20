@@ -421,6 +421,8 @@ export default function BadgeBeheerPage() {
 
   // Badge management
   const [badges,          setBadges]          = useState([]);
+  const [clubBadgeFilter,   setClubBadgeFilter]   = useState('all');
+  const [globalBadgeFilter, setGlobalBadgeFilter] = useState('all');
   const [isBadgeFormOpen, setIsBadgeFormOpen] = useState(false);
   const [editingBadge,    setEditingBadge]    = useState(null);
 
@@ -562,8 +564,18 @@ export default function BadgeBeheerPage() {
   const adminClubIds = adminClubs.map(c => c.id);
   const adminName    = currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() : 'Coach';
 
-  const clubBadges   = badges.filter(b => b.scope === 'club');
-  const globalBadges = badges.filter(b => b.scope === 'global');
+  const applyFilter = (list, filter) => list.filter(b => {
+    if (filter === 'automatic') return b.type === 'automatic';
+    if (filter === 'manual')    return b.type === 'manual';
+    if (filter === 'inactive')  return !b.isActive;
+    if (filter === 'active')    return b.isActive;
+    return true; // 'all'
+  });
+
+  const allClubBadges   = badges.filter(b => b.scope === 'club');
+  const allGlobalBadges = badges.filter(b => b.scope === 'global');
+  const clubBadges      = applyFilter(allClubBadges,   clubBadgeFilter);
+  const globalBadges    = applyFilter(allGlobalBadges, globalBadgeFilter);
 
   const filteredMembers = clubMembers.filter(m =>
     `${m.firstName} ${m.lastName}`.toLowerCase().includes(memberSearch.toLowerCase())
@@ -640,7 +652,7 @@ export default function BadgeBeheerPage() {
                   <Medal size={18} color="#f59e0b" /> Club badges
                 </div>
                 <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                  {clubBadges.filter(b => b.isActive).length} actief · {clubBadges.length} totaal
+                  {allClubBadges.filter(b => b.isActive).length} actief · {allClubBadges.length} totaal
                 </div>
               </div>
               <button onClick={() => { setEditingBadge(null); setIsBadgeFormOpen(true); }} style={bs.primary}>
@@ -648,13 +660,25 @@ export default function BadgeBeheerPage() {
               </button>
             </div>
 
-            {clubBadges.length === 0 ? (
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
+              {[['all', 'Alle'], ['active', '✅ Actief'], ['automatic', '🤖 Auto'], ['manual', '👋 Manueel'], ['inactive', '⛔ Inactief']].map(([v, l]) => (
+                <button key={v} onClick={() => setClubBadgeFilter(v)} style={{ padding: '5px 10px', borderRadius: '14px', border: `1px solid ${clubBadgeFilter === v ? '#f59e0b' : '#334155'}`, fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', backgroundColor: clubBadgeFilter === v ? '#f59e0b22' : 'transparent', color: clubBadgeFilter === v ? '#f59e0b' : '#64748b' }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+
+            {allClubBadges.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 20px' }}>
                 <Medal size={40} color="#334155" style={{ marginBottom: '12px' }} />
                 <p style={{ color: '#475569', fontSize: '14px', marginBottom: '16px' }}>Nog geen club badges.</p>
                 <button onClick={() => { setEditingBadge(null); setIsBadgeFormOpen(true); }} style={bs.primary}>
                   <Plus size={15} /> Eerste badge aanmaken
                 </button>
+              </div>
+            ) : clubBadges.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+                <p style={{ color: '#475569', fontSize: '13px' }}>Geen badges voor dit filter.</p>
               </div>
             ) : (
               <BadgeGrid badges={clubBadges} allClubs={allClubs} isSuperAdmin={isSuperAdmin} canEdit={true}
@@ -673,7 +697,7 @@ export default function BadgeBeheerPage() {
                   <Shield size={18} color="#a78bfa" /> Globale badges
                 </div>
                 <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                  {globalBadges.filter(b => b.isActive).length} actief · {globalBadges.length} totaal
+                  {allGlobalBadges.filter(b => b.isActive).length} actief · {allGlobalBadges.length} totaal
                 </div>
               </div>
               {isSuperAdmin && (
@@ -691,10 +715,22 @@ export default function BadgeBeheerPage() {
               </div>
             )}
 
-            {globalBadges.length === 0 ? (
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
+              {[['all', 'Alle'], ['active', '✅ Actief'], ['automatic', '🤖 Auto'], ['manual', '👋 Manueel'], ['inactive', '⛔ Inactief']].map(([v, l]) => (
+                <button key={v} onClick={() => setGlobalBadgeFilter(v)} style={{ padding: '5px 10px', borderRadius: '14px', border: `1px solid ${globalBadgeFilter === v ? '#a78bfa' : '#334155'}`, fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', backgroundColor: globalBadgeFilter === v ? '#a78bfa22' : 'transparent', color: globalBadgeFilter === v ? '#a78bfa' : '#64748b' }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+
+            {allGlobalBadges.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 20px' }}>
                 <Shield size={40} color="#334155" style={{ marginBottom: '12px' }} />
                 <p style={{ color: '#475569', fontSize: '14px' }}>Geen globale badges gevonden.</p>
+              </div>
+            ) : globalBadges.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+                <p style={{ color: '#475569', fontSize: '13px' }}>Geen badges voor dit filter.</p>
               </div>
             ) : (
               <BadgeGrid badges={globalBadges} allClubs={allClubs} isSuperAdmin={isSuperAdmin} canEdit={isSuperAdmin}
