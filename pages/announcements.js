@@ -9,6 +9,7 @@ import {
   Building2, Users, AlertTriangle, Bell, Edit2, Send,
   Calendar, Clock, Globe, Shield,
 } from 'lucide-react';
+import { renderBodyWithLinks } from '../utils/renderBodyWithLinks';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 export const ANNOUNCEMENT_TYPES = {
@@ -139,8 +140,10 @@ function AnnouncementCard({ ann, canEdit, onEdit, onDelete, onTogglePin, showSta
 
         {/* Body */}
         <div style={{ paddingLeft: '46px' }}>
-          <div style={{ fontSize: '13px', color: '#94a3b8', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-            {expanded ? ann.body : (hasMore ? preview.slice(0, 120) + '…' : ann.body)}
+          <div style={{ fontSize: '13px', color: '#94a3b8', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {expanded
+              ? renderBodyWithLinks(ann.body)
+              : (hasMore ? preview.slice(0, 120) + '…' : renderBodyWithLinks(ann.body))}
           </div>
           {hasMore && (
             <button onClick={() => setExpanded(v => !v)}
@@ -346,6 +349,10 @@ function ComposeModal({ editing, managedClubs, coachGroupsByClub, isSuperAdmin, 
           <textarea style={{ ...m.input, minHeight: '90px', resize: 'vertical', lineHeight: 1.6, fontFamily: 'inherit' }}
             placeholder="Schrijf hier het volledige bericht…"
             value={form.body} onChange={e => setF('body', e.target.value)} />
+          <div style={{ fontSize: '11px', color: '#475569', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span>🔗</span>
+            <span>URLs worden automatisch klikbaar — plak gewoon een link in de tekst.</span>
+          </div>
         </div>
 
         {/* Dates */}
