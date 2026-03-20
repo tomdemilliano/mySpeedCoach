@@ -136,15 +136,15 @@ const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished, o
   );
 });
 
-// ─── Discipline Card Picker ───────────────────────────────────────────────────
-// Richer than plain buttons: each discipline shows its name, duration,
-// individual/team info, and any special rule. Groups SR and DD.
+// ─── Discipline Chip Picker ───────────────────────────────────────────────────
+// Compact chip row grouped by ropeType.
+// The selected discipline shows a single detail line beneath.
 function DisciplineCardPicker({ value, onChange, disciplines }) {
   if (!disciplines || disciplines.length === 0) {
     return (
-      <div style={{ display: 'flex', gap: '8px' }}>
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
         {[1, 2, 3].map(i => (
-          <div key={i} style={{ flex: 1, height: '72px', backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #334155', opacity: 0.4 }} />
+          <div key={i} style={{ width: '80px', height: '32px', backgroundColor: '#1e293b', borderRadius: '16px', border: '1px solid #334155', opacity: 0.4 }} />
         ))}
       </div>
     );
@@ -153,83 +153,110 @@ function DisciplineCardPicker({ value, onChange, disciplines }) {
   const srDiscs = disciplines.filter(d => d.ropeType === 'SR');
   const ddDiscs = disciplines.filter(d => d.ropeType === 'DD');
   const hasDD   = ddDiscs.length > 0;
+  const selected = disciplines.find(d => d.id === value) || null;
 
   const formatDur = (d) => {
-    if (!d.durationSeconds) return '∞';
+    if (!d.durationSeconds) return '∞ onbeperkt';
     if (d.durationSeconds < 60) return `${d.durationSeconds}s`;
-    return `${d.durationSeconds / 60}min`;
+    return `${d.durationSeconds / 60} min`;
   };
 
-  const specialIcon = (d) => {
-    if (d.specialRule === 'triple_under') return '⚡';
-    if (d.specialRule === 'relay')        return '🔄';
-    return null;
+  const detailLine = (d) => {
+    const parts = [formatDur(d)];
+    if (!d.isIndividual) parts.push(`👥 Team ${d.teamSize}`);
+    if (d.specialRule === 'triple_under') parts.push('⚡ 15s herstart');
+    if (d.specialRule === 'relay')        parts.push('🔄 beurtelings');
+    return parts.join(' · ');
   };
 
-  const renderCard = (disc) => {
-    const selected = value === disc.id;
-    const accent   = disc.ropeType === 'DD' ? '#a78bfa' : '#3b82f6';
-    const icon     = specialIcon(disc);
+  const renderChip = (disc) => {
+    const sel    = value === disc.id;
+    const accent = disc.ropeType === 'DD' ? '#a78bfa' : '#3b82f6';
     return (
       <button
         key={disc.id}
         type="button"
         onClick={() => onChange(disc.id)}
         style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
-          padding: '10px 12px', borderRadius: '10px', cursor: 'pointer',
-          fontFamily: 'inherit', textAlign: 'left', minWidth: 0,
-          border: `1.5px solid ${selected ? accent : '#334155'}`,
-          backgroundColor: selected ? `${accent}18` : '#1e293b',
-          transition: 'all 0.15s',
-          flex: '1 1 auto',
+          padding: '6px 12px', borderRadius: '16px', cursor: 'pointer',
+          fontFamily: 'inherit', fontSize: '13px', whiteSpace: 'nowrap',
+          fontWeight: sel ? '700' : '500',
+          border: `1.5px solid ${sel ? accent : '#334155'}`,
+          backgroundColor: sel ? `${accent}22` : 'transparent',
+          color: sel ? (disc.ropeType === 'DD' ? '#a78bfa' : '#60a5fa') : '#94a3b8',
+          transition: 'all 0.12s',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', width: '100%', marginBottom: '4px' }}>
-          {icon && <span style={{ fontSize: '12px' }}>{icon}</span>}
-          <span style={{ fontSize: '13px', fontWeight: selected ? '700' : '500', color: selected ? '#f1f5f9' : '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-            {disc.name}
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '10px', fontWeight: '600', color: selected ? accent : '#475569', backgroundColor: selected ? `${accent}22` : '#0f172a', padding: '1px 5px', borderRadius: '4px', border: `1px solid ${selected ? `${accent}44` : '#334155'}` }}>
-            {formatDur(disc)}
-          </span>
-          <span style={{ fontSize: '10px', color: '#475569' }}>
-            {disc.isIndividual ? '👤' : `👥${disc.teamSize}`}
-          </span>
-        </div>
+        {disc.name}
       </button>
     );
   };
 
   return (
     <div>
-      {hasDD && srDiscs.length > 0 && (
-        <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>🪢 Single Rope</div>
+      {/* SR chips */}
+      {srDiscs.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: hasDD ? '8px' : '0' }}>
+          {srDiscs.map(renderChip)}
+        </div>
       )}
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: hasDD ? '10px' : '0' }}>
-        {srDiscs.map(renderCard)}
-      </div>
+      {/* DD chips with label */}
       {hasDD && (
-        <>
-          <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px', marginTop: '4px' }}>🌀 Double Dutch</div>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {ddDiscs.map(renderCard)}
+        <div>
+          <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '6px 0 5px' }}>
+            🌀 Double Dutch
           </div>
-        </>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {ddDiscs.map(renderChip)}
+          </div>
+        </div>
+      )}
+      {/* Detail line for selected discipline */}
+      {selected && (
+        <div style={{ marginTop: '8px', fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ color: '#475569' }}>ℹ</span> {detailLine(selected)}
+        </div>
       )}
     </div>
   );
 }
 
-// ─── Relay Skipper Order Picker ───────────────────────────────────────────────
-// Shown in the config modal for team/relay disciplines.
-// Allows dragging to reorder skippers before the session starts.
-function RelayOrderPicker({ skippers, clubMembers, value, onChange }) {
-  // value = array of { memberId, name } in chosen order
+// ─── Relay Team Builder ───────────────────────────────────────────────────────
+// Two-phase UX:
+//   1. Tap skippers from the pool to add them (in tap order = running order)
+//      — capped at `required` selections
+//   2. Drag the order list to reorder, or tap ✕ to remove
+//
+// Props:
+//   skippers    : group member docs (from GroupFactory.getSkippersByGroup)
+//   clubMembers : ClubMember profile docs (for name resolution)
+//   value       : [{memberId, name}]  — current ordered selection
+//   onChange    : (newValue) => void
+//   required    : number — exact count needed (from discipline.skippersCount)
+function RelayTeamBuilder({ skippers, clubMembers, value, onChange, required = 2 }) {
   const [dragging, setDragging] = useState(null);
   const [dragOver, setDragOver] = useState(null);
+
+  const selectedIds = new Set(value.map(v => v.memberId));
+  const isFull      = value.length >= required;
+  const isDone      = value.length === required;
+
+  const getProfile = (memberId) => clubMembers.find(m => m.id === memberId);
+
+  const handleToggle = (memberId) => {
+    if (selectedIds.has(memberId)) {
+      // Always allow removal
+      onChange(value.filter(v => v.memberId !== memberId));
+    } else {
+      // Block when already at required count
+      if (isFull) return;
+      const profile = getProfile(memberId);
+      onChange([...value, {
+        memberId,
+        name: profile ? `${profile.firstName} ${profile.lastName}` : memberId,
+      }]);
+    }
+  };
 
   const handleDragStart = (idx) => setDragging(idx);
   const handleDragOver  = (e, idx) => { e.preventDefault(); setDragOver(idx); };
@@ -243,54 +270,116 @@ function RelayOrderPicker({ skippers, clubMembers, value, onChange }) {
     setDragging(null); setDragOver(null);
   };
 
-  const getProfile = (memberId) => clubMembers.find(m => m.id === memberId);
-
-  if (value.length === 0) {
-    return <p style={{ color: '#475569', fontSize: '13px', textAlign: 'center', padding: '12px 0' }}>Geen skippers beschikbaar.</p>;
+  if (skippers.length === 0) {
+    return <p style={{ color: '#475569', fontSize: '13px', padding: '8px 0' }}>Geen skippers in deze groep.</p>;
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <GripVertical size={11} /> Sleep om de volgorde aan te passen
+    <div>
+      {/* ── Instruction line ── */}
+      <div style={{ fontSize: '11px', marginBottom: '8px', color: isDone ? '#22c55e' : '#64748b', display: 'flex', alignItems: 'center', gap: '5px' }}>
+        {isDone
+          ? `✓ ${required} skipper${required > 1 ? 's' : ''} geselecteerd`
+          : `Tik om te selecteren · ${required - value.length} nog nodig`}
       </div>
-      {value.map((item, idx) => {
-        const profile  = getProfile(item.memberId);
-        const initials = `${profile?.firstName?.[0] || '?'}${profile?.lastName?.[0] || ''}`.toUpperCase();
-        const isDraggedOver = dragOver === idx;
-        return (
-          <div
-            key={item.memberId}
-            draggable
-            onDragStart={() => handleDragStart(idx)}
-            onDragOver={(e) => handleDragOver(e, idx)}
-            onDrop={(e) => handleDrop(e, idx)}
-            onDragEnd={() => { setDragging(null); setDragOver(null); }}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '10px',
-              padding: '10px 12px', borderRadius: '10px',
-              backgroundColor: isDraggedOver ? '#1e3a5f' : '#0f172a',
-              border: `1px solid ${isDraggedOver ? '#3b82f6' : dragging === idx ? '#475569' : '#1e293b'}`,
-              cursor: 'grab', userSelect: 'none',
-              opacity: dragging === idx ? 0.5 : 1,
-              transition: 'border-color 0.15s, background-color 0.15s',
-            }}
-          >
-            <span style={{ fontSize: '16px', color: '#64748b', flexShrink: 0 }}>⠿</span>
-            <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#3b82f622', border: '1px solid #3b82f644', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '11px', color: '#60a5fa', flexShrink: 0 }}>
-              {initials}
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '14px', fontWeight: '600', color: '#f1f5f9' }}>
-                {profile ? `${profile.firstName} ${profile.lastName}` : item.memberId}
+
+      {/* ── Pool: tap to select ── */}
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: value.length > 0 ? '14px' : '0' }}>
+        {skippers.map(s => {
+          const memberId  = s.memberId || s.id;
+          const profile   = getProfile(memberId);
+          const firstName = profile?.firstName || '?';
+          const lastName  = profile?.lastName  || '';
+          const initials  = `${firstName[0] || '?'}${lastName[0] || ''}`.toUpperCase();
+          const isIn      = selectedIds.has(memberId);
+          const position  = isIn ? value.findIndex(v => v.memberId === memberId) + 1 : null;
+          // Dim non-selected when full (but still allow removal via isIn check)
+          const dimmed    = !isIn && isFull;
+
+          return (
+            <button
+              key={memberId}
+              type="button"
+              onClick={() => handleToggle(memberId)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                padding: '8px 12px', borderRadius: '20px', cursor: dimmed ? 'not-allowed' : 'pointer',
+                fontFamily: 'inherit', border: '1.5px solid',
+                borderColor:     isIn ? '#3b82f6' : '#334155',
+                backgroundColor: isIn ? '#1e3a5f' : 'transparent',
+                opacity:         dimmed ? 0.35 : 1,
+                transition: 'all 0.12s',
+              }}
+            >
+              <div style={{
+                width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0,
+                backgroundColor: isIn ? '#3b82f6' : '#334155',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '11px', fontWeight: '700', color: 'white',
+              }}>
+                {isIn ? position : initials}
               </div>
-            </div>
-            <div style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', color: '#94a3b8', flexShrink: 0 }}>
-              {idx + 1}
-            </div>
+              <span style={{ fontSize: '13px', fontWeight: isIn ? '700' : '400', color: isIn ? '#f1f5f9' : '#94a3b8' }}>
+                {firstName} {lastName}
+              </span>
+              {isIn && <span style={{ fontSize: '13px', color: '#60a5fa' }}>✓</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Order list: drag to reorder ── */}
+      {value.length > 0 && (
+        <div>
+          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <GripVertical size={11} /> Volgorde aanpassen
           </div>
-        );
-      })}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            {value.map((item, idx) => {
+              const profile       = getProfile(item.memberId);
+              const initials      = `${profile?.firstName?.[0] || '?'}${profile?.lastName?.[0] || ''}`.toUpperCase();
+              const isDraggedOver = dragOver === idx;
+              return (
+                <div
+                  key={item.memberId}
+                  draggable
+                  onDragStart={() => handleDragStart(idx)}
+                  onDragOver={(e) => handleDragOver(e, idx)}
+                  onDrop={(e) => handleDrop(e, idx)}
+                  onDragEnd={() => { setDragging(null); setDragOver(null); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '10px',
+                    padding: '9px 12px', borderRadius: '10px',
+                    backgroundColor: isDraggedOver ? '#1e3a5f' : '#0f172a',
+                    border: `1px solid ${isDraggedOver ? '#3b82f6' : dragging === idx ? '#475569' : '#1e293b'}`,
+                    cursor: 'grab', userSelect: 'none',
+                    opacity: dragging === idx ? 0.5 : 1,
+                    transition: 'border-color 0.12s, background-color 0.12s',
+                  }}
+                >
+                  <span style={{ color: '#475569', flexShrink: 0, fontSize: '16px' }}>⠿</span>
+                  <div style={{ width: '26px', height: '26px', borderRadius: '50%', backgroundColor: '#3b82f622', border: '1px solid #3b82f644', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: '#60a5fa', flexShrink: 0 }}>
+                    {initials}
+                  </div>
+                  <div style={{ flex: 1, fontSize: '13px', fontWeight: '600', color: '#f1f5f9' }}>
+                    {profile ? `${profile.firstName} ${profile.lastName}` : item.memberId}
+                  </div>
+                  <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: isDone ? '#22c55e' : '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: 'white', flexShrink: 0 }}>
+                    {idx + 1}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onChange(value.filter((_, i) => i !== idx))}
+                    style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', flexShrink: 0 }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1116,19 +1205,10 @@ export default function CounterPage() {
     const groupReady      = selectedClubId && selectedGroupId;
     const disciplineReady = !!disciplineId;
 
-    // For relay: build team order from group's skippers (pre-populated, user drags to reorder)
-    // We keep selectedTeamOrder in sync whenever the group or discipline changes
-    const teamOrderForDisplay = selectedTeamOrder.length > 0
-      ? selectedTeamOrder
-      : skippers.map(s => {
-          const mid = s.memberId || s.id;
-          const p   = clubMembers.find(m => m.id === mid);
-          return { memberId: mid, name: p ? `${p.firstName} ${p.lastName}` : mid };
-        });
-
     // Can we start?
+    const requiredSkippers = currentDisc?.skippersCount ?? 1;
     const canStart = disciplineReady && groupReady && (
-      isRelayDisc  ? teamOrderForDisplay.length > 0 :
+      isRelayDisc  ? selectedTeamOrder.length === requiredSkippers :
       isTuDisc     ? !!selectedSkipper :
       /* individual */ !!selectedSkipper
     );
@@ -1219,23 +1299,25 @@ export default function CounterPage() {
             </div>
           )}
 
-          {/* ── Step 4a: Relay — team order ── */}
+          {/* ── Step 4a: Relay — select and order team ── */}
           {disciplineReady && isRelayDisc && groupReady && (
             <div style={st.setupSection}>
               <div style={st.setupStepLabel}>
-                Startvolgorde
-                <span style={{ fontSize: '10px', color: '#475569', fontWeight: '400', marginLeft: '8px' }}>sleep om te herschikken</span>
+                Team samenstellen
+                <span style={{
+                  marginLeft: '8px', fontSize: '10px', fontWeight: '600',
+                  color: selectedTeamOrder.length === requiredSkippers ? '#22c55e' : '#f59e0b',
+                }}>
+                  {selectedTeamOrder.length} / {requiredSkippers}
+                </span>
               </div>
-              {skippers.length === 0 ? (
-                <p style={{ color: '#475569', fontSize: '13px', padding: '8px 0' }}>Geen skippers in deze groep.</p>
-              ) : (
-                <RelayOrderPicker
-                  skippers={skippers}
-                  clubMembers={clubMembers}
-                  value={teamOrderForDisplay}
-                  onChange={setSelectedTeamOrder}
-                />
-              )}
+              <RelayTeamBuilder
+                skippers={skippers}
+                clubMembers={clubMembers}
+                value={selectedTeamOrder}
+                onChange={setSelectedTeamOrder}
+                required={requiredSkippers}
+              />
             </div>
           )}
 
