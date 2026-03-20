@@ -111,10 +111,10 @@ function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, onSave, onCl
   // Auto-fill clubId whenever adminClubIds resolves to exactly one club
   // (handles the case where props arrive after initial render)
   useEffect(() => {
-    if (!isSuperAdmin && adminClubIds.length === 1 && !form.clubId) {
-      set('clubId', adminClubIds[0]);
+    if (!isSuperAdmin && adminClubIds.length === 1) {
+      setForm(f => f.clubId ? f : { ...f, clubId: adminClubIds[0] });
     }
-  }, [adminClubIds]);
+  }, [adminClubIds, isSuperAdmin]);
   
   const [triggerKind, setTriggerKind] = useState(detectTriggerKind(badge?.trigger));
   const [tv, setTv] = useState({
@@ -399,7 +399,28 @@ export default function BadgeBeheerPage() {
             });
           });
         });
-      }
+      } else {
+         // Regular user — check if they are a coach in any group
+         ClubFactory.getAll(allClubs => {
+           setAllClubs(allClubs);
+           const found = [];
+           let pending = allClubs.length;
+           if (pending === 0) { setAdminClubs([]); return; }
+           allClubs.forEach(club => {
+             GroupFactory.getGroupsByClub(club.id, groups => {
+               let gPending = groups.length;
+               if (gPending === 0) { if (--pending === 0) setAdminClubs(found); return; }
+               groups.forEach(group => {
+                 GroupFactory.getMembersByGroup(club.id, group.id, mems => {
+                   const isCoach = mems.some(m => (m.memberId || m.id) === uid && m.isCoach);
+                   if (isCoach && !found.find(c => c.id === club.id)) found.push(club);
+                   if (--gPending === 0 && --pending === 0) setAdminClubs(found);
+                 });
+               });
+             });
+           });
+         });      
+       }
     });
   }, [uid, authLoading]);
 
@@ -470,7 +491,9 @@ export default function BadgeBeheerPage() {
     </div>
   );
 
-  const hasAccess = currentUser?.role === 'clubadmin' || currentUser?.role === 'superadmin';
+  const hasAccess = currentUser?.role === 'clubadmin' 
+    || currentUser?.role === 'superadmin' 
+    || adminClubs.length > 0;
   if (!hasAccess && currentUser) return (
     <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px', fontFamily: 'system-ui,sans-serif' }}>
       <Award size={40} color="#334155" />
