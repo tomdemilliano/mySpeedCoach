@@ -1,7 +1,6 @@
 import { db, rtdb } from '../firebaseConfig';
-import {
-  collection, doc, setDoc, getDoc, getDocs, updateDoc,
-  deleteDoc, query, where, serverTimestamp, addDoc, onSnapshot
+import { collection, doc, setDoc, getDoc, getDocs, updateDoc,
+  deleteDoc, query, where, orderBy, serverTimestamp, addDoc, onSnapshot
 } from "firebase/firestore";
 import { ref, set, update, remove, onValue, runTransaction, push } from "firebase/database";
 
@@ -1102,4 +1101,183 @@ export const AnnouncementFactory = {
       },
       (err) => { console.error('AnnouncementFactory.subscribeForGroup error:', err); callback([]); }
     ),
+};
+
+// ==========================================
+// 11. DISCIPLINE FACTORY  (Feature: Dynamic Disciplines)
+// ==========================================
+// Schema (Firestore top-level collection):
+//
+// disciplines/{disciplineId}
+//   name:            string       — e.g. "Speed Sprint"
+//   ropeType:        "SR"|"DD"   — Single Rope or Double Dutch
+//   durationSeconds: number|null  — null = untimed
+//   teamSize:        number       — 1 = individual, 2/4 = team
+//   isIndividual:    boolean
+//   specialRule:     null | "triple_under" | "relay"
+//   skippersCount:   number       — jumping skippers (differs for DD)
+//   isActive:        boolean
+//   sortOrder:       number
+//   createdAt:       timestamp
+
+export const DisciplineFactory = {
+  create: (data) =>
+    addDoc(collection(db, 'disciplines'), {
+      name:            data.name            || '',
+      ropeType:        data.ropeType        || 'SR',
+      durationSeconds: data.durationSeconds ?? null,
+      teamSize:        data.teamSize        ?? 1,
+      isIndividual:    data.isIndividual    ?? true,
+      specialRule:     data.specialRule     || null,
+      skippersCount:   data.skippersCount   ?? 1,
+      isActive:        data.isActive        ?? true,
+      sortOrder:       data.sortOrder       ?? 999,
+      createdAt:       serverTimestamp(),
+    }),
+ 
+  update: (disciplineId, data) =>
+    updateDoc(doc(db, 'disciplines', disciplineId), data),
+ 
+  delete: (disciplineId) =>
+    deleteDoc(doc(db, 'disciplines', disciplineId)),
+ 
+  // Real-time subscription — ALL disciplines (including inactive), ordered by sortOrder
+  getAll: (callback) =>
+    onSnapshot(
+      query(collection(db, 'disciplines'), orderBy('sortOrder', 'asc')),
+      (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    ),
+ 
+  // Real-time subscription — only active disciplines
+  getActive: (callback) =>
+    onSnapshot(
+      query(
+        collection(db, 'disciplines'),
+        where('isActive', '==', true),
+        orderBy('sortOrder', 'asc')
+      ),
+      (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    ),
+ 
+  // One-shot fetch — active disciplines only
+  getActiveOnce: async () => {
+    const snap = await getDocs(
+      query(
+        collection(db, 'disciplines'),
+        where('isActive', '==', true),
+        orderBy('sortOrder', 'asc')
+      )
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+ 
+  // Seed standard rope-skipping disciplines.
+  // Idempotent: skips any discipline whose name already exists.
+  seedDefaults: async () => {
+    const existing = await getDocs(collection(db, 'disciplines'));
+    const existingNames = new Set(existing.docs.map(d => d.data().name));
+ 
+    const defaults = [
+      {
+        name: 'Speed Sprint',
+        ropeType: 'SR',
+        durationSeconds: 30,
+        teamSize: 1,
+        isIndividual: true,
+        specialRule: null,
+        skippersCount: 1,
+        sortOrder: 1,
+      },
+      {
+        name: 'Endurance 2 min',
+        ropeType: 'SR',
+        durationSeconds: 120,
+        teamSize: 1,
+        isIndividual: true,
+        specialRule: null,
+        skippersCount: 1,
+        sortOrder: 2,
+      },
+      {
+        name: 'Endurance 3 min',
+        ropeType: 'SR',
+        durationSeconds: 180,
+        teamSize: 1,
+        isIndividual: true,
+        specialRule: null,
+        skippersCount: 1,
+        sortOrder: 3,
+      },
+      {
+        name: 'Triple Under',
+        ropeType: 'SR',
+        durationSeconds: null,
+        teamSize: 1,
+        isIndividual: true,
+        specialRule: 'triple_under',
+        skippersCount: 1,
+        sortOrder: 4,
+      },
+      {
+        name: 'Speed Relay 2',
+        ropeType: 'SR',
+        durationSeconds: 30,   // 30 sec per skipper
+        teamSize: 2,
+        isIndividual: false,
+        specialRule: 'relay',
+        skippersCount: 2,
+        sortOrder: 5,
+      },
+      {
+        name: 'Speed Relay 4',
+        ropeType: 'SR',
+        durationSeconds: 30,   // 30 sec per skipper
+        teamSize: 4,
+        isIndividual: false,
+        specialRule: 'relay',
+        skippersCount: 4,
+        sortOrder: 6,
+      },
+      {
+        name: 'Double Under',
+        ropeType: 'SR',
+        durationSeconds: 30,   // 30 sec per skipper
+        teamSize: 2,
+        isIndividual: false,
+        specialRule: 'relay',
+        skippersCount: 2,
+        sortOrder: 7,
+      },
+      {
+        name: 'DD Speed Relay',
+        ropeType: 'DD',
+        durationSeconds: 30,   // 30 sec per skipper
+        teamSize: 4,
+        isIndividual: false,
+        specialRule: 'relay',
+        skippersCount: 4,
+        sortOrder: 8,
+      },
+      {
+        name: 'DD Speed Sprint',
+        ropeType: 'DD',
+        durationSeconds: 60,
+        teamSize: 3,           // 1 jumping + 2 turning
+        isIndividual: false,
+        specialRule: null,
+        skippersCount: 1,      // only 1 does speed jumps
+        sortOrder: 9,
+      },
+    ];
+ 
+    for (const disc of defaults) {
+      if (!existingNames.has(disc.name)) {
+        await addDoc(collection(db, 'disciplines'), {
+          ...disc,
+          isActive: true,
+          createdAt: serverTimestamp(),
+        });
+      }
+    }
+  },
 };
