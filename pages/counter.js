@@ -3,15 +3,18 @@ import {
   LiveSessionFactory, GroupFactory, ClubFactory, UserFactory,
   BadgeFactory, CounterBadgeFactory, ClubMemberFactory, UserMemberLinkFactory,
 } from '../constants/dbSchema';
+import { useDisciplines } from '../hooks/useDisciplines';
+import DisciplineSelector from '../components/DisciplineSelector';
 import {
   Hash, Timer, Square, History as HistoryIcon,
   Play, Clock, Users, Building2, Trophy, ArrowLeft,
-  Award, Check, X, Zap, Medal,
+  Award, Check, X, Zap, Medal, ChevronRight,
+  SkipForward, AlertTriangle, GripVertical, RefreshCw,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const DISCIPLINE_DURATION = { '30sec': 30, '2min': 120, '3min': 180 };
-const AUTO_STOP_IDLE_MS   = 15000;
+const AUTO_STOP_IDLE_MS  = 15000;  // individual idle auto-stop
+const TRIPLE_UNDER_IDLE  = 15000;  // 15s countdown after "misser"
 
 const COOKIE_KEY = 'msc_uid';
 const getCookie = () => {
@@ -20,11 +23,12 @@ const getCookie = () => {
   return match ? match[1] : null;
 };
 
+// Inject global keyframe CSS once
 if (typeof document !== 'undefined') {
   const styleId = 'counter-keyframes';
   if (!document.getElementById(styleId)) {
     const style = document.createElement('style');
-    style.id    = styleId;
+    style.id = styleId;
     style.textContent = `
       @keyframes sparkFlyA { 0%{transform:translate(0,0) scale(1);opacity:1} 100%{transform:translate(-120px,-200px) scale(0);opacity:0} }
       @keyframes sparkFlyB { 0%{transform:translate(0,0) scale(1);opacity:1} 100%{transform:translate(80px,-250px) scale(0);opacity:0} }
@@ -32,9 +36,10 @@ if (typeof document !== 'undefined') {
       @keyframes sparkFlyD { 0%{transform:translate(0,0) scale(1);opacity:1} 100%{transform:translate(-80px,-220px) scale(0);opacity:0} }
       @keyframes sparkFlyE { 0%{transform:translate(0,0) scale(1);opacity:1} 100%{transform:translate(30px,-300px) scale(0);opacity:0} }
       @keyframes sparkFlyF { 0%{transform:translate(0,0) scale(1);opacity:1} 100%{transform:translate(-200px,-150px) scale(0);opacity:0} }
-      @keyframes pulse     { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
-      @keyframes fadeInUp  { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
-      @keyframes spin      { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+      @keyframes pulse      { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+      @keyframes fadeInUp   { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes spin       { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+      @keyframes countPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.15)} }
     `;
     document.head.appendChild(style);
   }
@@ -47,17 +52,11 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
   const isBadge     = type === 'badge';
   const accentColor = isBadge ? '#f59e0b' : '#facc15';
   const Icon        = isBadge ? Medal : Award;
-
   return (
     <>
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 3000, overflow: 'hidden' }}>
         {Array.from({ length: 24 }).map((_, i) => (
-          <div key={i} style={{
-            position: 'absolute', left: `${10 + (i * 3.5) % 80}%`, top: `${15 + (i * 7) % 70}%`,
-            width: `${5 + (i % 4) * 3}px`, height: `${5 + (i % 4) * 3}px`, borderRadius: '50%',
-            backgroundColor: ['#facc15','#f97316','#ef4444','#22c55e','#60a5fa','#a78bfa'][i % 6],
-            animation: `${SPARK_ANIMS[i % 6]} ${0.9 + (i % 5) * 0.2}s ease-out ${(i % 8) * 0.12}s forwards`,
-          }} />
+          <div key={i} style={{ position: 'absolute', left: `${10 + (i * 3.5) % 80}%`, top: `${15 + (i * 7) % 70}%`, width: `${5 + (i % 4) * 3}px`, height: `${5 + (i % 4) * 3}px`, borderRadius: '50%', backgroundColor: ['#facc15','#f97316','#ef4444','#22c55e','#60a5fa','#a78bfa'][i % 6], animation: `${SPARK_ANIMS[i % 6]} ${0.9 + (i % 5) * 0.2}s ease-out ${(i % 8) * 0.12}s forwards` }} />
         ))}
       </div>
       <div style={st.modalOverlay}>
@@ -82,7 +81,7 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
             ) : (
               <>
                 <div style={{ fontSize: '42px', fontWeight: '900', color: 'white', lineHeight: 1 }}>{data.score}</div>
-                <div style={{ color: '#94a3b8', fontSize: '14px', marginTop: '4px' }}>steps · {data.discipline} · {data.sessionType}</div>
+                <div style={{ color: '#94a3b8', fontSize: '14px', marginTop: '4px' }}>stappen</div>
                 {data.previousBest > 0 && (
                   <div style={{ color: '#22c55e', fontSize: '13px', marginTop: '8px' }}>+{data.score - data.previousBest} beter dan vorig record ({data.previousBest})</div>
                 )}
@@ -109,7 +108,7 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
 }
 
 // ─── Isolated Timer ────────────────────────────────────────────────────────────
-const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished }) => {
+const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished, overtimeColor = '#f97316' }) => {
   const [display,    setDisplay]    = useState('0:00');
   const [isOvertime, setIsOvertime] = useState(false);
 
@@ -118,7 +117,7 @@ const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished })
     const interval = setInterval(() => {
       if (isRecording && startTime) {
         const elapsed   = Math.floor((Date.now() - startTime) / 1000);
-        const remaining = durationSeconds - elapsed;
+        const remaining = durationSeconds ? durationSeconds - elapsed : -elapsed;
         const abs  = Math.abs(remaining);
         const mins = Math.floor(abs / 60);
         const secs = abs % 60;
@@ -130,74 +129,318 @@ const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished })
   }, [startTime, durationSeconds, isRecording, isFinished]);
 
   return (
-    <div style={{ fontSize: '28px', fontWeight: 'bold', fontFamily: 'monospace', color: isOvertime ? '#f97316' : '#60a5fa', display: 'flex', alignItems: 'center', gap: '8px' }}>
-      <Timer size={22} color={isOvertime ? '#f97316' : '#60a5fa'} />
+    <div style={{ fontSize: '28px', fontWeight: 'bold', fontFamily: 'monospace', color: isOvertime ? overtimeColor : '#60a5fa', display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <Timer size={22} color={isOvertime ? overtimeColor : '#60a5fa'} />
       {display}
     </div>
   );
 });
 
+// ─── Relay Skipper Order Picker ───────────────────────────────────────────────
+// Shown in the config modal for team/relay disciplines.
+// Allows dragging to reorder skippers before the session starts.
+function RelayOrderPicker({ skippers, clubMembers, value, onChange }) {
+  // value = array of { memberId, name } in chosen order
+  const [dragging, setDragging] = useState(null);
+  const [dragOver, setDragOver] = useState(null);
+
+  const handleDragStart = (idx) => setDragging(idx);
+  const handleDragOver  = (e, idx) => { e.preventDefault(); setDragOver(idx); };
+  const handleDrop      = (e, targetIdx) => {
+    e.preventDefault();
+    if (dragging === null || dragging === targetIdx) { setDragging(null); setDragOver(null); return; }
+    const next = [...value];
+    const [moved] = next.splice(dragging, 1);
+    next.splice(targetIdx, 0, moved);
+    onChange(next);
+    setDragging(null); setDragOver(null);
+  };
+
+  const getProfile = (memberId) => clubMembers.find(m => m.id === memberId);
+
+  if (value.length === 0) {
+    return <p style={{ color: '#475569', fontSize: '13px', textAlign: 'center', padding: '12px 0' }}>Geen skippers beschikbaar.</p>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <GripVertical size={11} /> Sleep om de volgorde aan te passen
+      </div>
+      {value.map((item, idx) => {
+        const profile  = getProfile(item.memberId);
+        const initials = `${profile?.firstName?.[0] || '?'}${profile?.lastName?.[0] || ''}`.toUpperCase();
+        const isDraggedOver = dragOver === idx;
+        return (
+          <div
+            key={item.memberId}
+            draggable
+            onDragStart={() => handleDragStart(idx)}
+            onDragOver={(e) => handleDragOver(e, idx)}
+            onDrop={(e) => handleDrop(e, idx)}
+            onDragEnd={() => { setDragging(null); setDragOver(null); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '10px',
+              padding: '10px 12px', borderRadius: '10px',
+              backgroundColor: isDraggedOver ? '#1e3a5f' : '#0f172a',
+              border: `1px solid ${isDraggedOver ? '#3b82f6' : dragging === idx ? '#475569' : '#1e293b'}`,
+              cursor: 'grab', userSelect: 'none',
+              opacity: dragging === idx ? 0.5 : 1,
+              transition: 'border-color 0.15s, background-color 0.15s',
+            }}
+          >
+            <span style={{ fontSize: '16px', color: '#64748b', flexShrink: 0 }}>⠿</span>
+            <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#3b82f622', border: '1px solid #3b82f644', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '11px', color: '#60a5fa', flexShrink: 0 }}>
+              {initials}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '14px', fontWeight: '600', color: '#f1f5f9' }}>
+                {profile ? `${profile.firstName} ${profile.lastName}` : item.memberId}
+              </div>
+            </div>
+            <div style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', color: '#94a3b8', flexShrink: 0 }}>
+              {idx + 1}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Relay scoreboard (shown during relay session) ────────────────────────────
+function RelayScoreboard({ relayOrder, relayResults, currentSkipperIndex, discName }) {
+  const total = relayResults.reduce((s, r) => s + (r.steps || 0), 0);
+  return (
+    <div style={{ width: '100%', maxWidth: '440px', backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #334155', padding: '14px', marginBottom: '14px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+        <div style={{ fontSize: '12px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          {discName} · Teamtotaal
+        </div>
+        <div style={{ fontSize: '22px', fontWeight: '900', color: '#60a5fa' }}>
+          {total} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '400' }}>stappen</span>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        {relayOrder.map((item, idx) => {
+          const result   = relayResults[idx] || { steps: 0 };
+          const isCurrent = idx === currentSkipperIndex;
+          const isDone    = idx < currentSkipperIndex;
+          return (
+            <div key={item.memberId} style={{
+              display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '8px',
+              backgroundColor: isCurrent ? '#1e3a5f' : isDone ? '#0f172a' : '#0f172a44',
+              border: `1px solid ${isCurrent ? '#3b82f688' : isDone ? '#22c55e33' : '#1e293b'}`,
+              opacity: !isCurrent && !isDone ? 0.45 : 1,
+              transition: 'all 0.3s',
+            }}>
+              <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: isCurrent ? '#3b82f6' : isDone ? '#22c55e' : '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: 'white', flexShrink: 0 }}>
+                {isDone ? '✓' : idx + 1}
+              </div>
+              <div style={{ flex: 1, fontSize: '13px', fontWeight: isCurrent ? '700' : '400', color: isCurrent ? '#f1f5f9' : isDone ? '#94a3b8' : '#475569' }}>
+                {item.name}
+              </div>
+              <div style={{ fontSize: '16px', fontWeight: '800', color: isCurrent ? '#60a5fa' : isDone ? '#22c55e' : '#334155' }}>
+                {result.steps ?? '—'}
+              </div>
+              {isCurrent && (
+                <div style={{ fontSize: '9px', fontWeight: '700', color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  ACTIEF
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Relay results summary ────────────────────────────────────────────────────
+function RelayResultsSummary({ relayOrder, relayResults, discName, sessionType, onNewSession, onReset }) {
+  const total = relayResults.reduce((s, r) => s + (r.steps || 0), 0);
+  return (
+    <div style={{ width: '100%', maxWidth: '440px', backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #22c55e44', padding: '20px', animation: 'fadeInUp 0.4s ease-out' }}>
+      <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+        <div style={{ fontSize: '36px', marginBottom: '6px' }}>🏆</div>
+        <div style={{ fontSize: '14px', fontWeight: '700', color: '#22c55e', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sessie voltooid!</div>
+        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{discName} · {sessionType}</div>
+      </div>
+
+      {/* Total — prominent */}
+      <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', padding: '14px', marginBottom: '14px', textAlign: 'center', border: '1px solid #22c55e33' }}>
+        <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Teamtotaal</div>
+        <div style={{ fontSize: '44px', fontWeight: '900', color: '#22c55e', lineHeight: 1 }}>{total}</div>
+        <div style={{ fontSize: '12px', color: '#64748b' }}>stappen</div>
+      </div>
+
+      {/* Individual results — informational */}
+      <div style={{ marginBottom: '8px', fontSize: '11px', color: '#475569', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+        Individueel
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '16px' }}>
+        {relayOrder.map((item, idx) => {
+          const result = relayResults[idx] || { steps: 0 };
+          return (
+            <div key={item.memberId} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b' }}>
+              <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: '#94a3b8', flexShrink: 0 }}>
+                {idx + 1}
+              </div>
+              <div style={{ flex: 1, fontSize: '13px', color: '#94a3b8' }}>{item.name}</div>
+              <div style={{ fontSize: '16px', fontWeight: '700', color: '#60a5fa' }}>{result.steps ?? 0}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button onClick={onNewSession} style={{ flex: 1, padding: '13px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+          <Play size={16} fill="white" /> Nieuwe sessie
+        </button>
+        <button onClick={onReset} style={{ padding: '13px 16px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '10px', color: '#94a3b8', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
+          Andere skipper
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Triple Under display ─────────────────────────────────────────────────────
+function TripleUnderDisplay({ attempts, currentAttempt, missCountdown, onMisser }) {
+  const best = Math.max(...attempts.map(a => a.steps), 0);
+  return (
+    <div style={{ width: '100%', maxWidth: '440px' }}>
+      {/* Attempts summary */}
+      {attempts.length > 0 && (
+        <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '12px 14px', marginBottom: '10px' }}>
+          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
+            Pogingen · Beste: <span style={{ color: '#facc15' }}>{best}</span>
+          </div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {attempts.map((a, i) => (
+              <div key={i} style={{ padding: '4px 10px', borderRadius: '6px', backgroundColor: a.steps === best && best > 0 ? '#facc1522' : '#0f172a', border: `1px solid ${a.steps === best && best > 0 ? '#facc1544' : '#334155'}`, fontSize: '13px', fontWeight: '700', color: a.steps === best && best > 0 ? '#facc15' : '#94a3b8' }}>
+                #{i + 1}: {a.steps}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Miss countdown banner */}
+      {missCountdown !== null && (
+        <div style={{ backgroundColor: '#ef444422', border: '1px solid #ef444444', borderRadius: '12px', padding: '12px 16px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '12px', animation: 'flashRed 1s ease-in-out infinite' }}>
+          <div style={{ fontSize: '28px', fontWeight: '900', color: '#ef4444', fontFamily: 'monospace', animation: 'countPulse 1s ease-in-out infinite', minWidth: '36px', textAlign: 'center' }}>
+            {missCountdown}
+          </div>
+          <div>
+            <div style={{ fontWeight: '700', fontSize: '13px', color: '#ef4444' }}>Misser! Nog {missCountdown}s om verder te gaan</div>
+            <div style={{ fontSize: '11px', color: '#ef444488', marginTop: '2px' }}>Begin opnieuw te tellen om poging {attempts.length + 2} te starten</div>
+          </div>
+        </div>
+      )}
+
+      {/* Misser button */}
+      {missCountdown === null && (
+        <button
+          onClick={onMisser}
+          style={{ width: '100%', padding: '12px', backgroundColor: '#ef444422', border: '2px solid #ef444466', borderRadius: '12px', color: '#ef4444', fontWeight: '700', fontSize: '15px', cursor: 'pointer', marginBottom: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+        >
+          <AlertTriangle size={18} /> MISSER (start 15s countdown)
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════════════════
 export default function CounterPage() {
+  const { disciplines, getDisc, getDuration } = useDisciplines();
+
   // ── Current user (counter) ───────────────────────────────────────────────
   const [counterUser,   setCounterUser]   = useState(null);
   const isSuperAdminRef = useRef(false);
   const isClubAdminRef  = useRef(false);
 
-  // ── Member-scoped club/group data ────────────────────────────────────────
+  // ── Club/group data ──────────────────────────────────────────────────────
   const [memberClubs,   setMemberClubs]   = useState([]);
   const [memberGroups,  setMemberGroups]  = useState([]);
   const [bootstrapDone, setBootstrapDone] = useState(false);
-
-  // Selection state
   const [selectedClubId,  setSelectedClubId]  = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState('');
 
-  // Skippers in the selected group
+  // ── Skipper data ──────────────────────────────────────────────────────────
   const [skippers,    setSkippers]    = useState([]);
   const [clubMembers, setClubMembers] = useState([]);
-
-  // Selected skipper to count for
   const [selectedSkipper, setSelectedSkipper] = useState(null);
 
-  // Session config modal
+  // ── Session config ────────────────────────────────────────────────────────
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [sessionType,     setSessionType]     = useState('Training');
-  const [discipline,      setDiscipline]      = useState('30sec');
+  const [disciplineId,    setDisciplineId]    = useState('');
 
-  // Live session
+  // ── Derived discipline info ───────────────────────────────────────────────
+  const currentDisc = getDisc(disciplineId);
+  const sessionMode = !currentDisc ? 'individual'
+    : currentDisc.specialRule === 'triple_under' ? 'triple_under'
+    : currentDisc.specialRule === 'relay'        ? 'relay'
+    : 'individual';
+
+  // ── Individual session state ──────────────────────────────────────────────
   const [currentData,    setCurrentData]    = useState(null);
   const [liveBpm,        setLiveBpm]        = useState(0);
   const [sessionHistory, setSessionHistory] = useState([]);
   const [bestRecord,     setBestRecord]     = useState(null);
 
-  // Post-session queue
+  // ── Post-session queue ────────────────────────────────────────────────────
   const [pendingQueue,      setPendingQueue]      = useState([]);
   const [isProcessingQueue, setIsProcessingQueue] = useState(false);
   const [newlyEarnedBadges, setNewlyEarnedBadges] = useState([]);
+
+  // ── Triple Under state ────────────────────────────────────────────────────
+  const [tuAttempts,      setTuAttempts]      = useState([]);   // [{steps}]
+  const [tuCurrentSteps,  setTuCurrentSteps]  = useState(0);
+  const [tuMissCountdown, setTuMissCountdown] = useState(null); // null or seconds
+  const [tuIsActive,      setTuIsActive]      = useState(false);
+  const [tuIsFinished,    setTuIsFinished]    = useState(false);
+  const tuMissTimerRef  = useRef(null);
+  const tuCountdownRef  = useRef(null);
+
+  // ── Relay state ───────────────────────────────────────────────────────────
+  const [relayOrder,          setRelayOrder]          = useState([]); // [{memberId, name}]
+  const [relayResults,        setRelayResults]        = useState([]); // [{steps, memberId}]
+  const [currentSkipperIndex, setCurrentSkipperIndex] = useState(0);
+  const [relayIsActive,       setRelayIsActive]       = useState(false);
+  const [relayIsFinished,     setRelayIsFinished]     = useState(false);
+  const [relaySkipperStart,   setRelaySkipperStart]   = useState(null);
+  const relayTimerRef = useRef(null);
+  const relayCurrentStepsRef = useRef(0);
 
   const telemetryRef     = useRef([]);
   const sessionStartRef  = useRef(null);
   const autoStopTimerRef = useRef(null);
 
+  // ── Set default discipline when disciplines load ──────────────────────────
+  useEffect(() => {
+    if (disciplines.length > 0 && !disciplineId) {
+      setDisciplineId(disciplines[0].id);
+    }
+  }, [disciplines]);
+
   // ── Bootstrap: load counter user + their club/group memberships ──────────
   useEffect(() => {
     const uid = getCookie();
     if (!uid) { setBootstrapDone(true); return; }
-
     let unsubClubs = () => {};
     let cancelled  = false;
 
     const bootstrap = async () => {
       const snap = await UserFactory.get(uid);
       if (!snap.exists() || cancelled) { setBootstrapDone(true); return; }
-
       const user = { id: uid, ...snap.data() };
       setCounterUser(user);
 
-      // ── SuperAdmin: all clubs ─────────────────────────────────────────────
       if (user.role === 'superadmin') {
         isSuperAdminRef.current = true;
         unsubClubs = ClubFactory.getAll((clubs) => {
@@ -207,45 +450,26 @@ export default function CounterPage() {
         });
         return;
       }
-
-      // ── ClubAdmin: clubs where they have a UserMemberLink ────────────────
       if (user.role === 'clubadmin') {
         isClubAdminRef.current = true;
-
         unsubClubs = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
           if (cancelled) return;
           if (profiles.length === 0) { setBootstrapDone(true); return; }
-
           const clubIdSet = new Set(profiles.map(p => p.member.clubId));
-          const allClubSnaps = await Promise.all(
-            [...clubIdSet].map(id => ClubFactory.getById(id))
-          );
+          const allClubSnaps = await Promise.all([...clubIdSet].map(id => ClubFactory.getById(id)));
           if (cancelled) return;
-          const adminClubs = allClubSnaps
-            .filter(s => s.exists())
-            .map(s => ({ id: s.id, ...s.data() }));
-
-          setMemberClubs(adminClubs);
+          setMemberClubs(allClubSnaps.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() })));
           setBootstrapDone(true);
         });
         return;
       }
-
-      // ── Normal member: clubs via UserMemberLink ───────────────────────────
       unsubClubs = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
         if (cancelled) return;
         if (profiles.length === 0) { setBootstrapDone(true); return; }
-
         const clubIdSet    = new Set(profiles.map(p => p.member.clubId));
-        const allClubSnaps = await Promise.all(
-          [...clubIdSet].map(id => ClubFactory.getById(id))
-        );
+        const allClubSnaps = await Promise.all([...clubIdSet].map(id => ClubFactory.getById(id)));
         if (cancelled) return;
-        const resolvedClubs = allClubSnaps
-          .filter(s => s.exists())
-          .map(s => ({ id: s.id, ...s.data() }));
-
-        setMemberClubs(resolvedClubs);
+        setMemberClubs(allClubSnaps.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() })));
         setBootstrapDone(true);
       });
     };
@@ -254,77 +478,58 @@ export default function CounterPage() {
     return () => { cancelled = true; unsubClubs(); };
   }, []);
 
-  // ── Auto-select club if only one ──────────────────────────────────────────
   useEffect(() => {
     if (!bootstrapDone || memberClubs.length === 0) return;
     if (memberClubs.length === 1) setSelectedClubId(memberClubs[0].id);
   }, [bootstrapDone, memberClubs]);
 
-  // ── Load groups the user is in for the selected club ─────────────────────
   useEffect(() => {
     if (!selectedClubId) return;
     setSelectedGroupId('');
     setMemberGroups([]);
     setSkippers([]);
     setClubMembers([]);
-
     const uid = getCookie();
     if (!uid) return;
-
     let cancelled = false;
 
     const load = async () => {
       try {
         const allGroups = await GroupFactory.getGroupsByClubOnce(selectedClubId);
-
         const groupMembersCache = {};
-        await Promise.all(
-          allGroups.map(async group => {
-            const members = await GroupFactory.getMembersByGroupOnce(selectedClubId, group.id);
-            groupMembersCache[group.id] = members;
-          })
-        );
-
+        await Promise.all(allGroups.map(async group => {
+          const members = await GroupFactory.getMembersByGroupOnce(selectedClubId, group.id);
+          groupMembersCache[group.id] = members;
+        }));
         if (cancelled) return;
 
         if (isSuperAdminRef.current || isClubAdminRef.current) {
-          const filteredGroups = allGroups.filter(
-            g => groupMembersCache[g.id]?.some(m => m.isSkipper === true)
-          );
-          setMemberGroups(filteredGroups);
-          if (filteredGroups.length === 1) setSelectedGroupId(filteredGroups[0].id);
+          const filtered = allGroups.filter(g => groupMembersCache[g.id]?.some(m => m.isSkipper === true));
+          setMemberGroups(filtered);
+          if (filtered.length === 1) setSelectedGroupId(filtered[0].id);
           return;
         }
 
         const links = await UserMemberLinkFactory.getForUserInClub(uid, selectedClubId);
         if (links.length === 0) return;
-
         const myMemberIds = new Set(links.map(l => l.memberId).filter(Boolean));
-
         const memberGroupIds = new Set();
         allGroups.forEach(group => {
-          const isMember = groupMembersCache[group.id]?.some(
-            d => myMemberIds.has(d.memberId || d.id)
-          );
-          if (isMember) memberGroupIds.add(group.id);
+          if (groupMembersCache[group.id]?.some(d => myMemberIds.has(d.memberId || d.id))) {
+            memberGroupIds.add(group.id);
+          }
         });
-
-        const filteredGroups = allGroups
+        const filtered = allGroups
           .filter(g => memberGroupIds.has(g.id))
           .filter(g => groupMembersCache[g.id]?.some(m => m.isSkipper === true));
-
-        setMemberGroups(filteredGroups);
-        if (filteredGroups.length === 1) setSelectedGroupId(filteredGroups[0].id);
-      } catch (e) {
-        console.error('[Counter] Failed to load member groups:', e);
-      }
+        setMemberGroups(filtered);
+        if (filtered.length === 1) setSelectedGroupId(filtered[0].id);
+      } catch (e) { console.error('[Counter] Failed to load member groups:', e); }
     };
-
     load();
     return () => { cancelled = true; };
   }, [selectedClubId]);
 
-  // ── Load all skippers in the selected group ───────────────────────────────
   useEffect(() => {
     if (!selectedClubId || !selectedGroupId) return;
     const u1 = GroupFactory.getSkippersByGroup(selectedClubId, selectedGroupId, setSkippers);
@@ -332,91 +537,370 @@ export default function CounterPage() {
     return () => { u1(); u2(); };
   }, [selectedClubId, selectedGroupId]);
 
-  // ── Live session subscription ─────────────────────────────────────────────
+  // ── Live session subscription (individual only) ───────────────────────────
   useEffect(() => {
-    if (!selectedSkipper?.rtdbUid) return;
+    if (!selectedSkipper?.rtdbUid || sessionMode !== 'individual') return;
     const unsub = LiveSessionFactory.subscribeToLive(selectedSkipper.rtdbUid, data => {
       if (!data) return;
       setLiveBpm(data.bpm || 0);
       setCurrentData(data.session || null);
     });
     return () => unsub();
-  }, [selectedSkipper]);
+  }, [selectedSkipper, sessionMode]);
 
-  // ── Session history ───────────────────────────────────────────────────────
   useEffect(() => {
-    if (!selectedSkipper) return;
+    if (!selectedSkipper || sessionMode !== 'individual') return;
     const { clubId, memberId } = selectedSkipper;
     const unsub = ClubMemberFactory.getSessionHistory(clubId, memberId, setSessionHistory);
     return () => unsub();
-  }, [selectedSkipper]);
+  }, [selectedSkipper, sessionMode]);
 
-  // ── Best record ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!selectedSkipper) return;
+    if (!selectedSkipper || sessionMode !== 'individual' || !disciplineId) return;
     const { clubId, memberId } = selectedSkipper;
-    const unsub = ClubMemberFactory.subscribeToRecords(clubId, memberId, discipline, sessionType, setBestRecord);
+    const unsub = ClubMemberFactory.subscribeToRecords(clubId, memberId, disciplineId, sessionType, setBestRecord);
     return () => unsub();
-  }, [selectedSkipper, discipline, sessionType]);
+  }, [selectedSkipper, disciplineId, sessionType, sessionMode]);
 
-  // ── Auto-stop on idle ─────────────────────────────────────────────────────
+  // ── Individual auto-stop on idle ─────────────────────────────────────────
   useEffect(() => {
+    if (sessionMode !== 'individual') return;
     if (!currentData?.isActive) { clearTimeout(autoStopTimerRef.current); return; }
     clearTimeout(autoStopTimerRef.current);
     autoStopTimerRef.current = setTimeout(() => handleStopSession(), AUTO_STOP_IDLE_MS);
     return () => clearTimeout(autoStopTimerRef.current);
-  }, [currentData?.lastStepTime, currentData?.isActive]);
+  }, [currentData?.lastStepTime, currentData?.isActive, sessionMode]);
 
-  // ── Trigger post-session flow when finished ───────────────────────────────
+  // ── Trigger post-session flow when individual session finishes ────────────
   useEffect(() => {
+    if (sessionMode !== 'individual') return;
     if (currentData?.isFinished && !isProcessingQueue && pendingQueue.length === 0) {
       triggerPostSessionFlow();
     }
   }, [currentData?.isFinished]);
 
-  // ── Resolve skipper profile + RTDB uid ───────────────────────────────────
+  // ── Relay: timer tick ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (sessionMode !== 'relay' || !relayIsActive || relayIsFinished) return;
+    const disc = currentDisc;
+    if (!disc?.durationSeconds) return;
+
+    clearInterval(relayTimerRef.current);
+    relayTimerRef.current = setInterval(() => {
+      if (!relaySkipperStart) return;
+      const elapsed   = (Date.now() - relaySkipperStart) / 1000;
+      const remaining = disc.durationSeconds - elapsed;
+
+      if (remaining <= 0) {
+        clearInterval(relayTimerRef.current);
+        advanceRelaySkipper();
+      }
+    }, 200);
+
+    return () => clearInterval(relayTimerRef.current);
+  }, [relayIsActive, relayIsFinished, relaySkipperStart, currentSkipperIndex, sessionMode]);
+
+  // ── Relay: sync live state to RTDB so dashboard can read it ─────────────
+  useEffect(() => {
+    if (sessionMode !== 'relay' || !selectedSkipper?.rtdbUid) return;
+    if (!relayIsActive && !relayIsFinished) return;
+
+    const { rtdbUid } = selectedSkipper;
+    const currentItem = relayOrder[currentSkipperIndex];
+    const total = relayResults.reduce((s, r) => s + (r.steps || 0), 0);
+
+    // Push relay snapshot to RTDB under the lead-skipper's uid
+    import('../firebaseConfig').then(({ rtdb }) => {
+      import('firebase/database').then(({ ref, update }) => {
+        update(ref(rtdb, `live_sessions/${rtdbUid}/relaySession`), {
+          isActive:            relayIsActive,
+          isFinished:          relayIsFinished,
+          currentSkipperIndex,
+          currentSkipperName:  currentItem?.name || '',
+          currentSkipperMemberId: currentItem?.memberId || '',
+          totalSteps:          total,
+          skipperCount:        relayOrder.length,
+          results: relayResults.map((r, i) => ({
+            memberId: relayOrder[i]?.memberId || '',
+            name:     relayOrder[i]?.name     || '',
+            steps:    r.steps || 0,
+          })),
+          updatedAt: Date.now(),
+        }).catch(() => {});
+      });
+    });
+  }, [relayResults, currentSkipperIndex, relayIsActive, relayIsFinished, sessionMode]);
+
+  // Clear relay session from RTDB when relay ends or is reset
+  useEffect(() => {
+    if (sessionMode !== 'relay' || !selectedSkipper?.rtdbUid) return;
+    return () => {
+      // On unmount/reset: clear the relaySession node
+      import('../firebaseConfig').then(({ rtdb }) => {
+        import('firebase/database').then(({ ref, remove }) => {
+          remove(ref(rtdb, `live_sessions/${selectedSkipper.rtdbUid}/relaySession`)).catch(() => {});
+        });
+      });
+    };
+  }, [selectedSkipper?.rtdbUid, sessionMode]);
+  useEffect(() => {
+    if (tuMissCountdown === null) return;
+    if (tuMissCountdown <= 0) {
+      // Session over — save best attempt
+      clearInterval(tuCountdownRef.current);
+      finishTripleUnder();
+      return;
+    }
+    clearInterval(tuCountdownRef.current);
+    tuCountdownRef.current = setInterval(() => {
+      setTuMissCountdown(prev => {
+        if (prev === null || prev <= 1) { clearInterval(tuCountdownRef.current); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(tuCountdownRef.current);
+  }, [tuMissCountdown]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // HELPER: resolve skipper profile
+  // ─────────────────────────────────────────────────────────────────────────
   const resolveSkipperProfile = async (groupMember) => {
     const memberId  = groupMember.memberId || groupMember.id;
     const profile   = clubMembers.find(m => m.id === memberId);
     const firstName = profile?.firstName || '?';
     const lastName  = profile?.lastName  || '';
-
-    // Resolve uid for RTDB via factory
-    const rtdbUid = await UserMemberLinkFactory.getUidForMember(selectedClubId, memberId);
+    const rtdbUid   = await UserMemberLinkFactory.getUidForMember(selectedClubId, memberId);
     return { memberId, clubId: selectedClubId, firstName, lastName, rtdbUid };
   };
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // INDIVIDUAL SESSION HANDLERS
+  // ─────────────────────────────────────────────────────────────────────────
   const handleStartSession = async () => {
     telemetryRef.current    = [];
     sessionStartRef.current = null;
-    await LiveSessionFactory.startCounter(selectedSkipper.rtdbUid, discipline, sessionType);
+
+    if (sessionMode === 'triple_under') {
+      setTuAttempts([]);
+      setTuCurrentSteps(0);
+      setTuMissCountdown(null);
+      setTuIsActive(true);
+      setTuIsFinished(false);
+      setShowConfigModal(false);
+      return;
+    }
+
+    if (sessionMode === 'relay') {
+      // Build relay order from selected skippers (default order)
+      const defaultOrder = skippers.map(s => {
+        const memberId = s.memberId || s.id;
+        const profile  = clubMembers.find(m => m.id === memberId);
+        return { memberId, name: profile ? `${profile.firstName} ${profile.lastName}` : memberId };
+      });
+      setRelayOrder(defaultOrder);
+      setRelayResults(new Array(defaultOrder.length).fill({ steps: 0 }));
+      setCurrentSkipperIndex(0);
+      setRelayIsActive(false);
+      setRelayIsFinished(false);
+      setRelaySkipperStart(null);
+      setRelayWarning(false);
+      relayCurrentStepsRef.current = 0;
+      setShowConfigModal(false);
+      return;
+    }
+
+    await LiveSessionFactory.startCounter(selectedSkipper.rtdbUid, disciplineId, sessionType);
     setShowConfigModal(false);
   };
 
   const handleCountStep = () => {
+    if (sessionMode === 'triple_under') {
+      handleTuStep();
+      return;
+    }
+    if (sessionMode === 'relay') {
+      handleRelayStep();
+      return;
+    }
+    // Individual
     if (!currentData || currentData?.isFinished) return;
     if (!sessionStartRef.current) sessionStartRef.current = Date.now();
     LiveSessionFactory.incrementSteps(selectedSkipper.rtdbUid, liveBpm, sessionStartRef.current);
-    telemetryRef.current.push({
-      time:      Date.now() - sessionStartRef.current,
-      steps:     (currentData?.steps || 0) + 1,
-      heartRate: liveBpm,
-    });
+    telemetryRef.current.push({ time: Date.now() - sessionStartRef.current, steps: (currentData?.steps || 0) + 1, heartRate: liveBpm });
   };
 
   const handleStopSession = useCallback(async () => {
+    if (sessionMode === 'triple_under') {
+      handleTuMisser(); // treat manual stop as a misser
+      return;
+    }
     if (!selectedSkipper || !currentData?.isActive) return;
     clearTimeout(autoStopTimerRef.current);
     await LiveSessionFactory.stopCounter(selectedSkipper.rtdbUid);
-  }, [selectedSkipper, currentData]);
+  }, [selectedSkipper, currentData, sessionMode]);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // TRIPLE UNDER HANDLERS
+  // ─────────────────────────────────────────────────────────────────────────
+  const handleTuStep = () => {
+    if (tuIsFinished) return;
+
+    // If miss countdown is running → this tap starts a new attempt
+    if (tuMissCountdown !== null) {
+      // Save completed attempt
+      setTuAttempts(prev => [...prev, { steps: tuCurrentSteps }]);
+      setTuCurrentSteps(1); // first step of new attempt
+      setTuMissCountdown(null);
+      clearInterval(tuCountdownRef.current);
+      return;
+    }
+
+    setTuCurrentSteps(prev => prev + 1);
+    setTuIsActive(true);
+  };
+
+  const handleTuMisser = () => {
+    if (tuIsFinished || tuMissCountdown !== null) return;
+    // Save current attempt inline before countdown starts
+    if (tuCurrentSteps > 0) {
+      setTuAttempts(prev => [...prev, { steps: tuCurrentSteps }]);
+      setTuCurrentSteps(0);
+    }
+    setTuMissCountdown(Math.ceil(TRIPLE_UNDER_IDLE / 1000));
+  };
+
+  const finishTripleUnder = () => {
+    setTuIsActive(false);
+    setTuIsFinished(true);
+    setTuMissCountdown(null);
+    clearInterval(tuCountdownRef.current);
+    // Post-session flow for TU
+    triggerTuPostSession();
+  };
+
+  const triggerTuPostSession = async () => {
+    if (!selectedSkipper) return;
+    const { clubId, memberId } = selectedSkipper;
+    // Get attempts stored so far (need to read from state via closure — use ref pattern)
+    // We rely on the useEffect below to react to tuIsFinished
+  };
+
+  // Watch tuIsFinished to trigger save
+  useEffect(() => {
+    if (!tuIsFinished || !selectedSkipper) return;
+    const saveSession = async () => {
+      const { clubId, memberId } = selectedSkipper;
+      const allAttempts = tuAttempts.length > 0 ? tuAttempts : [{ steps: tuCurrentSteps }];
+      const bestScore = Math.max(...allAttempts.map(a => a.steps), 0);
+
+      try {
+        await ClubMemberFactory.saveSessionHistory(clubId, memberId, {
+          discipline: disciplineId, sessionType, score: bestScore,
+          avgBpm: 0, maxBpm: 0, sessionStart: null, telemetry: [],
+          countedBy: counterUser?.id || null,
+          countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
+        });
+      } catch (e) { console.error('Failed to save TU session:', e); }
+
+      const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, memberId);
+      try {
+        const newBadges = await BadgeFactory.checkAndAward(clubId, memberId, { score: bestScore, discipline: disciplineId, sessionType }, freshHistory);
+        if (newBadges.length > 0) setNewlyEarnedBadges(newBadges);
+      } catch (e) { console.error('Badge check failed:', e); }
+
+      const prevBest = bestRecord?.score || 0;
+      if (bestScore > prevBest) {
+        setPendingQueue([{ type: 'record', data: { score: bestScore, discipline: disciplineId, sessionType, previousBest: prevBest, telemetry: [] } }]);
+        setIsProcessingQueue(true);
+      }
+    };
+    saveSession();
+  }, [tuIsFinished]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RELAY HANDLERS
+  // ─────────────────────────────────────────────────────────────────────────
+  const handleRelayStep = () => {
+    if (relayIsFinished) return;
+
+    if (!relayIsActive) {
+      // First tap starts the relay
+      setRelayIsActive(true);
+      setRelaySkipperStart(Date.now());
+      relayCurrentStepsRef.current = 0;
+    }
+
+    // Clear miss countdown if it was running (not applicable for relay, but safe)
+    relayCurrentStepsRef.current += 1;
+
+    setRelayResults(prev => {
+      const next = [...prev];
+      next[currentSkipperIndex] = {
+        ...(next[currentSkipperIndex] || {}),
+        memberId: relayOrder[currentSkipperIndex]?.memberId,
+        steps: relayCurrentStepsRef.current,
+      };
+      return next;
+    });
+  };
+
+  const advanceRelaySkipper = () => {
+    clearInterval(relayTimerRef.current);
+
+    const nextIdx = currentSkipperIndex + 1;
+    if (nextIdx >= relayOrder.length) {
+      setRelayIsActive(false);
+      setRelayIsFinished(true);
+      return;
+    }
+
+    setCurrentSkipperIndex(nextIdx);
+    setRelaySkipperStart(Date.now());
+    relayCurrentStepsRef.current = 0;
+    // Vibrate to signal handoff
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate([200, 100, 200]);
+    }
+  };
+
+  const handleManualAdvance = () => {
+    if (!relayIsActive || relayIsFinished) return;
+    advanceRelaySkipper();
+  };
+
+  // Watch relayIsFinished to save session
+  useEffect(() => {
+    if (!relayIsFinished || relayOrder.length === 0 || !selectedSkipper) return;
+    const saveRelaySession = async () => {
+      const total = relayResults.reduce((s, r) => s + (r.steps || 0), 0);
+      const { clubId, memberId } = selectedSkipper;
+
+      try {
+        await ClubMemberFactory.saveSessionHistory(clubId, memberId, {
+          discipline: disciplineId, sessionType, score: total,
+          avgBpm: 0, maxBpm: 0, sessionStart: null, telemetry: [],
+          teamResults: relayResults.map((r, i) => ({ ...r, name: relayOrder[i]?.name || '' })),
+          countedBy: counterUser?.id || null,
+          countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
+        });
+      } catch (e) { console.error('Failed to save relay session:', e); }
+
+      const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, memberId);
+      try {
+        const newBadges = await BadgeFactory.checkAndAward(clubId, memberId, { score: total, discipline: disciplineId, sessionType }, freshHistory);
+        if (newBadges.length > 0) setNewlyEarnedBadges(newBadges);
+      } catch (e) { console.error('Badge check failed:', e); }
+    };
+    saveRelaySession();
+  }, [relayIsFinished]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // INDIVIDUAL POST-SESSION FLOW
+  // ─────────────────────────────────────────────────────────────────────────
   const triggerPostSessionFlow = async () => {
     if (!selectedSkipper || !currentData) return;
     const { clubId, memberId } = selectedSkipper;
     const score     = currentData.steps || 0;
-    const disc      = currentData.discipline  || discipline;
-    const sType     = currentData.sessionType || sessionType;
     const telemetry = telemetryRef.current;
     const bpmValues = telemetry.map(t => t.heartRate).filter(b => b > 0);
     const avgBpm    = bpmValues.length ? Math.round(bpmValues.reduce((a, b) => a + b, 0) / bpmValues.length) : liveBpm;
@@ -424,33 +908,27 @@ export default function CounterPage() {
 
     try {
       await ClubMemberFactory.saveSessionHistory(clubId, memberId, {
-        discipline: disc, sessionType: sType, score, avgBpm, maxBpm,
-        sessionStart:  currentData.startTime || sessionStartRef.current,
-        telemetry,
-        countedBy:     counterUser?.id   || null,
+        discipline: disciplineId, sessionType, score, avgBpm, maxBpm,
+        sessionStart: currentData.startTime || sessionStartRef.current, telemetry,
+        countedBy: counterUser?.id || null,
         countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
       });
     } catch (e) { console.error('Failed to save session history:', e); }
 
     const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, memberId);
-
     try {
-      const newBadges = await BadgeFactory.checkAndAward(
-        clubId, memberId,
-        { score, discipline: disc, sessionType: sType },
-        freshHistory,
-      );
+      const newBadges = await BadgeFactory.checkAndAward(clubId, memberId, { score, discipline: disciplineId, sessionType }, freshHistory);
       if (newBadges.length > 0) setNewlyEarnedBadges(newBadges);
     } catch (e) { console.error('Badge check failed:', e); }
 
     if (counterUser) {
-      try { await CounterBadgeFactory.checkAndAward(counterUser.id, { discipline: disc, sessionType: sType, score }); }
+      try { await CounterBadgeFactory.checkAndAward(counterUser.id, { discipline: disciplineId, sessionType, score }); }
       catch (e) { console.error('Counter badge check failed:', e); }
     }
 
     const previousBest = bestRecord?.score || 0;
     if (score > previousBest) {
-      setPendingQueue([{ type: 'record', data: { score, discipline: disc, sessionType: sType, previousBest, telemetry } }]);
+      setPendingQueue([{ type: 'record', data: { score, discipline: disciplineId, sessionType, previousBest, telemetry } }]);
       setIsProcessingQueue(true);
     }
   };
@@ -476,6 +954,8 @@ export default function CounterPage() {
 
   const handleReset = async () => {
     clearTimeout(autoStopTimerRef.current);
+    clearInterval(relayTimerRef.current);
+    clearInterval(tuCountdownRef.current);
     telemetryRef.current = [];
     if (selectedSkipper?.rtdbUid) await LiveSessionFactory.resetSession(selectedSkipper.rtdbUid);
     setSelectedSkipper(null);
@@ -483,49 +963,50 @@ export default function CounterPage() {
     setIsProcessingQueue(false);
     setPendingQueue([]);
     setNewlyEarnedBadges([]);
+    // Reset TU
+    setTuAttempts([]); setTuCurrentSteps(0); setTuMissCountdown(null); setTuIsActive(false); setTuIsFinished(false);
+    // Reset relay
+    setRelayOrder([]); setRelayResults([]); setCurrentSkipperIndex(0); setRelayIsActive(false); setRelayIsFinished(false); setRelaySkipperStart(null);
   };
 
   const handleNewSession = async () => {
     clearTimeout(autoStopTimerRef.current);
+    clearInterval(relayTimerRef.current);
+    clearInterval(tuCountdownRef.current);
     telemetryRef.current = [];
     if (selectedSkipper?.rtdbUid) await LiveSessionFactory.resetSession(selectedSkipper.rtdbUid);
     setIsProcessingQueue(false);
     setPendingQueue([]);
-    setShowConfigModal(true);
     setNewlyEarnedBadges([]);
+    setTuAttempts([]); setTuCurrentSteps(0); setTuMissCountdown(null); setTuIsActive(false); setTuIsFinished(false);
+    setRelayOrder([]); setRelayResults([]); setCurrentSkipperIndex(0); setRelayIsActive(false); setRelayIsFinished(false); setRelaySkipperStart(null);
+    setShowConfigModal(true);
   };
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const isRecording  = currentData?.isActive === true;
-  const isFinished   = currentData?.isFinished === true && !currentData?.isActive;
-  const isStartklaar = currentData !== null && currentData !== undefined && !isRecording && !isFinished;
-
+  const isRecording  = sessionMode === 'individual' && currentData?.isActive === true;
+  const isFinished   = sessionMode === 'individual' && currentData?.isFinished === true && !currentData?.isActive;
+  const isStartklaar = sessionMode === 'individual' && currentData !== null && !isRecording && !isFinished;
   const showClubPicker  = memberClubs.length > 1;
   const showGroupPicker = memberGroups.length > 1;
+  const relayDurationSec = currentDisc?.durationSeconds || 30;
 
-  // ── Loading state ─────────────────────────────────────────────────────────
-  if (!bootstrapDone) {
-    return (
-      <div style={{ ...st.container, alignItems: 'center', justifyContent: 'center' }}>
-        <div style={st.spinner} />
-      </div>
-    );
-  }
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (!bootstrapDone) return (
+    <div style={{ ...st.container, alignItems: 'center', justifyContent: 'center' }}>
+      <div style={st.spinner} />
+    </div>
+  );
 
-  // ── No memberships ────────────────────────────────────────────────────────
-  if (bootstrapDone && memberClubs.length === 0) {
-    return (
-      <div style={{ ...st.container, alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
-        <Users size={40} color="#334155" />
-        <p style={{ color: '#64748b', fontSize: '14px', textAlign: 'center', maxWidth: '280px' }}>
-          Je bent nog geen lid van een club. Vraag toegang aan via je profiel.
-        </p>
-        <a href="/" style={{ padding: '10px 20px', backgroundColor: '#3b82f6', color: 'white', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '14px' }}>
-          Naar profiel
-        </a>
-      </div>
-    );
-  }
+  if (bootstrapDone && memberClubs.length === 0) return (
+    <div style={{ ...st.container, alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
+      <Users size={40} color="#334155" />
+      <p style={{ color: '#64748b', fontSize: '14px', textAlign: 'center', maxWidth: '280px' }}>
+        Je bent nog geen lid van een club. Vraag toegang aan via je profiel.
+      </p>
+      <a href="/" style={{ padding: '10px 20px', backgroundColor: '#3b82f6', color: 'white', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '14px' }}>Naar profiel</a>
+    </div>
+  );
 
   // ── Screen 1: Skipper Selection ───────────────────────────────────────────
   if (!selectedSkipper) {
@@ -537,46 +1018,25 @@ export default function CounterPage() {
           </h1>
         </div>
         <div style={st.selectionPanel}>
-
-          {/* Club picker — only when user is in multiple clubs */}
           {showClubPicker && (
             <div style={st.field}>
-              <label style={st.label}>
-                <Building2 size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
-                Club
-              </label>
+              <label style={st.label}><Building2 size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />Club</label>
               <div style={st.clubGrid}>
                 {memberClubs.map(club => (
-                  <button
-                    key={club.id}
-                    style={{ ...st.clubCard, ...(selectedClubId === club.id ? st.clubCardActive : {}) }}
-                    onClick={() => setSelectedClubId(club.id)}
-                  >
-                    {club.logoUrl
-                      ? <img src={club.logoUrl} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', marginBottom: '8px' }} alt={club.name} />
-                      : <Building2 size={28} color={selectedClubId === club.id ? '#3b82f6' : '#475569'} style={{ marginBottom: '8px' }} />
-                    }
+                  <button key={club.id} style={{ ...st.clubCard, ...(selectedClubId === club.id ? st.clubCardActive : {}) }} onClick={() => setSelectedClubId(club.id)}>
+                    {club.logoUrl ? <img src={club.logoUrl} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', marginBottom: '8px' }} alt={club.name} /> : <Building2 size={28} color={selectedClubId === club.id ? '#3b82f6' : '#475569'} style={{ marginBottom: '8px' }} />}
                     <div style={{ fontSize: '13px', fontWeight: '600', textAlign: 'center' }}>{club.name}</div>
                   </button>
                 ))}
               </div>
             </div>
           )}
-
-          {/* Group picker — only when user is in multiple groups */}
           {selectedClubId && showGroupPicker && (
             <div style={st.field}>
-              <label style={st.label}>
-                <Users size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
-                Groep
-              </label>
+              <label style={st.label}><Users size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />Groep</label>
               <div style={st.groupGrid}>
                 {memberGroups.map(group => (
-                  <button
-                    key={group.id}
-                    style={{ ...st.groupCard, ...(selectedGroupId === group.id ? st.groupCardActive : {}) }}
-                    onClick={() => setSelectedGroupId(group.id)}
-                  >
+                  <button key={group.id} style={{ ...st.groupCard, ...(selectedGroupId === group.id ? st.groupCardActive : {}) }} onClick={() => setSelectedGroupId(group.id)}>
                     <Users size={22} color={selectedGroupId === group.id ? '#22c55e' : '#475569'} style={{ marginBottom: '6px' }} />
                     <div style={{ fontSize: '13px', fontWeight: '600', textAlign: 'center' }}>{group.name}</div>
                   </button>
@@ -584,14 +1044,9 @@ export default function CounterPage() {
               </div>
             </div>
           )}
-
-          {/* Skipper grid */}
           {selectedClubId && selectedGroupId && (
             <div style={st.field}>
-              <label style={st.label}>
-                <Hash size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
-                Skipper
-              </label>
+              <label style={st.label}><Hash size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />Skipper</label>
               {skippers.length > 0 ? (
                 <div style={st.grid}>
                   {skippers.map(s => {
@@ -601,19 +1056,13 @@ export default function CounterPage() {
                     const lastName  = profile?.lastName  || '';
                     const initials  = `${firstName[0] || '?'}${lastName[0] || ''}`.toUpperCase();
                     return (
-                      <button
-                        key={memberId}
-                        style={st.card}
-                        onClick={async () => {
-                          const resolved = await resolveSkipperProfile(s);
-                          setSelectedSkipper(resolved);
-                          setShowConfigModal(true);
-                        }}
-                      >
+                      <button key={memberId} style={st.card} onClick={async () => {
+                        const resolved = await resolveSkipperProfile(s);
+                        setSelectedSkipper(resolved);
+                        setShowConfigModal(true);
+                      }}>
                         <div style={st.avatar}>{initials}</div>
-                        <div style={{ marginTop: '10px', fontSize: '14px', fontWeight: '600', textAlign: 'center' }}>
-                          {firstName} {lastName}
-                        </div>
+                        <div style={{ marginTop: '10px', fontSize: '14px', fontWeight: '600', textAlign: 'center' }}>{firstName} {lastName}</div>
                       </button>
                     );
                   })}
@@ -623,16 +1072,8 @@ export default function CounterPage() {
               )}
             </div>
           )}
-
-          {/* Prompt when no group selected yet and group picker is shown */}
-          {selectedClubId && showGroupPicker && !selectedGroupId && (
-            <p style={st.infoText}>Selecteer een groep om de skippers te zien.</p>
-          )}
-
-          {/* Prompt when club picker is shown but no club selected */}
-          {showClubPicker && !selectedClubId && (
-            <p style={st.infoText}>Selecteer een club om verder te gaan.</p>
-          )}
+          {selectedClubId && showGroupPicker && !selectedGroupId && <p style={st.infoText}>Selecteer een groep om de skippers te zien.</p>}
+          {showClubPicker && !selectedClubId && <p style={st.infoText}>Selecteer een club om verder te gaan.</p>}
         </div>
       </div>
     );
@@ -640,9 +1081,10 @@ export default function CounterPage() {
 
   // ── Screen 2: Config Modal ────────────────────────────────────────────────
   if (showConfigModal) {
+    const isRelayDisc = sessionMode === 'relay';
     return (
       <div style={st.modalOverlay}>
-        <div style={{ ...st.modalContent, fontFamily: 'sans-serif' }}>
+        <div style={{ ...st.modalContent, fontFamily: 'sans-serif', maxHeight: '90vh', overflowY: 'auto' }}>
           <div style={{ textAlign: 'center', marginBottom: '24px' }}>
             <div style={{ ...st.avatar, margin: '0 auto 12px', width: '60px', height: '60px', fontSize: '20px' }}>
               {selectedSkipper.firstName[0]}{selectedSkipper.lastName[0]}
@@ -661,15 +1103,49 @@ export default function CounterPage() {
           </div>
 
           <label style={{ ...st.label, fontFamily: 'sans-serif' }}>Onderdeel</label>
-          <div style={st.toggleGroup}>
-            {['30sec', '2min', '3min'].map(d => (
-              <button key={d} onClick={() => setDiscipline(d)} style={{ ...st.toggleBtn, backgroundColor: discipline === d ? '#3b82f6' : '#0f172a', borderColor: discipline === d ? '#3b82f6' : '#334155' }}>
-                {d}
-              </button>
-            ))}
-          </div>
+          <DisciplineSelector
+            value={disciplineId}
+            onChange={setDisciplineId}
+            style={{ marginBottom: '16px' }}
+          />
 
-          {bestRecord && (
+          {/* Discipline info banner */}
+          {currentDisc && (
+            <div style={{ backgroundColor: '#0f172a', borderRadius: '8px', padding: '10px 12px', marginBottom: '16px', fontSize: '12px', color: '#64748b', border: '1px solid #1e293b', display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+              {currentDisc.durationSeconds
+                ? <span>⏱ {currentDisc.durationSeconds < 60 ? `${currentDisc.durationSeconds}s` : `${currentDisc.durationSeconds / 60} min`}</span>
+                : <span>⏱ Geen tijdslimiet</span>
+              }
+              <span>{currentDisc.isIndividual ? '👤 Individueel' : `👥 Team (${currentDisc.teamSize})`}</span>
+              {currentDisc.specialRule === 'triple_under' && <span style={{ color: '#f59e0b' }}>⚡ Triple Under regel (15s herstart)</span>}
+              {currentDisc.specialRule === 'relay'        && <span style={{ color: '#3b82f6' }}>🔄 Relay — beurtelings</span>}
+            </div>
+          )}
+
+          {/* Relay: skipper order */}
+          {isRelayDisc && relayOrder.length > 0 && (
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ ...st.label, fontFamily: 'sans-serif', display: 'block', marginBottom: '8px' }}>Startvolgorde skippers</label>
+              <RelayOrderPicker
+                skippers={skippers}
+                clubMembers={clubMembers}
+                value={relayOrder}
+                onChange={setRelayOrder}
+              />
+            </div>
+          )}
+
+          {/* Pre-populate relay order when discipline changes to relay */}
+          {isRelayDisc && relayOrder.length === 0 && (
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ ...st.label, fontFamily: 'sans-serif', display: 'block', marginBottom: '8px' }}>Startvolgorde skippers</label>
+              <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '12px 0' }}>
+                Volgorde wordt ingesteld bij het starten op basis van de groepslijst.
+              </p>
+            </div>
+          )}
+
+          {bestRecord && sessionMode === 'individual' && (
             <div style={{ backgroundColor: '#0f172a', borderRadius: '8px', padding: '12px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Trophy size={18} color="#facc15" />
               <div style={{ fontSize: '13px', color: '#94a3b8' }}>Huidig record: <strong style={{ color: '#facc15' }}>{bestRecord.score} steps</strong></div>
@@ -685,16 +1161,216 @@ export default function CounterPage() {
     );
   }
 
-  // ── Screen 3: Counter ─────────────────────────────────────────────────────
+  // ── Screen 3a: RELAY counter ──────────────────────────────────────────────
+  if (sessionMode === 'relay') {
+    const currentItem    = relayOrder[currentSkipperIndex];
+    const currentProfile = currentItem ? clubMembers.find(m => m.id === currentItem.memberId) : null;
+    const currentName    = currentProfile ? `${currentProfile.firstName} ${currentProfile.lastName}` : currentItem?.name || '?';
+    const currentInitials = currentProfile ? `${currentProfile.firstName?.[0] || '?'}${currentProfile.lastName?.[0] || ''}`.toUpperCase() : '??';
+    const totalSteps     = relayResults.reduce((s, r) => s + (r.steps || 0), 0);
+    const discName       = currentDisc?.name || disciplineId;
+
+    if (relayIsFinished) {
+      return (
+        <div style={st.container}>
+          {isProcessingQueue && pendingQueue.length > 0 && (
+            <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />
+          )}
+          <RelayResultsSummary
+            relayOrder={relayOrder}
+            relayResults={relayResults}
+            discName={discName}
+            sessionType={sessionType}
+            onNewSession={handleNewSession}
+            onReset={handleReset}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div style={st.container}>
+        {isProcessingQueue && pendingQueue.length > 0 && (
+          <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />
+        )}
+
+        <div style={st.activeHeader}>
+          <button style={st.backBtn} onClick={handleReset}><ArrowLeft size={18} /> Stoppen</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div style={{ ...st.avatar, width: '44px', height: '44px', fontSize: '15px' }}>
+              {currentInitials}
+            </div>
+            <div>
+              <div style={{ fontWeight: 'bold', fontSize: '18px' }}>{currentName}</div>
+              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>
+                {discName} · Skipper {currentSkipperIndex + 1} van {relayOrder.length}
+              </div>
+            </div>
+            <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+              <div style={{ fontSize: '13px', fontWeight: '700', color: '#60a5fa', fontFamily: 'monospace' }}>
+                {relayIsActive
+                  ? `${Math.max(0, Math.ceil(relayDurationSec - (Date.now() - relaySkipperStart) / 1000))}s`
+                  : `${relayDurationSec}s`}
+              </div>
+              <div style={{ fontSize: '9px', color: '#475569', fontWeight: '700', textTransform: 'uppercase' }}>
+                {relayIsActive ? 'RESTERENDE TIJD' : 'WACHT OP TELLER'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <RelayScoreboard
+          relayOrder={relayOrder}
+          relayResults={relayResults}
+          currentSkipperIndex={currentSkipperIndex}
+          discName={discName}
+        />
+
+        {/* Main counter button */}
+        <button
+          style={{
+            ...st.counterButton,
+            backgroundColor: '#1e293b',
+            border: `3px solid ${relayIsActive ? '#3b82f6' : '#334155'}`,
+            boxShadow: relayIsActive ? '0 0 60px rgba(59,130,246,0.25)' : 'none',
+          }}
+          onPointerDown={e => { e.currentTarget.style.transform = 'scale(0.96)'; handleCountStep(); }}
+          onPointerUp={e   => { e.currentTarget.style.transform = 'scale(1)'; }}
+          onPointerLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+        >
+          <span style={st.stepLabel}>STAPPEN</span>
+          <span style={{ fontSize: '100px', lineHeight: 1, fontWeight: '900' }}>
+            {relayResults[currentSkipperIndex]?.steps ?? 0}
+          </span>
+          {!relayIsActive && <span style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>Tik om te starten</span>}
+        </button>
+
+        {/* Controls */}
+        <div style={st.controls}>
+          {relayIsActive && (
+            <button
+              onClick={handleManualAdvance}
+              style={{ ...st.stopButton, backgroundColor: '#f59e0b', marginBottom: '10px' }}
+            >
+              <SkipForward size={18} /> VOLGENDE SKIPPER
+            </button>
+          )}
+          <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            Teamtotaal: <strong style={{ color: '#60a5fa' }}>{totalSteps}</strong> stappen
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Screen 3b: TRIPLE UNDER counter ──────────────────────────────────────
+  if (sessionMode === 'triple_under') {
+    const discName   = currentDisc?.name || disciplineId;
+    const bestSoFar  = Math.max(...tuAttempts.map(a => a.steps), tuCurrentSteps, 0);
+
+    if (tuIsFinished) {
+      return (
+        <div style={st.container}>
+          {isProcessingQueue && pendingQueue.length > 0 && (
+            <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />
+          )}
+          <div style={{ width: '100%', maxWidth: '440px', backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #22c55e44', padding: '20px', animation: 'fadeInUp 0.4s ease-out' }}>
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+              <div style={{ fontSize: '36px', marginBottom: '6px' }}>⚡</div>
+              <div style={{ fontSize: '14px', fontWeight: '700', color: '#22c55e', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sessie voltooid!</div>
+              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{discName}</div>
+            </div>
+            <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', padding: '14px', marginBottom: '14px', textAlign: 'center', border: '1px solid #facc1533' }}>
+              <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Beste poging</div>
+              <div style={{ fontSize: '44px', fontWeight: '900', color: '#facc15', lineHeight: 1 }}>{bestSoFar}</div>
+              <div style={{ fontSize: '12px', color: '#64748b' }}>stappen · {tuAttempts.length} pogi{tuAttempts.length === 1 ? 'ng' : 'ngen'}</div>
+            </div>
+            {tuAttempts.length > 1 && (
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
+                {tuAttempts.map((a, i) => (
+                  <div key={i} style={{ padding: '4px 10px', borderRadius: '6px', backgroundColor: a.steps === bestSoFar ? '#facc1522' : '#0f172a', border: `1px solid ${a.steps === bestSoFar ? '#facc1544' : '#334155'}`, fontSize: '13px', fontWeight: '700', color: a.steps === bestSoFar ? '#facc15' : '#64748b' }}>
+                    #{i + 1}: {a.steps}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={handleNewSession} style={{ flex: 1, padding: '13px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <Play size={16} fill="white" /> Nieuwe sessie
+              </button>
+              <button onClick={handleReset} style={{ padding: '13px 16px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '10px', color: '#94a3b8', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
+                Andere skipper
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div style={st.container}>
+        {isProcessingQueue && pendingQueue.length > 0 && (
+          <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />
+        )}
+
+        <div style={st.activeHeader}>
+          <button style={st.backBtn} onClick={handleReset}><ArrowLeft size={18} /> Andere skipper</button>
+          <div style={st.userInfo}>
+            <div style={{ ...st.avatar, width: '44px', height: '44px', fontSize: '15px' }}>
+              {selectedSkipper.firstName[0]}{selectedSkipper.lastName[0]}
+            </div>
+            <div>
+              <div style={{ fontWeight: 'bold', fontSize: '18px' }}>{selectedSkipper.firstName} {selectedSkipper.lastName}</div>
+              <div style={{ fontSize: '12px', color: '#94a3b8' }}>{discName} · {sessionType}</div>
+            </div>
+            {bestSoFar > 0 && (
+              <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+                <div style={{ fontSize: '18px', fontWeight: '900', color: '#facc15' }}>{bestSoFar}</div>
+                <div style={{ fontSize: '9px', color: '#475569' }}>BESTE</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <TripleUnderDisplay
+          attempts={tuAttempts}
+          currentAttempt={tuCurrentSteps}
+          missCountdown={tuMissCountdown}
+          onMisser={handleTuMisser}
+        />
+
+        {/* Main counter */}
+        <button
+          style={{
+            ...st.counterButton,
+            backgroundColor: tuMissCountdown !== null ? '#1a0a0a' : '#1e293b',
+            border: `3px solid ${tuMissCountdown !== null ? '#ef444466' : tuIsActive ? '#3b82f6' : '#334155'}`,
+            boxShadow: tuIsActive && tuMissCountdown === null ? '0 0 60px rgba(59,130,246,0.25)' : 'none',
+          }}
+          onPointerDown={e => { e.currentTarget.style.transform = 'scale(0.96)'; handleCountStep(); }}
+          onPointerUp={e   => { e.currentTarget.style.transform = 'scale(1)'; }}
+          onPointerLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+        >
+          <span style={st.stepLabel}>{tuMissCountdown !== null ? 'POGING KLAAR' : 'STAPPEN'}</span>
+          <span style={{ fontSize: '100px', lineHeight: 1, fontWeight: '900' }}>{tuCurrentSteps}</span>
+          {!tuIsActive && <span style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>Tik om te starten</span>}
+          {tuMissCountdown !== null && <span style={{ fontSize: '14px', color: '#ef4444', marginTop: '8px' }}>Tik om nieuwe poging te starten</span>}
+        </button>
+
+        <div style={st.controls}>
+          <button onClick={handleReset} style={{ ...st.stopButton, backgroundColor: '#475569' }}>
+            <Square size={18} fill="white" /> STOPPEN
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Screen 3c: INDIVIDUAL counter ─────────────────────────────────────────
   return (
     <div style={st.container}>
       {isProcessingQueue && pendingQueue.length > 0 && (
-        <CelebrationOverlay
-          type={pendingQueue[0].type}
-          data={pendingQueue[0].data}
-          onAccept={handleQueueAccept}
-          onDecline={advanceQueue}
-        />
+        <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />
       )}
 
       <div style={st.activeHeader}>
@@ -707,7 +1383,7 @@ export default function CounterPage() {
             <div style={{ fontWeight: 'bold', fontSize: '18px' }}>{selectedSkipper.firstName} {selectedSkipper.lastName}</div>
             <div style={{ fontSize: '12px', display: 'flex', gap: '8px', marginTop: '2px' }}>
               <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 'bold', backgroundColor: sessionType === 'Wedstrijd' ? '#ef4444' : '#3b82f6' }}>{sessionType}</span>
-              <span style={{ color: '#94a3b8' }}>{discipline}</span>
+              <span style={{ color: '#94a3b8' }}>{currentDisc?.name || disciplineId}</span>
             </div>
           </div>
           <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
@@ -718,7 +1394,7 @@ export default function CounterPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
           <LiveTimer
             startTime={currentData?.startTime}
-            durationSeconds={DISCIPLINE_DURATION[currentData?.discipline] || DISCIPLINE_DURATION[discipline]}
+            durationSeconds={currentDisc?.durationSeconds || null}
             isRecording={isRecording}
             isFinished={isFinished}
           />
@@ -735,9 +1411,7 @@ export default function CounterPage() {
 
       {newlyEarnedBadges.length > 0 && (
         <div style={{ width: '100%', maxWidth: '440px', backgroundColor: '#1a1a2e', border: '1px solid #f59e0b44', borderRadius: '12px', padding: '12px 16px', marginBottom: '12px' }}>
-          <div style={{ fontSize: '13px', fontWeight: '700', color: '#f59e0b', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            🎖️ Nieuwe badges verdiend door {selectedSkipper?.firstName}!
-          </div>
+          <div style={{ fontSize: '13px', fontWeight: '700', color: '#f59e0b', marginBottom: '8px' }}>🎖️ Nieuwe badges verdiend door {selectedSkipper?.firstName}!</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             {newlyEarnedBadges.map(b => (
               <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#0f172a', borderRadius: '8px', padding: '6px 10px', border: '1px solid #334155' }}>
@@ -752,7 +1426,7 @@ export default function CounterPage() {
 
       {bestRecord && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '8px 16px', backgroundColor: '#1e293b', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', color: '#facc15' }}>
-          <Trophy size={14} /> Record: <strong>{bestRecord.score} steps</strong>
+          <Trophy size={14} /> Record: <strong>{bestRecord.score} stappen</strong>
         </div>
       )}
 
@@ -761,7 +1435,7 @@ export default function CounterPage() {
           ...st.counterButton,
           backgroundColor: isFinished ? '#1e293b' : isRecording ? '#1e3a5f' : '#1e293b',
           border:      isRecording ? '3px solid #3b82f6' : isFinished ? '3px solid #22c55e' : '3px solid #334155',
-          boxShadow:   isRecording ? '0 0 60px rgba(59, 130, 246, 0.25)' : 'none',
+          boxShadow:   isRecording ? '0 0 60px rgba(59,130,246,0.25)' : 'none',
           cursor:      isFinished ? 'default' : 'pointer',
         }}
         disabled={isFinished || !selectedSkipper}
@@ -771,9 +1445,7 @@ export default function CounterPage() {
       >
         <span style={st.stepLabel}>STEPS</span>
         <span style={{ fontSize: '100px', lineHeight: 1, fontWeight: '900' }}>{currentData?.steps ?? 0}</span>
-        {!isRecording && !isFinished && (
-          <span style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>Tik om te starten</span>
-        )}
+        {!isRecording && !isFinished && <span style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>Tik om te starten</span>}
       </button>
 
       <div style={st.controls}>
@@ -793,20 +1465,19 @@ export default function CounterPage() {
 
       <div style={st.historySection}>
         <h3 style={{ fontSize: '14px', color: '#94a3b8', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}><HistoryIcon size={16} /> Recente sessies</h3>
-        {sessionHistory.slice(0, 5).map((item, idx) => (
-          <div key={idx} style={st.historyItem}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', backgroundColor: item.sessionType === 'Wedstrijd' ? '#ef444422' : '#3b82f622', color: item.sessionType === 'Wedstrijd' ? '#ef4444' : '#60a5fa', border: `1px solid ${item.sessionType === 'Wedstrijd' ? '#ef444440' : '#3b82f640'}` }}>
-                {item.sessionType || 'Training'}
-              </span>
-              <span style={{ color: '#94a3b8', fontSize: '12px' }}>{item.discipline}</span>
+        {sessionHistory.slice(0, 5).map((item, idx) => {
+          const discLabel = item.disciplineName || item.discipline;
+          return (
+            <div key={idx} style={st.historyItem}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', backgroundColor: item.sessionType === 'Wedstrijd' ? '#ef444422' : '#3b82f622', color: item.sessionType === 'Wedstrijd' ? '#ef4444' : '#60a5fa', border: `1px solid ${item.sessionType === 'Wedstrijd' ? '#ef444440' : '#3b82f640'}` }}>{item.sessionType || 'Training'}</span>
+                <span style={{ color: '#94a3b8', fontSize: '12px' }}>{discLabel}</span>
+              </div>
+              <span style={{ fontWeight: 'bold', color: '#60a5fa', fontSize: '16px' }}>{item.score} <span style={{ fontSize: '11px', color: '#64748b' }}>stappen</span></span>
             </div>
-            <span style={{ fontWeight: 'bold', color: '#60a5fa', fontSize: '16px' }}>{item.score} <span style={{ fontSize: '11px', color: '#64748b' }}>steps</span></span>
-          </div>
-        ))}
-        {sessionHistory.length === 0 && (
-          <p style={{ color: '#475569', fontSize: '13px', textAlign: 'center' }}>Nog geen sessies.</p>
-        )}
+          );
+        })}
+        {sessionHistory.length === 0 && <p style={{ color: '#475569', fontSize: '13px', textAlign: 'center' }}>Nog geen sessies.</p>}
       </div>
     </div>
   );
@@ -831,11 +1502,11 @@ const st = {
   avatar:         { width: '50px', height: '50px', backgroundColor: '#3b82f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' },
   infoText:       { textAlign: 'center', color: '#64748b', fontSize: '14px', marginTop: '20px' },
   modalOverlay:   { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.92)', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', zIndex: 100 },
-  modalContent:   { backgroundColor: '#1e293b', padding: '30px', borderRadius: '20px', width: '100%', maxWidth: '400px', border: '1px solid #334155' },
+  modalContent:   { backgroundColor: '#1e293b', padding: '30px', borderRadius: '20px', width: '100%', maxWidth: '440px', border: '1px solid #334155' },
   toggleGroup:    { display: 'flex', gap: '10px', marginBottom: '20px' },
   toggleBtn:      { flex: 1, padding: '12px', border: '1px solid #334155', borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'sans-serif' },
   mainStartBtn:   { width: '100%', padding: '15px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: 'bold', marginTop: '10px', display: 'flex', justifyContent: 'center', gap: '10px', alignItems: 'center', cursor: 'pointer', fontSize: '16px', fontFamily: 'sans-serif' },
-  activeHeader:   { backgroundColor: '#1e293b', padding: '16px', borderRadius: '14px', marginBottom: '16px', width: '100%', maxWidth: '440px', border: '1px solid #334155' },
+  activeHeader:   { backgroundColor: '#1e293b', padding: '16px', borderRadius: '14px', marginBottom: '16px', width: '100%', maxWidth: '440px', border: '1px solid #334155', transition: 'border-color 0.3s' },
   backBtn:        { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', marginBottom: '12px', padding: 0 },
   userInfo:       { display: 'flex', alignItems: 'center', gap: '14px' },
   counterButton:  { width: '280px', height: '280px', borderRadius: '50%', color: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', touchAction: 'manipulation', userSelect: 'none', transition: 'transform 0.08s, box-shadow 0.2s', margin: '10px 0' },
