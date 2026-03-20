@@ -1119,7 +1119,7 @@ export const AnnouncementFactory = {
 //   isActive:        boolean
 //   sortOrder:       number
 //   createdAt:       timestamp
-
+ 
 export const DisciplineFactory = {
   create: (data) =>
     addDoc(collection(db, 'disciplines'), {
@@ -1141,34 +1141,40 @@ export const DisciplineFactory = {
   delete: (disciplineId) =>
     deleteDoc(doc(db, 'disciplines', disciplineId)),
  
-  // Real-time subscription — ALL disciplines (including inactive), ordered by sortOrder
+  // Real-time subscription — ALL disciplines (including inactive), sorted client-side
+  // No composite index required.
   getAll: (callback) =>
     onSnapshot(
-      query(collection(db, 'disciplines'), orderBy('sortOrder', 'asc')),
-      (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      collection(db, 'disciplines'),
+      (snap) => {
+        const docs = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+        callback(docs);
+      }
     ),
  
-  // Real-time subscription — only active disciplines
+  // Real-time subscription — only active disciplines, sorted client-side
+  // No composite index required.
   getActive: (callback) =>
     onSnapshot(
-      query(
-        collection(db, 'disciplines'),
-        where('isActive', '==', true),
-        orderBy('sortOrder', 'asc')
-      ),
-      (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      collection(db, 'disciplines'),
+      (snap) => {
+        const docs = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(d => d.isActive !== false)
+          .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+        callback(docs);
+      }
     ),
  
-  // One-shot fetch — active disciplines only
+  // One-shot fetch — active disciplines only, sorted client-side
   getActiveOnce: async () => {
-    const snap = await getDocs(
-      query(
-        collection(db, 'disciplines'),
-        where('isActive', '==', true),
-        orderBy('sortOrder', 'asc')
-      )
-    );
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const snap = await getDocs(collection(db, 'disciplines'));
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(d => d.isActive !== false)
+      .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
   },
  
   // Seed standard rope-skipping disciplines.
