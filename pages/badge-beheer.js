@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  BadgeFactory, ClubFactory, GroupFactory, ClubMemberFactory, UserFactory, UserMemberLinkFactory
+  BadgeFactory, ClubFactory, GroupFactory, ClubMemberFactory, UserFactory,
+  UserMemberLinkFactory,
 } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -96,18 +97,15 @@ function ImageUploader({ currentUrl, onUploaded }) {
 }
 
 // ─── Badge Form Modal ─────────────────────────────────────────────────────────
-// adminClubIds is guaranteed to be non-empty when this modal is opened
-// (the parent waits for bootstrap to complete before enabling the button).
-function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, onSave, onClose }) {
+function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, defaultScope, onSave, onClose }) {
   const isEdit = !!badge?.id;
 
-  const defaultScope  = isSuperAdmin ? 'global' : 'club';
-  // Always pre-fill clubId when there is exactly one club available
+  const resolvedScope = isSuperAdmin ? (defaultScope || 'global') : 'club';
   const defaultClubId = !isSuperAdmin && adminClubIds.length >= 1 ? adminClubIds[0] : null;
 
   const [form, setForm] = useState(() => {
     if (badge) return { ...EMPTY_BADGE, ...badge };
-    return { ...EMPTY_BADGE, scope: defaultScope, clubId: defaultClubId, type: 'manual' };
+    return { ...EMPTY_BADGE, scope: resolvedScope, clubId: defaultClubId, type: 'manual' };
   });
 
   const [triggerKind, setTriggerKind] = useState(detectTriggerKind(badge?.trigger));
@@ -132,7 +130,6 @@ function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, onSave, onCl
     finally { setSaving(false); }
   };
 
-  // Clubs available for scoping
   const availableClubs = isSuperAdmin ? clubs : clubs.filter(c => adminClubIds.includes(c.id));
 
   return (
@@ -342,6 +339,72 @@ function AwardBadgeModal({ member, clubId, adminName, onClose }) {
   );
 }
 
+// ─── Badge Grid ───────────────────────────────────────────────────────────────
+// Reusable grid used by both the club-badges and global-badges tabs.
+// canEdit: false → read-only (no edit / deactivate / delete buttons)
+function BadgeGrid({ badges, allClubs, isSuperAdmin, canEdit, onEdit }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' }}>
+      {badges.map(badge => {
+        const catColor = CATEGORY_COLORS[badge.category] || '#64748b';
+        const club = badge.clubId ? allClubs.find(c => c.id === badge.clubId) : null;
+        return (
+          <div key={badge.id} style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: `1px solid ${badge.isActive ? '#334155' : '#1e293b'}`, padding: '14px', opacity: badge.isActive ? 1 : 0.55, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ width: '44px', height: '44px', borderRadius: '50%', flexShrink: 0, backgroundColor: '#0f172a', border: `2px solid ${catColor}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px', overflow: 'hidden' }}>
+                {badge.imageUrl ? <img src={badge.imageUrl} alt={badge.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : badge.emoji || '🏅'}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: '700', fontSize: '13px', color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{badge.name}</div>
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>{badge.description || '—'}</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+              <span style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10px', fontWeight: '600', backgroundColor: catColor + '22', color: catColor, border: `1px solid ${catColor}44` }}>{badge.category}</span>
+              <span style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10px', fontWeight: '600', backgroundColor: '#3b82f622', color: '#60a5fa', border: '1px solid #3b82f644' }}>{badge.type === 'automatic' ? '🤖 Auto' : '👋 Manueel'}</span>
+              <span style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10px', fontWeight: '600', backgroundColor: badge.scope === 'global' ? '#a78bfa22' : '#1e293b', color: badge.scope === 'global' ? '#a78bfa' : '#94a3b8', border: `1px solid ${badge.scope === 'global' ? '#a78bfa33' : '#334155'}` }}>
+                {badge.scope === 'global' ? '🌐 Globaal' : `🏟 ${club?.name || 'Club'}`}
+              </span>
+            </div>
+
+            {badge.trigger && badge.type === 'automatic' && (
+              <div style={{ fontSize: '11px', color: '#64748b', backgroundColor: '#0f172a', borderRadius: '6px', padding: '6px 8px' }}>
+                {badge.trigger.minScore != null         && `≥ ${badge.trigger.minScore} stappen`}
+                {badge.trigger.firstSession             && `Eerste ${badge.trigger.discipline} sessie`}
+                {badge.trigger.totalSessions != null    && `${badge.trigger.totalSessions} sessies totaal`}
+                {badge.trigger.consecutiveWeeks != null && `${badge.trigger.consecutiveWeeks} weken op rij`}
+              </div>
+            )}
+
+            {/* Action buttons — only shown when canEdit is true */}
+            {canEdit && (
+              <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
+                <button onClick={() => onEdit(badge)} style={{ ...bs.ghost, flex: 1, justifyContent: 'center' }}>
+                  <Edit2 size={12} /> Bewerk
+                </button>
+                <button onClick={() => BadgeFactory.update(badge.id, { isActive: !badge.isActive })} style={{ ...bs.ghost, flex: 1, justifyContent: 'center', color: badge.isActive ? '#f97316' : '#22c55e' }}>
+                  {badge.isActive ? '⛔ Deactiveer' : '✅ Activeer'}
+                </button>
+                <button onClick={() => { if (confirm(`Verwijder "${badge.name}"?`)) BadgeFactory.delete(badge.id); }} style={{ ...bs.ghost, color: '#ef4444' }}>
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            )}
+
+            {/* Read-only indicator for non-editable badges */}
+            {!canEdit && (
+              <div style={{ marginTop: 'auto', fontSize: '10px', color: '#475569', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Shield size={9} /> Alleen lezen
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════
@@ -351,14 +414,13 @@ export default function BadgeBeheerPage() {
   const [isSuperAdmin,   setIsSuperAdmin]   = useState(false);
   const [adminClubs,     setAdminClubs]     = useState([]);
   const [allClubs,       setAllClubs]       = useState([]);
-  const [activeTab,      setActiveTab]      = useState('badges');
-  // bootstrapDone prevents rendering the page (and opening the modal) before
-  // adminClubs has been resolved — this is the key fix.
+  const [activeTab,      setActiveTab]      = useState('club-badges');
+  // bootstrapDone prevents showing the page before adminClubs is resolved,
+  // ensuring adminClubIds is always populated when the modal opens.
   const [bootstrapDone,  setBootstrapDone]  = useState(false);
 
   // Badge management
   const [badges,          setBadges]          = useState([]);
-  const [badgeFilter,     setBadgeFilter]     = useState('all');
   const [isBadgeFormOpen, setIsBadgeFormOpen] = useState(false);
   const [editingBadge,    setEditingBadge]    = useState(null);
 
@@ -375,42 +437,46 @@ export default function BadgeBeheerPage() {
   useEffect(() => {
     if (authLoading || !uid) return;
 
-    // Helper: find all clubs where uid is a coach in at least one group
-      const findCoachClubs = async (allClubs) => {
-        const found = [];
+    // Resolves uid → memberId per club via UserMemberLinks, then checks
+    // each group in each club to see if that member has isCoach: true.
+    const findCoachClubs = async (allClubs) => {
+      const found = [];
 
-        // First resolve the memberId(s) for this uid via UserMemberLinks
-        const memberIdByClub = {};
-        await new Promise(resolve => {
-          const unsub = UserMemberLinkFactory.getForUser(uid, (profiles) => {
-            unsub();
-            profiles.forEach(p => {
-              if (p.link.relationship === 'self') {
-                memberIdByClub[p.member.clubId] = p.member.id;
-              }
-            });
-            resolve();
-          });
-        });
-
-        for (const club of allClubs) {
-          const memberId = memberIdByClub[club.id];
-          if (!memberId) continue;
-          const groups = await GroupFactory.getGroupsByClubOnce(club.id);
-          for (const group of groups) {
-            const members = await GroupFactory.getMembersByGroupOnce(club.id, group.id);
-            const me = members.find(m => (m.memberId || m.id) === memberId);
-            if (me?.isCoach) {
-              found.push(club);
-              break; // no need to check other groups in this club
+      // Step 1: resolve uid → memberId for each club
+      const memberIdByClub = {};
+      await new Promise(resolve => {
+        const unsub = UserMemberLinkFactory.getForUser(uid, (profiles) => {
+          unsub();
+          profiles.forEach(p => {
+            if (p.link.relationship === 'self') {
+              memberIdByClub[p.member.clubId] = p.member.id;
             }
+          });
+          resolve();
+        });
+      });
+
+      // Step 2: for each club, check if this member is a coach in any group
+      for (const club of allClubs) {
+        const memberId = memberIdByClub[club.id];
+        if (!memberId) continue;
+        const groups = await GroupFactory.getGroupsByClubOnce(club.id);
+        for (const group of groups) {
+          const members = await GroupFactory.getMembersByGroupOnce(club.id, group.id);
+          const me = members.find(m => (m.memberId || m.id) === memberId);
+          if (me?.isCoach) {
+            found.push(club);
+            break; // found coach role in this club, no need to check further groups
           }
         }
-        return found;
-    }
+      }
+
+      return found;
+    };
 
     UserFactory.get(uid).then(snap => {
       if (!snap.exists()) { setBootstrapDone(true); return; }
+
       const user = { id: uid, ...snap.data() };
       setCurrentUser(user);
       const role = user.role || 'user';
@@ -422,23 +488,30 @@ export default function BadgeBeheerPage() {
           setAdminClubs(clubs);
           setBootstrapDone(true);
         });
+
       } else if (role === 'clubadmin') {
         ClubFactory.getAll(allClubs => {
           setAllClubs(allClubs);
-          // clubadmin has access to all clubs they are linked to as a coach
           findCoachClubs(allClubs).then(found => {
-            // If no coach groups found, fall back to all clubs
-            // (clubadmin role itself grants access)
+            // clubadmin always gets access; scope to their coach clubs if found,
+            // otherwise fall back to all clubs they belong to
             setAdminClubs(found.length > 0 ? found : allClubs);
+            setBootstrapDone(true);
+          }).catch(() => {
+            setAdminClubs(allClubs);
             setBootstrapDone(true);
           });
         });
+
       } else {
-        // Regular user — only gets access if they are a coach in a group
+        // Regular user — only gets access if they are a coach in at least one group
         ClubFactory.getAll(allClubs => {
           setAllClubs(allClubs);
           findCoachClubs(allClubs).then(found => {
             setAdminClubs(found);
+            setBootstrapDone(true);
+          }).catch(() => {
+            setAdminClubs([]);
             setBootstrapDone(true);
           });
         });
@@ -489,21 +562,15 @@ export default function BadgeBeheerPage() {
   const adminClubIds = adminClubs.map(c => c.id);
   const adminName    = currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() : 'Coach';
 
-  const filteredBadges = badges.filter(b => {
-    if (badgeFilter === 'automatic') return b.type === 'automatic';
-    if (badgeFilter === 'manual')    return b.type === 'manual';
-    if (badgeFilter === 'global')    return b.scope === 'global';
-    if (badgeFilter === 'club')      return b.scope === 'club';
-    if (badgeFilter === 'inactive')  return !b.isActive;
-    return true;
-  });
+  const clubBadges   = badges.filter(b => b.scope === 'club');
+  const globalBadges = badges.filter(b => b.scope === 'global');
 
   const filteredMembers = clubMembers.filter(m =>
     `${m.firstName} ${m.lastName}`.toLowerCase().includes(memberSearch.toLowerCase())
   );
 
   // ── Guards ─────────────────────────────────────────────────────────────────
-  // Show spinner while auth or bootstrap is in progress
+  // Show spinner until both auth and the async bootstrap are complete
   if (authLoading || !bootstrapDone) return (
     <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <style>{pageCSS}</style>
@@ -511,7 +578,8 @@ export default function BadgeBeheerPage() {
     </div>
   );
 
-  // After bootstrap, deny access if no admin clubs found and not a named admin role
+  // After bootstrap, deny access if the user is not an admin role and
+  // has no coach clubs
   const hasAccess = isSuperAdmin
     || currentUser?.role === 'clubadmin'
     || adminClubs.length > 0;
@@ -525,8 +593,9 @@ export default function BadgeBeheerPage() {
   );
 
   const tabs = [
-    { key: 'badges',    label: 'Badges beheren', icon: Medal },
-    { key: 'uitreiken', label: 'Uitreiken',       icon: Award },
+    { key: 'club-badges',   label: 'Club badges',    icon: Medal  },
+    { key: 'global-badges', label: 'Globale badges', icon: Shield },
+    { key: 'uitreiken',     label: 'Uitreiken',      icon: Award  },
   ];
 
   return (
@@ -562,16 +631,16 @@ export default function BadgeBeheerPage() {
 
       <div style={s.content}>
 
-        {/* ══ BADGES BEHEREN ══ */}
-        {activeTab === 'badges' && (
+        {/* ══ CLUB BADGES ══ */}
+        {activeTab === 'club-badges' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
               <div>
                 <div style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Medal size={18} color="#f59e0b" /> Badges
+                  <Medal size={18} color="#f59e0b" /> Club badges
                 </div>
                 <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                  {badges.filter(b => b.isActive).length} actief · {badges.length} totaal
+                  {clubBadges.filter(b => b.isActive).length} actief · {clubBadges.length} totaal
                 </div>
               </div>
               <button onClick={() => { setEditingBadge(null); setIsBadgeFormOpen(true); }} style={bs.primary}>
@@ -579,77 +648,58 @@ export default function BadgeBeheerPage() {
               </button>
             </div>
 
-            {/* Filters */}
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
-              {[
-                ['all', 'Alle'],
-                ...(isSuperAdmin ? [['global', '🌐 Globaal'], ['club', '🏟 Club']] : []),
-                ['automatic', '🤖 Auto'],
-                ['manual', '👋 Manueel'],
-                ['inactive', '⛔ Inactief'],
-              ].map(([v, l]) => (
-                <button key={v} onClick={() => setBadgeFilter(v)} style={{ padding: '5px 10px', borderRadius: '14px', border: `1px solid ${badgeFilter === v ? '#a78bfa' : '#334155'}`, fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', backgroundColor: badgeFilter === v ? '#a78bfa22' : 'transparent', color: badgeFilter === v ? '#a78bfa' : '#64748b' }}>
-                  {l}
-                </button>
-              ))}
-            </div>
-
-            {filteredBadges.length === 0 ? (
+            {clubBadges.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 20px' }}>
                 <Medal size={40} color="#334155" style={{ marginBottom: '12px' }} />
-                <p style={{ color: '#475569', fontSize: '14px' }}>Geen badges gevonden.</p>
+                <p style={{ color: '#475569', fontSize: '14px', marginBottom: '16px' }}>Nog geen club badges.</p>
+                <button onClick={() => { setEditingBadge(null); setIsBadgeFormOpen(true); }} style={bs.primary}>
+                  <Plus size={15} /> Eerste badge aanmaken
+                </button>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' }}>
-                {filteredBadges.map(badge => {
-                  const catColor = CATEGORY_COLORS[badge.category] || '#64748b';
-                  const club = badge.clubId ? allClubs.find(c => c.id === badge.clubId) : null;
-                  return (
-                    <div key={badge.id} style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: `1px solid ${badge.isActive ? '#334155' : '#1e293b'}`, padding: '14px', opacity: badge.isActive ? 1 : 0.55, display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{ width: '44px', height: '44px', borderRadius: '50%', flexShrink: 0, backgroundColor: '#0f172a', border: `2px solid ${catColor}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px', overflow: 'hidden' }}>
-                          {badge.imageUrl ? <img src={badge.imageUrl} alt={badge.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : badge.emoji || '🏅'}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: '700', fontSize: '13px', color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{badge.name}</div>
-                          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>{badge.description || '—'}</div>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                        <span style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10px', fontWeight: '600', backgroundColor: catColor + '22', color: catColor, border: `1px solid ${catColor}44` }}>{badge.category}</span>
-                        <span style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10px', fontWeight: '600', backgroundColor: '#3b82f622', color: '#60a5fa', border: '1px solid #3b82f644' }}>{badge.type === 'automatic' ? '🤖 Auto' : '👋 Manueel'}</span>
-                        {badge.scope === 'global'
-                          ? <span style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10px', fontWeight: '600', backgroundColor: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa33' }}>🌐 Globaal</span>
-                          : <span style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '10px', fontWeight: '600', backgroundColor: '#1e293b', color: '#94a3b8', border: '1px solid #334155' }}>🏟 {club?.name || 'Club'}</span>
-                        }
-                      </div>
-                      {badge.trigger && badge.type === 'automatic' && (
-                        <div style={{ fontSize: '11px', color: '#64748b', backgroundColor: '#0f172a', borderRadius: '6px', padding: '6px 8px' }}>
-                          {badge.trigger.minScore != null         && `≥ ${badge.trigger.minScore} stappen`}
-                          {badge.trigger.firstSession             && `Eerste ${badge.trigger.discipline} sessie`}
-                          {badge.trigger.totalSessions != null    && `${badge.trigger.totalSessions} sessies totaal`}
-                          {badge.trigger.consecutiveWeeks != null && `${badge.trigger.consecutiveWeeks} weken op rij`}
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
-                        {(isSuperAdmin || badge.scope !== 'global') && (
-                          <button onClick={() => { setEditingBadge(badge); setIsBadgeFormOpen(true); }} style={{ ...bs.ghost, flex: 1, justifyContent: 'center' }}>
-                            <Edit2 size={12} /> Bewerk
-                          </button>
-                        )}
-                        <button onClick={() => BadgeFactory.update(badge.id, { isActive: !badge.isActive })} style={{ ...bs.ghost, flex: 1, justifyContent: 'center', color: badge.isActive ? '#f97316' : '#22c55e' }}>
-                          {badge.isActive ? '⛔ Deactiveer' : '✅ Activeer'}
-                        </button>
-                        {(isSuperAdmin || badge.scope !== 'global') && (
-                          <button onClick={() => { if (confirm(`Verwijder "${badge.name}"?`)) BadgeFactory.delete(badge.id); }} style={{ ...bs.ghost, color: '#ef4444' }}>
-                            <Trash2 size={12} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+              <BadgeGrid badges={clubBadges} allClubs={allClubs} isSuperAdmin={isSuperAdmin} canEdit={true}
+                onEdit={badge => { setEditingBadge(badge); setIsBadgeFormOpen(true); }}
+              />
+            )}
+          </div>
+        )}
+
+        {/* ══ GLOBALE BADGES ══ */}
+        {activeTab === 'global-badges' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <div style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Shield size={18} color="#a78bfa" /> Globale badges
+                </div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                  {globalBadges.filter(b => b.isActive).length} actief · {globalBadges.length} totaal
+                </div>
               </div>
+              {isSuperAdmin && (
+                <button onClick={() => { setEditingBadge(null); setIsBadgeFormOpen(true); }} style={bs.primary}>
+                  <Plus size={15} /> Nieuwe badge
+                </button>
+              )}
+            </div>
+
+            {/* Read-only notice for non-superadmins */}
+            {!isSuperAdmin && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#a78bfa11', border: '1px solid #a78bfa33', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#a78bfa' }}>
+                <Shield size={13} style={{ flexShrink: 0 }} />
+                Globale badges worden beheerd door de systeembeheerder. Je kunt ze hier bekijken als referentie om dubbele badges te vermijden.
+              </div>
+            )}
+
+            {globalBadges.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+                <Shield size={40} color="#334155" style={{ marginBottom: '12px' }} />
+                <p style={{ color: '#475569', fontSize: '14px' }}>Geen globale badges gevonden.</p>
+              </div>
+            ) : (
+              <BadgeGrid badges={globalBadges} allClubs={allClubs} isSuperAdmin={isSuperAdmin} canEdit={isSuperAdmin}
+                onEdit={badge => { setEditingBadge(badge); setIsBadgeFormOpen(true); }}
+              />
             )}
           </div>
         )}
@@ -738,6 +788,7 @@ export default function BadgeBeheerPage() {
           clubs={allClubs}
           adminClubIds={adminClubIds}
           isSuperAdmin={isSuperAdmin}
+          defaultScope={activeTab === 'global-badges' ? 'global' : 'club'}
           onSave={handleBadgeSave}
           onClose={() => { setIsBadgeFormOpen(false); setEditingBadge(null); }}
         />
