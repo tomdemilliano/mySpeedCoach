@@ -407,7 +407,7 @@ export default function BadgeBeheerPage() {
           }
         }
         return found;
-      };
+      }
     };
 
     UserFactory.get(uid).then(snap => {
