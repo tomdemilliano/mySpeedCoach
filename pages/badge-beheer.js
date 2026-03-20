@@ -376,23 +376,38 @@ export default function BadgeBeheerPage() {
     if (authLoading || !uid) return;
 
     // Helper: find all clubs where uid is a coach in at least one group
-    const findCoachClubs = (allClubs, onDone) => {
-      const found = [];
-      let pending = allClubs.length;
-      if (pending === 0) { onDone(found); return; }
-      allClubs.forEach(club => {
-        GroupFactory.getGroupsByClub(club.id, groups => {
-          let gPending = groups.length;
-          if (gPending === 0) { if (--pending === 0) onDone(found); return; }
-          groups.forEach(group => {
-            GroupFactory.getMembersByGroup(club.id, group.id, mems => {
-              const isCoach = mems.some(m => (m.memberId || m.id) === uid && m.isCoach);
-              if (isCoach && !found.find(c => c.id === club.id)) found.push(club);
-              if (--gPending === 0 && --pending === 0) onDone(found);
+      const findCoachClubs = async (allClubs) => {
+        const found = [];
+
+        // First resolve the memberId(s) for this uid via UserMemberLinks
+        const memberIdByClub = {};
+        await new Promise(resolve => {
+          const unsub = UserMemberLinkFactory.getForUser(uid, (profiles) => {
+            unsub();
+            profiles.forEach(p => {
+              if (p.link.relationship === 'self') {
+                memberIdByClub[p.member.clubId] = p.member.id;
+              }
             });
+            resolve();
           });
         });
-      });
+
+        for (const club of allClubs) {
+          const memberId = memberIdByClub[club.id];
+          if (!memberId) continue;
+          const groups = await GroupFactory.getGroupsByClubOnce(club.id);
+          for (const group of groups) {
+            const members = await GroupFactory.getMembersByGroupOnce(club.id, group.id);
+            const me = members.find(m => (m.memberId || m.id) === memberId);
+            if (me?.isCoach) {
+              found.push(club);
+              break; // no need to check other groups in this club
+            }
+          }
+        }
+        return found;
+      };
     };
 
     UserFactory.get(uid).then(snap => {
@@ -412,7 +427,7 @@ export default function BadgeBeheerPage() {
         ClubFactory.getAll(allClubs => {
           setAllClubs(allClubs);
           // clubadmin has access to all clubs they are linked to as a coach
-          findCoachClubs(allClubs, found => {
+          findCoachClubs(allClubs).then(found => {
             // If no coach groups found, fall back to all clubs
             // (clubadmin role itself grants access)
             setAdminClubs(found.length > 0 ? found : allClubs);
@@ -423,7 +438,7 @@ export default function BadgeBeheerPage() {
         // Regular user — only gets access if they are a coach in a group
         ClubFactory.getAll(allClubs => {
           setAllClubs(allClubs);
-          findCoachClubs(allClubs, found => {
+          findCoachClubs(allClubs).then(found => {
             setAdminClubs(found);
             setBootstrapDone(true);
           });
