@@ -1,14 +1,421 @@
 import React, { useState, useEffect } from 'react';
 import {
-  UserFactory, ClubFactory, UserMemberLinkFactory,
+  UserFactory, ClubFactory, UserMemberLinkFactory, DisciplineFactory,
 } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebaseConfig';
 import { collection, onSnapshot } from 'firebase/firestore';
 import {
   ShieldAlert, UserPlus, Building2, Trash2, Search, Edit2, X, Save,
-  Users, UserX, Award,
+  Users, UserX, Award, Zap, Plus, Check, ChevronUp, ChevronDown,
+  Timer, Hash,
 } from 'lucide-react';
+
+// ─── Discipline Form Modal ────────────────────────────────────────────────────
+function DisciplineFormModal({ discipline, onSave, onClose }) {
+  const isEdit = !!discipline?.id;
+
+  const [form, setForm] = useState({
+    name:            discipline?.name            || '',
+    ropeType:        discipline?.ropeType        || 'SR',
+    durationSeconds: discipline?.durationSeconds ?? '',  // empty string = untimed
+    teamSize:        discipline?.teamSize        ?? 1,
+    isIndividual:    discipline?.isIndividual    ?? true,
+    specialRule:     discipline?.specialRule     || 'none',
+    skippersCount:   discipline?.skippersCount   ?? 1,
+    isActive:        discipline?.isActive        ?? true,
+    sortOrder:       discipline?.sortOrder       ?? 999,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    setError('');
+    if (!form.name.trim()) { setError('Geef de discipline een naam.'); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        name:            form.name.trim(),
+        ropeType:        form.ropeType,
+        durationSeconds: form.durationSeconds === '' || form.durationSeconds === null
+                           ? null
+                           : parseInt(form.durationSeconds),
+        teamSize:        parseInt(form.teamSize) || 1,
+        isIndividual:    form.isIndividual,
+        specialRule:     form.specialRule === 'none' ? null : form.specialRule,
+        skippersCount:   parseInt(form.skippersCount) || 1,
+        isActive:        form.isActive,
+        sortOrder:       parseInt(form.sortOrder) || 999,
+      };
+      await onSave(payload);
+      onClose();
+    } catch (e) {
+      console.error(e);
+      setError('Opslaan mislukt. Probeer opnieuw.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const durationOptions = [
+    { value: '30',  label: '30 seconden' },
+    { value: '60',  label: '1 minuut' },
+    { value: '120', label: '2 minuten' },
+    { value: '180', label: '3 minuten' },
+    { value: '',    label: 'Geen tijdslimiet (onbeperkt)' },
+  ];
+
+  return (
+    <div style={s.modalOverlay}>
+      <div style={{ ...s.modal, maxHeight: '92vh', overflowY: 'auto', borderRadius: '20px' }}>
+        <div style={s.modalHeader}>
+          <h3 style={{ margin: 0, fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#f1f5f9' }}>
+            <Zap size={18} color="#3b82f6" />
+            {isEdit ? 'Discipline bewerken' : 'Nieuwe discipline'}
+          </h3>
+          <button style={s.iconBtn} onClick={onClose}><X size={18} /></button>
+        </div>
+
+        {/* Name */}
+        <div style={s.fieldGroup}>
+          <label style={s.fieldLabel}>Naam *</label>
+          <input
+            style={s.input}
+            value={form.name}
+            onChange={e => set('name', e.target.value)}
+            placeholder="bijv. Speed Sprint"
+            autoFocus
+          />
+        </div>
+
+        {/* Rope type */}
+        <div style={s.fieldGroup}>
+          <label style={s.fieldLabel}>Touw type *</label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {['SR', 'DD'].map(rt => (
+              <button key={rt} type="button" onClick={() => set('ropeType', rt)} style={{
+                flex: 1, padding: '10px', borderRadius: '8px', border: `1px solid ${form.ropeType === rt ? '#3b82f6' : '#334155'}`,
+                fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit',
+                backgroundColor: form.ropeType === rt ? '#3b82f622' : 'transparent',
+                color: form.ropeType === rt ? '#60a5fa' : '#64748b',
+              }}>
+                {rt === 'SR' ? '🪢 Single Rope' : '🌀 Double Dutch'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Duration */}
+        <div style={s.fieldGroup}>
+          <label style={s.fieldLabel}>Duur</label>
+          <select style={s.select} value={form.durationSeconds ?? ''} onChange={e => set('durationSeconds', e.target.value)}>
+            {durationOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          {form.durationSeconds === '' && (
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              ℹ️ Gebruik dit voor disciplines als Triple Under waarbij er geen vaste tijdslimiet is.
+            </div>
+          )}
+        </div>
+
+        {/* Individual vs Team */}
+        <div style={s.fieldGroup}>
+          <label style={s.fieldLabel}>Type</label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button type="button" onClick={() => { set('isIndividual', true); set('teamSize', 1); set('skippersCount', 1); }} style={{
+              flex: 1, padding: '10px', borderRadius: '8px', border: `1px solid ${form.isIndividual ? '#22c55e' : '#334155'}`,
+              fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit',
+              backgroundColor: form.isIndividual ? '#22c55e22' : 'transparent',
+              color: form.isIndividual ? '#22c55e' : '#64748b',
+            }}>
+              👤 Individueel
+            </button>
+            <button type="button" onClick={() => set('isIndividual', false)} style={{
+              flex: 1, padding: '10px', borderRadius: '8px', border: `1px solid ${!form.isIndividual ? '#f59e0b' : '#334155'}`,
+              fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit',
+              backgroundColor: !form.isIndividual ? '#f59e0b22' : 'transparent',
+              color: !form.isIndividual ? '#f59e0b' : '#64748b',
+            }}>
+              👥 Team
+            </button>
+          </div>
+        </div>
+
+        {/* Team size + skippers count (only for team) */}
+        {!form.isIndividual && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+            <div>
+              <label style={s.fieldLabel}>Teamgrootte (totaal)</label>
+              <input
+                type="number" min="2" max="10"
+                style={s.input}
+                value={form.teamSize}
+                onChange={e => set('teamSize', e.target.value)}
+                placeholder="2"
+              />
+            </div>
+            <div>
+              <label style={s.fieldLabel}>Aantal springers</label>
+              <input
+                type="number" min="1" max="10"
+                style={s.input}
+                value={form.skippersCount}
+                onChange={e => set('skippersCount', e.target.value)}
+                placeholder="1"
+              />
+              <div style={{ fontSize: '10px', color: '#475569', marginTop: '3px' }}>
+                Bij DD: de 2 touwdraaiers tellen ook mee in teamgrootte
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Special rule */}
+        <div style={s.fieldGroup}>
+          <label style={s.fieldLabel}>Speciale regel</label>
+          <select style={s.select} value={form.specialRule || 'none'} onChange={e => set('specialRule', e.target.value)}>
+            <option value="none">Geen</option>
+            <option value="triple_under">Triple Under (15s restart-window)</option>
+            <option value="relay">Relay (beurtelings per springer)</option>
+          </select>
+        </div>
+
+        {/* Sort order */}
+        <div style={s.fieldGroup}>
+          <label style={s.fieldLabel}>Volgorde</label>
+          <input
+            type="number" min="1"
+            style={s.input}
+            value={form.sortOrder}
+            onChange={e => set('sortOrder', e.target.value)}
+            placeholder="1"
+          />
+        </div>
+
+        {/* Active */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '18px' }}>
+          <input type="checkbox" id="discActive" checked={form.isActive} onChange={e => set('isActive', e.target.checked)} />
+          <label htmlFor="discActive" style={{ fontSize: '13px', color: '#94a3b8', cursor: 'pointer' }}>
+            Discipline is actief (zichtbaar in teller & selectie)
+          </label>
+        </div>
+
+        {error && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ef444422', color: '#ef4444', fontSize: '13px', padding: '10px 12px', borderRadius: '8px', marginBottom: '14px', border: '1px solid #ef444433' }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={handleSave} disabled={saving} style={{ ...bs.primary, flex: 1, justifyContent: 'center' }}>
+            <Check size={15} /> {saving ? 'Opslaan…' : 'Opslaan'}
+          </button>
+          <button onClick={onClose} style={bs.secondary}><X size={15} /> Annuleren</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Disciplines Tab ──────────────────────────────────────────────────────────
+function DisciplinesTab() {
+  const [disciplines, setDisciplines] = useState([]);
+  const [formOpen,    setFormOpen]    = useState(false);
+  const [editing,     setEditing]     = useState(null);
+  const [seeding,     setSeeding]     = useState(false);
+
+  useEffect(() => {
+    const unsub = DisciplineFactory.getAll(setDisciplines);
+    return () => unsub();
+  }, []);
+
+  const handleSave = async (data) => {
+    if (editing?.id) {
+      const { ...rest } = data;
+      await DisciplineFactory.update(editing.id, rest);
+    } else {
+      await DisciplineFactory.create(data);
+    }
+    setEditing(null);
+    setFormOpen(false);
+  };
+
+  const handleSeed = async () => {
+    if (!confirm('Standaard disciplines toevoegen? Bestaande disciplines met dezelfde naam worden overgeslagen.')) return;
+    setSeeding(true);
+    try { await DisciplineFactory.seedDefaults(); }
+    catch (e) { alert('Seeden mislukt: ' + e.message); }
+    finally { setSeeding(false); }
+  };
+
+  const handleToggleActive = (disc) =>
+    DisciplineFactory.update(disc.id, { isActive: !disc.isActive });
+
+  const handleDelete = (disc) => {
+    if (!confirm(`Discipline "${disc.name}" verwijderen?`)) return;
+    DisciplineFactory.delete(disc.id);
+  };
+
+  const handleMoveUp = (disc) => {
+    const idx = disciplines.findIndex(d => d.id === disc.id);
+    if (idx === 0) return;
+    const prev = disciplines[idx - 1];
+    DisciplineFactory.update(disc.id,    { sortOrder: prev.sortOrder });
+    DisciplineFactory.update(prev.id, { sortOrder: disc.sortOrder });
+  };
+
+  const handleMoveDown = (disc) => {
+    const idx = disciplines.findIndex(d => d.id === disc.id);
+    if (idx === disciplines.length - 1) return;
+    const next = disciplines[idx + 1];
+    DisciplineFactory.update(disc.id,    { sortOrder: next.sortOrder });
+    DisciplineFactory.update(next.id, { sortOrder: disc.sortOrder });
+  };
+
+  const formatDuration = (d) => {
+    if (!d.durationSeconds) return '∞ Onbeperkt';
+    if (d.durationSeconds < 60) return `${d.durationSeconds}s`;
+    return `${d.durationSeconds / 60} min`;
+  };
+
+  const formatTeam = (d) => {
+    if (d.isIndividual) return '👤 Individueel';
+    return `👥 Team ${d.teamSize} (${d.skippersCount} springer${d.skippersCount > 1 ? 's' : ''})`;
+  };
+
+  const RULE_LABELS = {
+    triple_under: '⚡ Triple Under regel',
+    relay:        '🔄 Relay',
+  };
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+        <div>
+          <div style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Zap size={18} color="#3b82f6" /> Disciplines
+          </div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+            {disciplines.filter(d => d.isActive).length} actief · {disciplines.length} totaal
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {disciplines.length === 0 && (
+            <button onClick={handleSeed} disabled={seeding} style={bs.secondary}>
+              {seeding ? 'Seeden…' : '🌱 Standaard disciplines laden'}
+            </button>
+          )}
+          <button onClick={() => { setEditing(null); setFormOpen(true); }} style={bs.primary}>
+            <Plus size={15} /> Nieuwe discipline
+          </button>
+        </div>
+      </div>
+
+      {disciplines.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+          <Zap size={40} color="#334155" style={{ marginBottom: '12px' }} />
+          <p style={{ color: '#475569', fontSize: '14px', marginBottom: '16px' }}>Nog geen disciplines aangemaakt.</p>
+          <button onClick={handleSeed} disabled={seeding} style={bs.primary}>
+            🌱 {seeding ? 'Standaard disciplines laden…' : 'Standaard disciplines laden'}
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {disciplines.map((disc, idx) => (
+            <div key={disc.id} style={{
+              backgroundColor: '#1e293b', borderRadius: '12px',
+              border: `1px solid ${disc.isActive ? '#334155' : '#1e293b'}`,
+              padding: '12px 14px',
+              opacity: disc.isActive ? 1 : 0.55,
+              display: 'flex', alignItems: 'center', gap: '12px',
+            }}>
+              {/* Reorder buttons */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', flexShrink: 0 }}>
+                <button
+                  onClick={() => handleMoveUp(disc)}
+                  disabled={idx === 0}
+                  style={{ ...s.iconBtn, padding: '2px', opacity: idx === 0 ? 0.2 : 1 }}
+                >
+                  <ChevronUp size={12} />
+                </button>
+                <button
+                  onClick={() => handleMoveDown(disc)}
+                  disabled={idx === disciplines.length - 1}
+                  style={{ ...s.iconBtn, padding: '2px', opacity: idx === disciplines.length - 1 ? 0.2 : 1 }}
+                >
+                  <ChevronDown size={12} />
+                </button>
+              </div>
+
+              {/* Sort order badge */}
+              <div style={{ width: '26px', height: '26px', borderRadius: '6px', backgroundColor: '#0f172a', border: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', color: '#64748b', flexShrink: 0 }}>
+                {disc.sortOrder}
+              </div>
+
+              {/* Info */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '3px' }}>
+                  <span style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9' }}>{disc.name}</span>
+                  <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', backgroundColor: disc.ropeType === 'SR' ? '#3b82f622' : '#a78bfa22', color: disc.ropeType === 'SR' ? '#60a5fa' : '#a78bfa', border: `1px solid ${disc.ropeType === 'SR' ? '#3b82f644' : '#a78bfa44'}` }}>
+                    {disc.ropeType}
+                  </span>
+                  {!disc.isActive && (
+                    <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', backgroundColor: '#ef444422', color: '#ef4444', border: '1px solid #ef444433' }}>
+                      Inactief
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: '10px', fontSize: '11px', color: '#64748b', flexWrap: 'wrap' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                    <Timer size={10} /> {formatDuration(disc)}
+                  </span>
+                  <span>{formatTeam(disc)}</span>
+                  {disc.specialRule && (
+                    <span style={{ color: '#f59e0b' }}>{RULE_LABELS[disc.specialRule] || disc.specialRule}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                <button
+                  onClick={() => handleToggleActive(disc)}
+                  title={disc.isActive ? 'Deactiveren' : 'Activeren'}
+                  style={{ ...s.iconBtn, color: disc.isActive ? '#f59e0b' : '#22c55e' }}
+                >
+                  {disc.isActive ? '⛔' : '✅'}
+                </button>
+                <button
+                  onClick={() => { setEditing(disc); setFormOpen(true); }}
+                  style={s.iconBtn}
+                >
+                  <Edit2 size={14} />
+                </button>
+                <button
+                  onClick={() => handleDelete(disc)}
+                  style={{ ...s.iconBtn, color: '#ef4444' }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {formOpen && (
+        <DisciplineFormModal
+          discipline={editing}
+          onSave={handleSave}
+          onClose={() => { setFormOpen(false); setEditing(null); }}
+        />
+      )}
+    </div>
+  );
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
@@ -115,8 +522,9 @@ export default function SuperAdmin() {
   };
 
   const tabs = [
-    { key: 'clubs', label: 'Clubs' },
-    { key: 'users', label: 'Gebruikers' },
+    { key: 'clubs',       label: 'Clubs' },
+    { key: 'users',       label: 'Gebruikers' },
+    { key: 'disciplines', label: 'Disciplines' },
   ];
 
   // ── Guards ─────────────────────────────────────────────────────────────────
@@ -246,7 +654,6 @@ export default function SuperAdmin() {
         {/* ═══ USERS ═══ */}
         {activeTab === 'users' && (
           <div>
-            {/* Search + Add */}
             <div style={s.actionBar}>
               <div style={s.searchWrap}>
                 <Search size={16} style={s.searchIcon} />
@@ -265,51 +672,33 @@ export default function SuperAdmin() {
               </button>
             </div>
 
-            {/* Club filter pills */}
             <div style={{ marginBottom: '16px' }}>
               <div style={{ fontSize: '11px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Building2 size={11} /> Filter op club
                 {clubMembersLoading && <span style={{ fontSize: '10px', color: '#475569', fontWeight: '400' }}>— laden…</span>}
               </div>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {/* All */}
-                <button
-                  onClick={() => setUserClubFilter('')}
-                  style={{ ...s.filterPill, ...(userClubFilter === '' ? s.filterPillActive : {}) }}
-                >
+                <button onClick={() => setUserClubFilter('')} style={{ ...s.filterPill, ...(userClubFilter === '' ? s.filterPillActive : {}) }}>
                   <Users size={11} /> Alle
                   <span style={{ ...s.pillCount, backgroundColor: userClubFilter === '' ? '#1e293b' : '#334155', color: '#94a3b8' }}>
                     {users.length}
                   </span>
                 </button>
-
-                {/* Per club */}
                 {clubs.map(club => {
                   const count    = countForClub(club.id);
                   const isActive = userClubFilter === club.id;
                   return (
-                    <button
-                      key={club.id}
-                      onClick={() => setUserClubFilter(club.id)}
-                      style={{ ...s.filterPill, ...(isActive ? s.filterPillActive : {}) }}
-                    >
+                    <button key={club.id} onClick={() => setUserClubFilter(club.id)} style={{ ...s.filterPill, ...(isActive ? s.filterPillActive : {}) }}>
                       {club.logoUrl
                         ? <img src={club.logoUrl} alt="" style={{ width: '12px', height: '12px', borderRadius: '2px', objectFit: 'cover' }} />
                         : <Building2 size={11} />
                       }
                       {club.name}
-                      <span style={{ ...s.pillCount, backgroundColor: isActive ? '#1e293b' : '#334155', color: '#94a3b8' }}>
-                        {count}
-                      </span>
+                      <span style={{ ...s.pillCount, backgroundColor: isActive ? '#1e293b' : '#334155', color: '#94a3b8' }}>{count}</span>
                     </button>
                   );
                 })}
-
-                {/* No club */}
-                <button
-                  onClick={() => setUserClubFilter('__none__')}
-                  style={{ ...s.filterPill, ...(userClubFilter === '__none__' ? { ...s.filterPillActive, borderColor: '#f59e0b', color: '#f59e0b' } : {}) }}
-                >
+                <button onClick={() => setUserClubFilter('__none__')} style={{ ...s.filterPill, ...(userClubFilter === '__none__' ? { ...s.filterPillActive, borderColor: '#f59e0b', color: '#f59e0b' } : {}) }}>
                   <UserX size={11} /> Geen club
                   <span style={{ ...s.pillCount, backgroundColor: userClubFilter === '__none__' ? '#1e293b' : '#f59e0b22', color: userClubFilter === '__none__' ? '#94a3b8' : '#f59e0b' }}>
                     {countForClub('__none__')}
@@ -318,7 +707,6 @@ export default function SuperAdmin() {
               </div>
             </div>
 
-            {/* Result count */}
             <div style={{ fontSize: '12px', color: '#475569', marginBottom: '12px' }}>
               {filteredUsers.length} gebruiker{filteredUsers.length !== 1 ? 's' : ''} gevonden
               {userClubFilter && userClubFilter !== '__none__' && (
@@ -331,7 +719,6 @@ export default function SuperAdmin() {
               )}
             </div>
 
-            {/* User list */}
             <div className="user-list">
               {filteredUsers.map(user => {
                 const clubNames = getUserClubNames(user.id);
@@ -361,16 +748,10 @@ export default function SuperAdmin() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                      <button
-                        style={s.iconBtn}
-                        onClick={() => { setEditingId(user.id); setUserForm(user); setIsUserModalOpen(true); }}
-                      >
+                      <button style={s.iconBtn} onClick={() => { setEditingId(user.id); setUserForm(user); setIsUserModalOpen(true); }}>
                         <Edit2 size={16} />
                       </button>
-                      <button
-                        style={{ ...s.iconBtn, color: '#ef4444' }}
-                        onClick={() => { if (confirm('Gebruiker wissen?')) UserFactory.delete(user.id); }}
-                      >
+                      <button style={{ ...s.iconBtn, color: '#ef4444' }} onClick={() => { if (confirm('Gebruiker wissen?')) UserFactory.delete(user.id); }}>
                         <Trash2 size={16} />
                       </button>
                     </div>
@@ -386,6 +767,10 @@ export default function SuperAdmin() {
             </div>
           </div>
         )}
+
+        {/* ═══ DISCIPLINES ═══ */}
+        {activeTab === 'disciplines' && <DisciplinesTab />}
+
       </main>
 
       {/* ══ USER MODAL ══ */}
@@ -441,6 +826,12 @@ export default function SuperAdmin() {
 const getRoleColor = r =>
   r === 'superadmin' ? '#ef4444' : r === 'clubadmin' ? '#f59e0b' : '#3b82f6';
 
+// ─── Button styles ────────────────────────────────────────────────────────────
+const bs = {
+  primary:   { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '9px 14px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
+  secondary: { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '9px 14px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '8px', color: '#94a3b8', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
+};
+
 // ─── CSS ──────────────────────────────────────────────────────────────────────
 const css = `
   * { box-sizing: border-box; }
@@ -490,6 +881,8 @@ const s = {
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', color: '#f1f5f9' },
   form:        { display: 'flex', flexDirection: 'column', gap: '10px' },
   fieldLabel:  { display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: '600' },
-  input:       { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px' },
+  fieldGroup:  { marginBottom: '14px' },
+  input:       { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px', fontFamily: 'inherit' },
+  select:      { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px', fontFamily: 'inherit' },
   saveBtn:     { width: '100%', backgroundColor: '#ef4444', border: 'none', color: 'white', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' },
 };
