@@ -100,9 +100,6 @@ function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, onSave, onCl
   const isEdit = !!badge?.id;
 
   // Non-superadmin can only create club-scoped badges
-  const defaultScope = isSuperAdmin ? 'global' : 'club';
-  const defaultClubId = !isSuperAdmin && adminClubIds.length === 1 ? adminClubIds[0] : null;
-
   const defaultScope  = isSuperAdmin ? 'global' : 'club';
   const defaultClubId = !isSuperAdmin && adminClubIds.length === 1 ? adminClubIds[0] : null;
 
