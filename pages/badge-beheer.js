@@ -96,33 +96,27 @@ function ImageUploader({ currentUrl, onUploaded }) {
 }
 
 // ─── Badge Form Modal ─────────────────────────────────────────────────────────
+// adminClubIds is guaranteed to be non-empty when this modal is opened
+// (the parent waits for bootstrap to complete before enabling the button).
 function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, onSave, onClose }) {
   const isEdit = !!badge?.id;
 
-  // Non-superadmin can only create club-scoped badges
   const defaultScope  = isSuperAdmin ? 'global' : 'club';
-  const defaultClubId = !isSuperAdmin && adminClubIds.length === 1 ? adminClubIds[0] : null;
+  // Always pre-fill clubId when there is exactly one club available
+  const defaultClubId = !isSuperAdmin && adminClubIds.length >= 1 ? adminClubIds[0] : null;
 
-  const [form, setForm] = useState(badge
-    ? { ...EMPTY_BADGE, ...badge }
-    : { ...EMPTY_BADGE, scope: defaultScope, clubId: defaultClubId, type: 'manual' }
-  );
+  const [form, setForm] = useState(() => {
+    if (badge) return { ...EMPTY_BADGE, ...badge };
+    return { ...EMPTY_BADGE, scope: defaultScope, clubId: defaultClubId, type: 'manual' };
+  });
 
-  // Auto-fill clubId whenever adminClubIds resolves to exactly one club
-  // (handles the case where props arrive after initial render)
-  useEffect(() => {
-    if (!isSuperAdmin && adminClubIds.length === 1) {
-      setForm(f => f.clubId ? f : { ...f, clubId: adminClubIds[0] });
-    }
-  }, [adminClubIds, isSuperAdmin]);
-  
   const [triggerKind, setTriggerKind] = useState(detectTriggerKind(badge?.trigger));
   const [tv, setTv] = useState({
-    discipline:      badge?.trigger?.discipline      || 'any',
-    sessionType:     badge?.trigger?.sessionType     || 'any',
-    minScore:        badge?.trigger?.minScore        ?? '',
-    totalSessions:   badge?.trigger?.totalSessions   ?? '',
-    consecutiveWeeks:badge?.trigger?.consecutiveWeeks?? '',
+    discipline:       badge?.trigger?.discipline       || 'any',
+    sessionType:      badge?.trigger?.sessionType      || 'any',
+    minScore:         badge?.trigger?.minScore         ?? '',
+    totalSessions:    badge?.trigger?.totalSessions    ?? '',
+    consecutiveWeeks: badge?.trigger?.consecutiveWeeks ?? '',
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -138,7 +132,7 @@ function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, onSave, onCl
     finally { setSaving(false); }
   };
 
-  // Clubs available for scoping — superadmin sees all, clubadmin sees only their clubs
+  // Clubs available for scoping
   const availableClubs = isSuperAdmin ? clubs : clubs.filter(c => adminClubIds.includes(c.id));
 
   return (
@@ -205,14 +199,23 @@ function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, onSave, onCl
           )}
         </div>
 
+        {/* Only show club selector when there are multiple clubs to choose from */}
         {(form.scope === 'club' || !isSuperAdmin) && availableClubs.length > 1 && (
           <>
             <label style={s.fieldLabel}>Club</label>
-              <select style={{ ...s.input, marginBottom: '12px' }} value={form.clubId || ''} onChange={e => set('clubId', e.target.value || null)}>
-                <option value="">-- Kies club --</option>
-                {availableClubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <select style={{ ...s.input, marginBottom: '12px' }} value={form.clubId || ''} onChange={e => set('clubId', e.target.value || null)}>
+              <option value="">-- Kies club --</option>
+              {availableClubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </>
+        )}
+
+        {/* Show which club the badge will be linked to (read-only, single club) */}
+        {!isSuperAdmin && availableClubs.length === 1 && (
+          <div style={{ marginBottom: '12px', padding: '8px 12px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #334155', fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Building2 size={12} color="#475569" />
+            Club: <span style={{ color: '#94a3b8', fontWeight: '600' }}>{availableClubs[0].name}</span>
+          </div>
         )}
 
         {form.type === 'automatic' && (
@@ -344,87 +347,92 @@ function AwardBadgeModal({ member, clubId, adminName, onClose }) {
 // ════════════════════════════════════════════════════════════════════════════
 export default function BadgeBeheerPage() {
   const { uid, loading: authLoading } = useAuth();
-  const [currentUser, setCurrentUser] = useState(null);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [adminClubs,   setAdminClubs]   = useState([]); // clubs this user admins
-  const [allClubs,     setAllClubs]     = useState([]);
-  const [activeTab,    setActiveTab]    = useState('badges');
+  const [currentUser,    setCurrentUser]    = useState(null);
+  const [isSuperAdmin,   setIsSuperAdmin]   = useState(false);
+  const [adminClubs,     setAdminClubs]     = useState([]);
+  const [allClubs,       setAllClubs]       = useState([]);
+  const [activeTab,      setActiveTab]      = useState('badges');
+  // bootstrapDone prevents rendering the page (and opening the modal) before
+  // adminClubs has been resolved — this is the key fix.
+  const [bootstrapDone,  setBootstrapDone]  = useState(false);
 
   // Badge management
-  const [badges,       setBadges]       = useState([]);
-  const [badgeFilter,  setBadgeFilter]  = useState('all');
+  const [badges,          setBadges]          = useState([]);
+  const [badgeFilter,     setBadgeFilter]     = useState('all');
   const [isBadgeFormOpen, setIsBadgeFormOpen] = useState(false);
-  const [editingBadge, setEditingBadge] = useState(null);
+  const [editingBadge,    setEditingBadge]    = useState(null);
 
   // Award tab
-  const [selectedClubId, setSelectedClubId]   = useState('');
-  const [groups,         setGroups]           = useState([]);
-  const [selectedGroupId,setSelectedGroupId]  = useState('');
-  const [groupMembers,   setGroupMembers]      = useState([]);
-  const [clubMembers,    setClubMembers]       = useState([]);
-  const [awardTarget,    setAwardTarget]       = useState(null);
-  const [memberSearch,   setMemberSearch]      = useState('');
+  const [selectedClubId,  setSelectedClubId]  = useState('');
+  const [groups,          setGroups]          = useState([]);
+  const [selectedGroupId, setSelectedGroupId] = useState('');
+  const [groupMembers,    setGroupMembers]    = useState([]);
+  const [clubMembers,     setClubMembers]     = useState([]);
+  const [awardTarget,     setAwardTarget]     = useState(null);
+  const [memberSearch,    setMemberSearch]    = useState('');
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (authLoading || !uid) return;
 
+    // Helper: find all clubs where uid is a coach in at least one group
+    const findCoachClubs = (allClubs, onDone) => {
+      const found = [];
+      let pending = allClubs.length;
+      if (pending === 0) { onDone(found); return; }
+      allClubs.forEach(club => {
+        GroupFactory.getGroupsByClub(club.id, groups => {
+          let gPending = groups.length;
+          if (gPending === 0) { if (--pending === 0) onDone(found); return; }
+          groups.forEach(group => {
+            GroupFactory.getMembersByGroup(club.id, group.id, mems => {
+              const isCoach = mems.some(m => (m.memberId || m.id) === uid && m.isCoach);
+              if (isCoach && !found.find(c => c.id === club.id)) found.push(club);
+              if (--gPending === 0 && --pending === 0) onDone(found);
+            });
+          });
+        });
+      });
+    };
+
     UserFactory.get(uid).then(snap => {
-      if (!snap.exists()) return;
+      if (!snap.exists()) { setBootstrapDone(true); return; }
       const user = { id: uid, ...snap.data() };
       setCurrentUser(user);
       const role = user.role || 'user';
 
       if (role === 'superadmin') {
         setIsSuperAdmin(true);
-        ClubFactory.getAll(clubs => { setAllClubs(clubs); setAdminClubs(clubs); });
+        ClubFactory.getAll(clubs => {
+          setAllClubs(clubs);
+          setAdminClubs(clubs);
+          setBootstrapDone(true);
+        });
       } else if (role === 'clubadmin') {
         ClubFactory.getAll(allClubs => {
           setAllClubs(allClubs);
-          // Find clubs where user is a coach
-          let found = [];
-          let pending = allClubs.length;
-          if (pending === 0) { setAdminClubs([]); return; }
-          allClubs.forEach(club => {
-            GroupFactory.getGroupsByClub(club.id, groups => {
-              let gPending = groups.length;
-              if (gPending === 0) { if (--pending === 0) setAdminClubs(found); return; }
-              groups.forEach(group => {
-                GroupFactory.getMembersByGroup(club.id, group.id, mems => {
-                  const isCoach = mems.some(m => (m.memberId || m.id) === uid && m.isCoach);
-                  if (isCoach && !found.find(c => c.id === club.id)) found = [...found, club];
-                  if (--gPending === 0 && --pending === 0) setAdminClubs(found);
-                });
-              });
-            });
+          // clubadmin has access to all clubs they are linked to as a coach
+          findCoachClubs(allClubs, found => {
+            // If no coach groups found, fall back to all clubs
+            // (clubadmin role itself grants access)
+            setAdminClubs(found.length > 0 ? found : allClubs);
+            setBootstrapDone(true);
           });
         });
       } else {
-         // Regular user — check if they are a coach in any group
-         ClubFactory.getAll(allClubs => {
-           setAllClubs(allClubs);
-           const found = [];
-           let pending = allClubs.length;
-           if (pending === 0) { setAdminClubs([]); return; }
-           allClubs.forEach(club => {
-             GroupFactory.getGroupsByClub(club.id, groups => {
-               let gPending = groups.length;
-               if (gPending === 0) { if (--pending === 0) setAdminClubs(found); return; }
-               groups.forEach(group => {
-                 GroupFactory.getMembersByGroup(club.id, group.id, mems => {
-                   const isCoach = mems.some(m => (m.memberId || m.id) === uid && m.isCoach);
-                   if (isCoach && !found.find(c => c.id === club.id)) found.push(club);
-                   if (--gPending === 0 && --pending === 0) setAdminClubs(found);
-                 });
-               });
-             });
-           });
-         });      
-       }
+        // Regular user — only gets access if they are a coach in a group
+        ClubFactory.getAll(allClubs => {
+          setAllClubs(allClubs);
+          findCoachClubs(allClubs, found => {
+            setAdminClubs(found);
+            setBootstrapDone(true);
+          });
+        });
+      }
     });
   }, [uid, authLoading]);
 
-  // Auto-select club if only one admin club
+  // Auto-select club for the Award tab if there's only one
   useEffect(() => {
     if (adminClubs.length === 1 && !selectedClubId) {
       setSelectedClubId(adminClubs[0].id);
@@ -436,7 +444,6 @@ export default function BadgeBeheerPage() {
     if (!adminClubs.length) return;
     const adminClubIds = adminClubs.map(c => c.id);
     const u = BadgeFactory.getAll(all => {
-      // Superadmin sees all; clubadmin sees global + their club badges
       const visible = isSuperAdmin
         ? all
         : all.filter(b => b.scope === 'global' || adminClubIds.includes(b.clubId));
@@ -454,7 +461,7 @@ export default function BadgeBeheerPage() {
 
   useEffect(() => {
     if (!selectedClubId || !selectedGroupId) return;
-    const u = GroupFactory.getMembersByGroup(selectedClubId, selectedGroupId, setGroupMembers);
+    const u  = GroupFactory.getMembersByGroup(selectedClubId, selectedGroupId, setGroupMembers);
     const u2 = ClubMemberFactory.getAll(selectedClubId, setClubMembers);
     return () => { u(); u2(); };
   }, [selectedClubId, selectedGroupId]);
@@ -477,24 +484,25 @@ export default function BadgeBeheerPage() {
     return true;
   });
 
-  const getMemberProfile = (memberId) => clubMembers.find(m => m.id === memberId);
-
   const filteredMembers = clubMembers.filter(m =>
     `${m.firstName} ${m.lastName}`.toLowerCase().includes(memberSearch.toLowerCase())
   );
 
-  // ── Guard ──────────────────────────────────────────────────────────────────
-  if (authLoading) return (
+  // ── Guards ─────────────────────────────────────────────────────────────────
+  // Show spinner while auth or bootstrap is in progress
+  if (authLoading || !bootstrapDone) return (
     <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <style>{pageCSS}</style>
       <div style={s.spinner} />
     </div>
   );
 
-  const hasAccess = currentUser?.role === 'clubadmin' 
-    || currentUser?.role === 'superadmin' 
+  // After bootstrap, deny access if no admin clubs found and not a named admin role
+  const hasAccess = isSuperAdmin
+    || currentUser?.role === 'clubadmin'
     || adminClubs.length > 0;
-  if (!hasAccess && currentUser) return (
+
+  if (!hasAccess) return (
     <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px', fontFamily: 'system-ui,sans-serif' }}>
       <Award size={40} color="#334155" />
       <p style={{ color: '#ef4444', fontSize: '16px', fontWeight: '700' }}>Geen toegang</p>
@@ -503,8 +511,8 @@ export default function BadgeBeheerPage() {
   );
 
   const tabs = [
-    { key: 'badges',  label: 'Badges beheren', icon: Medal },
-    { key: 'uitreiken', label: 'Uitreiken',     icon: Award },
+    { key: 'badges',    label: 'Badges beheren', icon: Medal },
+    { key: 'uitreiken', label: 'Uitreiken',       icon: Award },
   ];
 
   return (
@@ -610,7 +618,6 @@ export default function BadgeBeheerPage() {
                         </div>
                       )}
                       <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
-                        {/* Only allow editing non-global badges for clubadmin */}
                         {(isSuperAdmin || badge.scope !== 'global') && (
                           <button onClick={() => { setEditingBadge(badge); setIsBadgeFormOpen(true); }} style={{ ...bs.ghost, flex: 1, justifyContent: 'center' }}>
                             <Edit2 size={12} /> Bewerk
@@ -643,7 +650,6 @@ export default function BadgeBeheerPage() {
               Kies een club, groep en lid om een manuele badge uit te reiken.
             </p>
 
-            {/* Club selector — only when >1 admin club */}
             {adminClubs.length > 1 && (
               <div style={{ marginBottom: '14px' }}>
                 <label style={s.fieldLabel}><Building2 size={12} style={{ verticalAlign: 'middle', marginRight: '5px' }} />Club</label>
@@ -657,7 +663,7 @@ export default function BadgeBeheerPage() {
             {selectedClubId && (
               <div style={{ marginBottom: '14px' }}>
                 <label style={s.fieldLabel}><Users size={12} style={{ verticalAlign: 'middle', marginRight: '5px' }} />Groep (optioneel)</label>
-                <select style={s.select} value={selectedGroupId} onChange={e => { setSelectedGroupId(e.target.value); }}>
+                <select style={s.select} value={selectedGroupId} onChange={e => setSelectedGroupId(e.target.value)}>
                   <option value="">-- Alle leden --</option>
                   {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                 </select>
@@ -681,11 +687,8 @@ export default function BadgeBeheerPage() {
                     {filteredMembers.map(member => {
                       const initials = `${member.firstName?.[0] || '?'}${member.lastName?.[0] || ''}`.toUpperCase();
                       return (
-                        <div
-                          key={member.id}
-                          onClick={() => setAwardTarget(member)}
-                          style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', transition: 'border-color 0.15s' }}
-                        >
+                        <div key={member.id} onClick={() => setAwardTarget(member)}
+                          style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
                           <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#f59e0b22', border: '1px solid #f59e0b44', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '13px', color: '#fbbf24', flexShrink: 0 }}>
                             {initials}
                           </div>
@@ -751,15 +754,15 @@ const bs = {
 };
 
 const s = {
-  page:       { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif' },
-  spinner:    { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #a78bfa', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
-  header:     { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 50 },
-  content:    { maxWidth: '800px', margin: '0 auto', padding: '20px 16px 40px' },
+  page:         { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif' },
+  spinner:      { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #a78bfa', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
+  header:       { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 50 },
+  content:      { maxWidth: '800px', margin: '0 auto', padding: '20px 16px 40px' },
   modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 500 },
-  modal:      { backgroundColor: '#1e293b', borderRadius: '20px 20px 0 0', padding: '24px', width: '100%', maxWidth: '560px', border: '1px solid #334155', maxHeight: '90vh', overflowY: 'auto' },
-  modalHeader:{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', color: '#f1f5f9' },
-  iconBtn:    { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center' },
-  fieldLabel: { display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: '600' },
-  input:      { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px' },
-  select:     { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px' },
+  modal:        { backgroundColor: '#1e293b', borderRadius: '20px 20px 0 0', padding: '24px', width: '100%', maxWidth: '560px', border: '1px solid #334155', maxHeight: '90vh', overflowY: 'auto' },
+  modalHeader:  { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', color: '#f1f5f9' },
+  iconBtn:      { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center' },
+  fieldLabel:   { display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: '600' },
+  input:        { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px' },
+  select:       { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px' },
 };
