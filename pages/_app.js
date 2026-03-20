@@ -82,14 +82,57 @@ function AppShell({ Component, pageProps }) {
   }, [uid, hasMembership, userRole, router.pathname]);
 
   // coachView
-  useEffect(() => {
-    const stored = sessionStorage.getItem(VIEW_MODE_KEY);
-    if (stored) setCoachView(stored === 'coach');
-    const handler = (e) => { if (e.key === VIEW_MODE_KEY) setCoachView(e.newValue === 'coach'); };
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, []);
+useEffect(() => {
+  const stored = sessionStorage.getItem(VIEW_MODE_KEY);
+  if (stored) setCoachView(stored === 'coach');
+  const handler = (e) => { if (e.key === VIEW_MODE_KEY) setCoachView(e.newValue === 'coach'); };
+  window.addEventListener('storage', handler);
+  return () => window.removeEventListener('storage', handler);
+}, []);
 
+// Auto-detect coach status — set coachView true if user is a coach in any group.
+// This ensures the badge-beheer and other coach nav items appear without
+// requiring the user to manually toggle the coach/skipper switch.
+useEffect(() => {
+  if (!uid || !hasMembership) return;
+  let cancelled = false;
+
+  const check = async () => {
+    try {
+      const links = await new Promise(resolve => {
+        const unsub = UserMemberLinkFactory.getForUser(uid, (profiles) => {
+          unsub();
+          resolve(profiles);
+        });
+      });
+
+      const clubIds = [...new Set(links.map(p => p.member.clubId))];
+
+      for (const clubId of clubIds) {
+        const groups = await GroupFactory.getGroupsByClubOnce(clubId);
+        for (const group of groups) {
+          const members = await GroupFactory.getMembersByGroupOnce(clubId, group.id);
+          const me = members.find(m => (m.memberId || m.id) === links.find(l => l.member.clubId === clubId)?.member.id);
+          if (me?.isCoach) {
+            if (!cancelled) {
+              setCoachView(true);
+              // Only set sessionStorage if the user hasn't explicitly chosen 'skipper'
+              if (!sessionStorage.getItem(VIEW_MODE_KEY)) {
+                sessionStorage.setItem(VIEW_MODE_KEY, 'coach');
+              }
+            }
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Coach auto-detect error:', e);
+    }
+  };
+
+  check();
+  return () => { cancelled = true; };
+}, [uid, hasMembership]);
   // Announcement unread count — only factories, no direct Firestore imports
   useEffect(() => {
     if (!uid || !AuthFactory.isEmailVerified()) return;
