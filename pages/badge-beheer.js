@@ -407,8 +407,7 @@ export default function BadgeBeheerPage() {
           }
         }
         return found;
-      }
-    };
+    }
 
     UserFactory.get(uid).then(snap => {
       if (!snap.exists()) { setBootstrapDone(true); return; }
