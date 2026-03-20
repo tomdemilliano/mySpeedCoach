@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  BadgeFactory, ClubFactory, GroupFactory, ClubMemberFactory, UserFactory,
+  BadgeFactory, ClubFactory, GroupFactory, ClubMemberFactory, UserFactory, UserMemberLinkFactory
 } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
