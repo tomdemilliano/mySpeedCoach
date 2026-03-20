@@ -470,6 +470,245 @@ function SkipperCard({
   );
 }
 
+// ─── Relay Total Card ─────────────────────────────────────────────────────────
+// Shown above all skipper cards in team monitoring mode.
+// Shows total steps, progress through skippers, and current skipper's BPM.
+function RelayTotalCard({ totalSteps, currentSkipperIndex, skipperCount, isActive, isFinished, currentBpm, currentSkipperName, isMobile }) {
+  const bpmColor = getZoneColor(currentBpm, DEFAULT_ZONES);
+  const progress = skipperCount > 0 ? ((currentSkipperIndex + (isFinished ? 1 : 0)) / skipperCount) : 0;
+
+  return (
+    <div style={{
+      backgroundColor: '#1e293b', borderRadius: '14px', padding: '16px 20px',
+      border: `2px solid ${isFinished ? '#22c55e44' : '#3b82f644'}`,
+      background: isFinished
+        ? 'linear-gradient(135deg, #052e1622 0%, #1e293b 100%)'
+        : 'linear-gradient(135deg, #1e3a5f22 0%, #1e293b 100%)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '20px' }}>
+        {/* Left: total steps */}
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: isFinished ? '#22c55e' : '#3b82f6', display: 'inline-block' }} />
+            {isFinished ? 'EINDRESULTAAT' : 'TEAMTOTAAL RELAY'}
+          </div>
+          <div style={{ fontSize: isMobile ? '48px' : '60px', fontWeight: '900', lineHeight: 1, color: isFinished ? '#22c55e' : '#f1f5f9', letterSpacing: '-1px' }}>
+            {totalSteps}
+          </div>
+          <div style={{ fontSize: '12px', color: '#475569', marginTop: '3px' }}>stappen</div>
+        </div>
+
+        {/* Right: current skipper BPM */}
+        {!isFinished && currentBpm > 0 && (
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+              {currentSkipperName?.split(' ')[0] || '—'}
+            </div>
+            <div style={{ fontSize: isMobile ? '28px' : '36px', fontWeight: '900', color: bpmColor, lineHeight: 1, fontFamily: 'monospace' }}>
+              {currentBpm}
+            </div>
+            <div style={{ fontSize: '10px', color: bpmColor, marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '3px' }}>
+              <Heart size={9} fill={bpmColor} color={bpmColor} /> BPM
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Progress bar */}
+      <div style={{ marginTop: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+          <span style={{ fontSize: '10px', color: '#475569' }}>
+            {isFinished ? 'Alle skippers klaar' : `Skipper ${currentSkipperIndex + 1} van ${skipperCount}`}
+          </span>
+          <span style={{ fontSize: '10px', color: isFinished ? '#22c55e' : '#60a5fa', fontWeight: '700' }}>
+            {Math.round(progress * 100)}%
+          </span>
+        </div>
+        <div style={{ height: '6px', backgroundColor: '#0f172a', borderRadius: '3px', overflow: 'hidden' }}>
+          <div style={{
+            height: '100%', borderRadius: '3px',
+            backgroundColor: isFinished ? '#22c55e' : '#3b82f6',
+            width: `${Math.round(progress * 100)}%`,
+            transition: 'width 0.5s ease',
+          }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Relay Skipper Card ───────────────────────────────────────────────────────
+// Used in team relay monitoring. Current skipper is prominent with full chart;
+// done/pending skippers are compact and dimmed.
+function RelaySkipperCard({
+  idx, name, member, uid, liveData, history, personalBest,
+  ghostCurve, showGhost, onToggleGhost, buildChartData,
+  result, isCurrent, isDone, isPending, isMobile,
+}) {
+  const currentBpm    = liveData?.bpm || 0;
+  const bpmColor      = getZoneColor(currentBpm, DEFAULT_ZONES);
+  const steps         = result?.steps ?? liveData?.session?.steps ?? 0;
+  const displayName   = name || (member ? `${member.firstName} ${member.lastName}`.trim() : `Skipper ${idx + 1}`);
+  const firstName     = displayName.split(' ')[0];
+  const initials      = member
+    ? `${member.firstName?.[0] || '?'}${member.lastName?.[0] || ''}`.toUpperCase()
+    : displayName.substring(0, 2).toUpperCase();
+
+  const ghostVisible  = showGhost && ghostCurve && Object.keys(ghostCurve).length > 0;
+  const chartData     = uid ? buildChartData(uid) : [];
+  const pb            = personalBest;
+  const disciplineDuration = DISCIPLINE_DURATION[liveData?.session?.discipline] || 30;
+
+  // ── Compact card for done/pending skippers ──────────────────────────────
+  if (isDone || isPending) {
+    return (
+      <div style={{
+        backgroundColor: '#1e293b', borderRadius: '12px', padding: '12px 14px',
+        border: `1px solid ${isDone ? '#22c55e22' : '#1e293b'}`,
+        opacity: isPending ? 0.45 : 1,
+        display: 'flex', alignItems: 'center', gap: '12px',
+      }}>
+        {/* Position badge */}
+        <div style={{
+          width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0,
+          backgroundColor: isDone ? '#22c55e22' : '#0f172a',
+          border: `1.5px solid ${isDone ? '#22c55e55' : '#334155'}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '11px', fontWeight: '700', color: isDone ? '#22c55e' : '#475569',
+        }}>
+          {isDone ? '✓' : idx + 1}
+        </div>
+
+        {/* Avatar */}
+        <div style={{
+          width: '36px', height: '36px', borderRadius: '50%', flexShrink: 0,
+          backgroundColor: isDone ? '#22c55e22' : '#334155',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '12px', fontWeight: '700', color: isDone ? '#22c55e' : '#64748b',
+        }}>
+          {initials}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: '600', fontSize: '14px', color: isDone ? '#94a3b8' : '#475569', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {displayName}
+          </div>
+          <div style={{ fontSize: '11px', color: '#334155', marginTop: '1px' }}>
+            {isPending ? 'Wacht...' : ''}
+          </div>
+        </div>
+
+        {/* Steps result */}
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{ fontSize: '22px', fontWeight: '900', color: isDone ? '#22c55e' : '#334155', lineHeight: 1 }}>
+            {isDone ? steps : '—'}
+          </div>
+          <div style={{ fontSize: '9px', color: '#334155' }}>stappen</div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Full expanded card for current skipper ──────────────────────────────
+  const session    = liveData?.session || {};
+  const hist       = history || [];
+  const latestPoint = hist[hist.length - 1] || {};
+  const currentTempo = latestPoint.tempo || 0;
+
+  return (
+    <div style={{
+      backgroundColor: '#1e293b', borderRadius: '14px', padding: '16px',
+      border: '2px solid #3b82f6',
+      boxShadow: '0 0 0 1px #3b82f622, 0 4px 24px #3b82f614',
+    }}>
+      {/* Active badge */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <span style={{ fontSize: '11px', fontWeight: '700', color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6', display: 'inline-block', animation: 'pulse 1.2s infinite' }} />
+          NU AAN HET SPRINGEN
+        </span>
+        <span style={{ fontSize: '11px', color: '#475569' }}>#{idx + 1}</span>
+      </div>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+        <div style={{ width: '44px', height: '44px', borderRadius: '50%', backgroundColor: bpmColor + '33', border: `2px solid ${bpmColor}66`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: '700', flexShrink: 0 }}>
+          {initials}
+        </div>
+        <div>
+          <div style={{ fontWeight: '800', fontSize: isMobile ? '18px' : '20px' }}>{displayName}</div>
+          {pb && <div style={{ fontSize: '11px', color: '#a78bfa', display: 'flex', alignItems: 'center', gap: '3px' }}><Trophy size={10} color="#a78bfa" /> PB {pb.score} stps</div>}
+        </div>
+      </div>
+
+      {/* Stats row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', marginBottom: '12px' }}>
+        <div style={css.statBox}>
+          <div style={css.statLabel}><Heart size={10} fill={bpmColor} color={bpmColor} /> Hartslag</div>
+          <div style={{ ...css.statValue, color: bpmColor, fontSize: isMobile ? '20px' : '24px' }}>{currentBpm || '--'}</div>
+          <div style={{ fontSize: '9px', color: '#475569' }}>BPM</div>
+        </div>
+        <div style={css.statBox}>
+          <div style={css.statLabel}><Hash size={10} /> Stappen</div>
+          <div style={{ ...css.statValue, color: '#60a5fa', fontSize: isMobile ? '20px' : '24px' }}>{session.steps || 0}</div>
+          <div style={{ fontSize: '9px', color: '#475569' }}>totaal</div>
+        </div>
+        <div style={css.statBox}>
+          <div style={css.statLabel}><Zap size={10} color="#22c55e" /> Tempo</div>
+          <div style={{ ...css.statValue, color: '#22c55e', fontSize: isMobile ? '20px' : '24px' }}>{currentTempo || '--'}</div>
+          <div style={{ fontSize: '9px', color: '#475569' }}>stps/30s</div>
+        </div>
+      </div>
+
+      {/* Ghost toggle */}
+      {pb?.telemetry && Object.keys(ghostCurve || {}).length > 1 && (
+        <button
+          style={{ ...css.ghostToggle, backgroundColor: ghostVisible ? '#7c3aed22' : '#0f172a', borderColor: ghostVisible ? '#7c3aed' : '#334155', color: ghostVisible ? '#a78bfa' : '#475569' }}
+          onClick={onToggleGhost}
+        >
+          <Ghost size={12} />
+          {ghostVisible ? 'Ghost actief' : 'Ghost tonen'}
+          {ghostVisible && pb && <span style={{ fontSize: '10px', color: '#64748b', marginLeft: '4px' }}>({pb.score} stps)</span>}
+        </button>
+      )}
+
+      {/* Chart */}
+      <div style={{ height: isMobile ? '200px' : '220px', marginTop: '8px', backgroundColor: '#0f172a', borderRadius: '10px', padding: '8px 6px 4px' }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 2, right: 4, left: -16, bottom: 0 }}>
+            <CartesianGrid stroke="#1e293b" vertical={true} strokeDasharray="3 3" />
+            <XAxis dataKey="elapsed" stroke="#334155" fontSize={8} type="number" domain={[0, disciplineDuration]} tickCount={disciplineDuration <= 30 ? 5 : 7} tickFormatter={v => `${v}s`} allowDataOverflow />
+            <YAxis yAxisId="bpm" domain={[40, 210]} stroke="#475569" fontSize={8} tickCount={4} width={24} />
+            <YAxis yAxisId="steps" orientation="right" domain={[0, pb ? Math.max(pb.score + 10, (session.steps || 0) + 10) : 'auto']} stroke="#334155" fontSize={8} tickCount={4} width={26} />
+            <Tooltip content={<CustomTooltip />} />
+            {DEFAULT_ZONES.map(zone => (
+              <ReferenceArea key={zone.name} yAxisId="bpm" y1={zone.min} y2={Math.min(zone.max, 210)} fill={zone.color} fillOpacity={0.04} stroke="none" />
+            ))}
+            {ghostVisible && <Line yAxisId="steps" type="monotone" dataKey="ghostSteps" name="Ghost Stappen" stroke="#7c3aed" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls strokeDasharray="5 3" strokeOpacity={0.75} />}
+            <Line yAxisId="steps" type="monotone" dataKey="steps" name="Stappen" stroke="#60a5fa" strokeWidth={2.5} dot={false} isAnimationActive={false} connectNulls />
+            {ghostVisible && <Line yAxisId="bpm" type="monotone" dataKey="ghostBpm" name="Ghost BPM" stroke="#a78bfa" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls strokeDasharray="6 3" strokeOpacity={0.65} />}
+            <Line yAxisId="bpm" type="monotone" dataKey="bpm" name="Hartslag" stroke={bpmColor} strokeWidth={2.5} dot={false} isAnimationActive={false} connectNulls />
+            <Line yAxisId="steps" type="monotone" dataKey="tempo" name="Tempo/30s" stroke="#22c55e" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls strokeDasharray="3 3" strokeOpacity={0.7} />
+          </LineChart>
+        </ResponsiveContainer>
+        <div style={{ display: 'flex', gap: '8px', marginTop: '3px', flexWrap: 'wrap', paddingLeft: '2px' }}>
+          {[
+            { color: bpmColor,  label: 'BPM',     dash: false },
+            { color: '#60a5fa', label: 'Stappen',  dash: false },
+            { color: '#22c55e', label: 'Tempo',    dash: true  },
+            ...(ghostVisible ? [{ color: '#a78bfa', label: 'G.BPM', dash: true }, { color: '#7c3aed', label: 'G.Stps', dash: true }] : []),
+          ].map(item => (
+            <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '9px', color: '#64748b' }}>
+              <svg width="14" height="5"><line x1="0" y1="2.5" x2="14" y2="2.5" stroke={item.color} strokeWidth="2" strokeDasharray={item.dash ? '4 2' : 'none'} /></svg>
+              {item.label}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN DASHBOARD
 // ════════════════════════════════════════════════════════════════════════════
@@ -493,6 +732,11 @@ export default function Dashboard() {
 
   const [selectedSkipperMemberIds, setSelectedSkipperMemberIds] = useState([]);
   const [selectedSkipperUids,      setSelectedSkipperUids]      = useState([]);
+
+  // ── Team / relay monitoring ───────────────────────────────────────────────
+  // selectedTeam: null | { relayLeadUid, memberIds: [{memberId,name,uid}] }
+  const [selectedTeam,   setSelectedTeam]   = useState(null);
+  const [monitoringMode, setMonitoringMode] = useState('individual'); // 'individual' | 'team'
 
   const [liveSessions, setLiveSessions] = useState({});
   const liveRef = useRef({});
@@ -642,8 +886,12 @@ export default function Dashboard() {
 
   // ── RTDB live subscriptions ───────────────────────────────────────────────
   useEffect(() => {
-    if (selectedSkipperUids.length === 0) return;
-    const unsubs = selectedSkipperUids.map(uid =>
+    // Collect all UIDs to subscribe: individual skippers + team relay lead
+    const teamLeadUid = selectedTeam?.relayLeadUid || null;
+    const teamMemberUids = (selectedTeam?.memberIds || []).map(m => m.uid).filter(Boolean);
+    const allUids = [...new Set([...selectedSkipperUids, ...teamMemberUids, ...(teamLeadUid ? [teamLeadUid] : [])])];
+    if (allUids.length === 0) return;
+    const unsubs = allUids.map(uid =>
       LiveSessionFactory.subscribeToLive(uid, (data) => {
         if (!data) return;
         setLiveSessions(prev => ({ ...prev, [uid]: data }));
@@ -651,7 +899,7 @@ export default function Dashboard() {
       })
     );
     return () => unsubs.forEach(u => u && u());
-  }, [selectedSkipperUids]);
+  }, [selectedSkipperUids, selectedTeam]);
 
   // ── Personal best loader ──────────────────────────────────────────────────
   const loadPersonalBest = useCallback(async (uid, memberId, discipline, sessionType) => {
@@ -683,11 +931,13 @@ export default function Dashboard() {
   // ── Live history ticker ───────────────────────────────────────────────────
   const sessionStartRef = useRef({});
   useEffect(() => {
+    const teamMemberUids = (selectedTeam?.memberIds || []).map(m => m.uid).filter(Boolean);
+    const allUids = [...new Set([...selectedSkipperUids, ...teamMemberUids])];
     const interval = setInterval(() => {
       const now = Date.now();
       setHistory(prev => {
         const next = { ...prev };
-        selectedSkipperUids.forEach(uid => {
+        allUids.forEach(uid => {
           const liveData = liveRef.current[uid] || {};
           const session  = liveData.session;
           if (!session?.isActive && !session?.isFinished) return;
@@ -712,7 +962,7 @@ export default function Dashboard() {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [selectedSkipperUids]);
+  }, [selectedSkipperUids, selectedTeam]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const buildChartData = (uid) => {
@@ -729,7 +979,48 @@ export default function Dashboard() {
 
   const availableSkippers = groupMembers.filter(m => m.isSkipper === true);
 
+  // ── Detect active relay teams from live data ──────────────────────────────
+  // A relay team is active when any skipper's liveData has relaySession.isActive
+  // We group by the relaySession data itself (all members share the same lead uid)
+  const activeRelayTeams = (() => {
+    const teams = [];
+    const seenLeads = new Set();
+    availableSkippers.forEach(s => {
+      const memberId = s.memberId || s.id;
+      const uid      = memberUidMap[memberId] ?? null;
+      if (!uid) return;
+      const liveData     = liveSessions[uid];
+      const relaySession = liveData?.relaySession;
+      if (!relaySession?.isActive && !relaySession?.isFinished) return;
+      if (seenLeads.has(uid)) return;
+      seenLeads.add(uid);
+      // Build member list from results array in relaySession
+      const memberIds = (relaySession.results || []).map((r, idx) => {
+        // Try to match by name to a real memberId
+        const matched = availableSkippers.find(sk => {
+          const m  = getMember(sk.memberId || sk.id);
+          return m && `${m.firstName} ${m.lastName}`.trim() === r.name;
+        });
+        const mId  = matched ? (matched.memberId || matched.id) : null;
+        const mUid = mId ? (memberUidMap[mId] ?? null) : null;
+        return { memberId: mId, name: r.name || `Skipper ${idx + 1}`, uid: mUid };
+      });
+      teams.push({ relayLeadUid: uid, relaySession, memberIds });
+    });
+    return teams;
+  })();
+
+  const selectTeam = (team) => {
+    setSelectedTeam(team);
+    setSelectedSkipperMemberIds([]);
+    setSelectedSkipperUids([]);
+    setMonitoringMode('team');
+  };
+
   const toggleSkipper = (memberId) => {
+    // Selecting an individual skipper clears any team selection
+    setSelectedTeam(null);
+    setMonitoringMode('individual');
     const uid = memberUidMap[memberId] ?? null;
     const alreadySelected = selectedSkipperMemberIds.includes(memberId);
     if (alreadySelected) {
@@ -744,7 +1035,7 @@ export default function Dashboard() {
 
   const showClubPicker  = memberClubs.length > 1;
   const showGroupPicker = memberGroups.length > 1;
-  const canStartMonitoring = selectedSkipperMemberIds.length > 0;
+  const canStartMonitoring = selectedSkipperMemberIds.length > 0 || selectedTeam !== null;
 
   // ── Guards ────────────────────────────────────────────────────────────────
   if (!bootstrapDone) return (
@@ -765,6 +1056,96 @@ export default function Dashboard() {
 
   // ── Monitoring view ───────────────────────────────────────────────────────
   if (view === 'monitoring') {
+
+    // ── TEAM RELAY MONITORING ────────────────────────────────────────────────
+    if (monitoringMode === 'team' && selectedTeam) {
+      const { relayLeadUid, memberIds } = selectedTeam;
+      // Always read live relay session from RTDB (updates in real-time)
+      const liveRelaySession = liveSessions[relayLeadUid]?.relaySession || selectedTeam.relaySession || {};
+      const {
+        totalSteps          = 0,
+        currentSkipperIndex = 0,
+        currentSkipperName  = '—',
+        skipperCount        = memberIds.length,
+        results             = [],
+        isFinished          = false,
+        isActive            = false,
+      } = liveRelaySession;
+      const leadBpm = liveSessions[relayLeadUid]?.bpm || 0;
+
+      // Current skipper's uid (for BPM)
+      const currentMember = memberIds[currentSkipperIndex] || memberIds[0] || null;
+      const currentUid    = currentMember?.uid || null;
+      const currentBpm    = currentUid ? (liveSessions[currentUid]?.bpm || leadBpm) : leadBpm;
+
+      return (
+        <div style={css.page}>
+          <style>{responsiveCSS}</style>
+          <div style={css.header}>
+            <button style={css.backBtn} onClick={() => setView('selection')}>
+              <ArrowLeft size={15} /> {isMobile ? 'Terug' : 'Wijzig selectie'}
+            </button>
+            <h1 style={{ margin: 0, fontSize: isMobile ? '14px' : '18px', fontWeight: '800', color: '#f1f5f9', textAlign: 'center' }}>
+              TEAM RELAY LIVE
+            </h1>
+            <div style={{ fontSize: '11px', color: '#475569', textAlign: 'right', display: isMobile ? 'none' : 'block' }}>
+              {selectedClub?.name} · {selectedGroup?.name}
+            </div>
+          </div>
+
+          <div style={{ padding: isMobile ? '10px' : '16px', display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '700px', margin: '0 auto', paddingBottom: '32px' }}>
+
+            {/* ── TOTAL STEPS CARD (above all skipper cards) ── */}
+            <RelayTotalCard
+              totalSteps={totalSteps}
+              currentSkipperIndex={currentSkipperIndex}
+              skipperCount={skipperCount}
+              isActive={isActive}
+              isFinished={isFinished}
+              currentBpm={currentBpm}
+              currentSkipperName={currentSkipperName}
+              isMobile={isMobile}
+            />
+
+            {/* ── PER-SKIPPER CARDS ── */}
+            {memberIds.map((m, idx) => {
+              const isCurrent = idx === currentSkipperIndex && !isFinished;
+              const isDone    = isFinished || idx < currentSkipperIndex;
+              const isPending = !isCurrent && !isDone;
+              const uid       = m.uid;
+              const member    = m.memberId ? getMember(m.memberId) : null;
+              const result    = results[idx] || {};
+              const bpm       = uid ? (liveSessions[uid]?.bpm || 0) : 0;
+              const bpmColor  = getZoneColor(bpm, DEFAULT_ZONES);
+
+              return (
+                <RelaySkipperCard
+                  key={idx}
+                  idx={idx}
+                  name={m.name}
+                  member={member}
+                  uid={uid}
+                  liveData={uid ? (liveSessions[uid] || {}) : {}}
+                  history={uid ? (history[uid] || []) : []}
+                  personalBest={uid ? (personalBests[uid] || null) : null}
+                  ghostCurve={uid ? (ghostCurves[uid] || {}) : {}}
+                  showGhost={uid ? (showGhost[uid] || false) : false}
+                  onToggleGhost={() => uid && setShowGhost(prev => ({ ...prev, [uid]: !prev[uid] }))}
+                  buildChartData={buildChartData}
+                  result={result}
+                  isCurrent={isCurrent}
+                  isDone={isDone}
+                  isPending={isPending}
+                  isMobile={isMobile}
+                />
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    // ── INDIVIDUAL MONITORING ────────────────────────────────────────────────
     const monitoredSkippers = selectedSkipperMemberIds.map(memberId => ({
       memberId,
       uid:    memberUidMap[memberId] ?? null,
@@ -884,7 +1265,66 @@ export default function Dashboard() {
 
         {selectedClubId && selectedGroupId && (
           <div style={css.field}>
-            <label style={css.label}><Trophy size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />Skippers ({selectedSkipperMemberIds.length}/4)</label>
+
+            {/* ── Active relay teams ── */}
+            {activeRelayTeams.length > 0 && (
+              <div style={{ marginBottom: '28px' }}>
+                <label style={css.label}>
+                  <SkipForward size={14} style={{ verticalAlign: 'middle', marginRight: '6px', color: '#3b82f6' }} />
+                  Actieve teams
+                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {activeRelayTeams.map((team, i) => {
+                    const rs = team.relaySession;
+                    const isSelected = selectedTeam?.relayLeadUid === team.relayLeadUid;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => isSelected ? (setSelectedTeam(null), setMonitoringMode('individual')) : selectTeam(team)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '12px',
+                          padding: '12px 14px', borderRadius: '12px', cursor: 'pointer',
+                          border: `2px solid ${isSelected ? '#3b82f6' : '#1e293b'}`,
+                          backgroundColor: isSelected ? '#1e3a5f' : '#1e293b',
+                          color: 'white', textAlign: 'left', fontFamily: 'inherit',
+                          transition: 'border-color 0.15s, background-color 0.15s',
+                        }}
+                      >
+                        {isSelected && <CheckCircle2 size={18} color="#3b82f6" style={{ flexShrink: 0 }} />}
+                        {!isSelected && <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: '2px solid #334155', flexShrink: 0 }} />}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: '700', fontSize: '13px', marginBottom: '3px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ color: rs.isFinished ? '#22c55e' : '#60a5fa' }}>
+                              {rs.isFinished ? '✓' : '●'} {team.memberIds.map(m => m.name.split(' ')[0]).join(' · ')}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#64748b', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                            <span>{rs.skipperCount || team.memberIds.length} skippers</span>
+                            <span>Totaal: <strong style={{ color: '#22c55e' }}>{rs.totalSteps || 0}</strong> stps</span>
+                            {!rs.isFinished && <span>Nu: <strong style={{ color: '#60a5fa' }}>{rs.currentSkipperName?.split(' ')[0] || '—'}</strong></span>}
+                          </div>
+                        </div>
+                        <span style={{ fontSize: '11px', fontWeight: '700', color: isSelected ? '#3b82f6' : '#334155', flexShrink: 0 }}>
+                          {isSelected ? 'GESELECTEERD' : 'Selecteer'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ margin: '20px 0 0', borderTop: '1px solid #1e293b', paddingTop: '20px' }}>
+                  <label style={css.label}>
+                    <Trophy size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+                    Of selecteer individuele skippers ({selectedSkipperMemberIds.length}/4)
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* ── Individual skipper grid ── */}
+            {!activeRelayTeams.length && (
+              <label style={css.label}><Trophy size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />Skippers ({selectedSkipperMemberIds.length}/4)</label>
+            )}
+
             {availableSkippers.length > 0 ? (
               <div style={css.skipperGrid}>
                 {availableSkippers.map(s => {
@@ -921,7 +1361,9 @@ export default function Dashboard() {
 
             {canStartMonitoring && (
               <button onClick={() => { setExpandedSkipper(null); setView('monitoring'); }} style={{ ...css.primaryBtn, marginTop: '20px', width: '100%', padding: '14px' }}>
-                Start Monitoring ({selectedSkipperMemberIds.length} skipper{selectedSkipperMemberIds.length > 1 ? 's' : ''}) →
+                {monitoringMode === 'team'
+                  ? `Team monitoring starten →`
+                  : `Start Monitoring (${selectedSkipperMemberIds.length} skipper${selectedSkipperMemberIds.length > 1 ? 's' : ''}) →`}
               </button>
             )}
           </div>
@@ -935,6 +1377,7 @@ export default function Dashboard() {
 const responsiveCSS = `
   * { box-sizing: border-box; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 `;
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
