@@ -136,6 +136,93 @@ const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished, o
   );
 });
 
+// ─── Discipline Card Picker ───────────────────────────────────────────────────
+// Richer than plain buttons: each discipline shows its name, duration,
+// individual/team info, and any special rule. Groups SR and DD.
+function DisciplineCardPicker({ value, onChange, disciplines }) {
+  if (!disciplines || disciplines.length === 0) {
+    return (
+      <div style={{ display: 'flex', gap: '8px' }}>
+        {[1, 2, 3].map(i => (
+          <div key={i} style={{ flex: 1, height: '72px', backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #334155', opacity: 0.4 }} />
+        ))}
+      </div>
+    );
+  }
+
+  const srDiscs = disciplines.filter(d => d.ropeType === 'SR');
+  const ddDiscs = disciplines.filter(d => d.ropeType === 'DD');
+  const hasDD   = ddDiscs.length > 0;
+
+  const formatDur = (d) => {
+    if (!d.durationSeconds) return '∞';
+    if (d.durationSeconds < 60) return `${d.durationSeconds}s`;
+    return `${d.durationSeconds / 60}min`;
+  };
+
+  const specialIcon = (d) => {
+    if (d.specialRule === 'triple_under') return '⚡';
+    if (d.specialRule === 'relay')        return '🔄';
+    return null;
+  };
+
+  const renderCard = (disc) => {
+    const selected = value === disc.id;
+    const accent   = disc.ropeType === 'DD' ? '#a78bfa' : '#3b82f6';
+    const icon     = specialIcon(disc);
+    return (
+      <button
+        key={disc.id}
+        type="button"
+        onClick={() => onChange(disc.id)}
+        style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+          padding: '10px 12px', borderRadius: '10px', cursor: 'pointer',
+          fontFamily: 'inherit', textAlign: 'left', minWidth: 0,
+          border: `1.5px solid ${selected ? accent : '#334155'}`,
+          backgroundColor: selected ? `${accent}18` : '#1e293b',
+          transition: 'all 0.15s',
+          flex: '1 1 auto',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', width: '100%', marginBottom: '4px' }}>
+          {icon && <span style={{ fontSize: '12px' }}>{icon}</span>}
+          <span style={{ fontSize: '13px', fontWeight: selected ? '700' : '500', color: selected ? '#f1f5f9' : '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+            {disc.name}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '10px', fontWeight: '600', color: selected ? accent : '#475569', backgroundColor: selected ? `${accent}22` : '#0f172a', padding: '1px 5px', borderRadius: '4px', border: `1px solid ${selected ? `${accent}44` : '#334155'}` }}>
+            {formatDur(disc)}
+          </span>
+          <span style={{ fontSize: '10px', color: '#475569' }}>
+            {disc.isIndividual ? '👤' : `👥${disc.teamSize}`}
+          </span>
+        </div>
+      </button>
+    );
+  };
+
+  return (
+    <div>
+      {hasDD && srDiscs.length > 0 && (
+        <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>🪢 Single Rope</div>
+      )}
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: hasDD ? '10px' : '0' }}>
+        {srDiscs.map(renderCard)}
+      </div>
+      {hasDD && (
+        <>
+          <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px', marginTop: '4px' }}>🌀 Double Dutch</div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {ddDiscs.map(renderCard)}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Relay Skipper Order Picker ───────────────────────────────────────────────
 // Shown in the config modal for team/relay disciplines.
 // Allows dragging to reorder skippers before the session starts.
@@ -375,8 +462,9 @@ export default function CounterPage() {
   const [clubMembers, setClubMembers] = useState([]);
   const [selectedSkipper, setSelectedSkipper] = useState(null);
 
-  // ── Session config ────────────────────────────────────────────────────────
-  const [showConfigModal, setShowConfigModal] = useState(false);
+  // ── Session config — unified setup page ──────────────────────────────────
+  const [setupDone,       setSetupDone]       = useState(false);
+  const [selectedTeamOrder, setSelectedTeamOrder] = useState([]); // for relay: [{memberId,name}]
   const [sessionType,     setSessionType]     = useState('Training');
   const [disciplineId,    setDisciplineId]    = useState('');
 
@@ -416,6 +504,7 @@ export default function CounterPage() {
   const [relaySkipperStart,   setRelaySkipperStart]   = useState(null);
   const relayTimerRef = useRef(null);
   const relayCurrentStepsRef = useRef(0);
+  const relayLeadUidRef = useRef(null);  // uid of first skipper, used for RTDB relay sync
 
   const telemetryRef     = useRef([]);
   const sessionStartRef  = useRef(null);
@@ -602,24 +691,24 @@ export default function CounterPage() {
 
   // ── Relay: sync live state to RTDB so dashboard can read it ─────────────
   useEffect(() => {
-    if (sessionMode !== 'relay' || !selectedSkipper?.rtdbUid) return;
+    if (sessionMode !== 'relay') return;
     if (!relayIsActive && !relayIsFinished) return;
+    const rtdbUid = relayLeadUidRef.current;
+    if (!rtdbUid) return;
 
-    const { rtdbUid } = selectedSkipper;
     const currentItem = relayOrder[currentSkipperIndex];
     const total = relayResults.reduce((s, r) => s + (r.steps || 0), 0);
 
-    // Push relay snapshot to RTDB under the lead-skipper's uid
     import('../firebaseConfig').then(({ rtdb }) => {
       import('firebase/database').then(({ ref, update }) => {
         update(ref(rtdb, `live_sessions/${rtdbUid}/relaySession`), {
-          isActive:            relayIsActive,
-          isFinished:          relayIsFinished,
+          isActive:               relayIsActive,
+          isFinished:             relayIsFinished,
           currentSkipperIndex,
-          currentSkipperName:  currentItem?.name || '',
+          currentSkipperName:     currentItem?.name || '',
           currentSkipperMemberId: currentItem?.memberId || '',
-          totalSteps:          total,
-          skipperCount:        relayOrder.length,
+          totalSteps:             total,
+          skipperCount:           relayOrder.length,
           results: relayResults.map((r, i) => ({
             memberId: relayOrder[i]?.memberId || '',
             name:     relayOrder[i]?.name     || '',
@@ -631,18 +720,19 @@ export default function CounterPage() {
     });
   }, [relayResults, currentSkipperIndex, relayIsActive, relayIsFinished, sessionMode]);
 
-  // Clear relay session from RTDB when relay ends or is reset
+  // Clear relay session from RTDB on unmount/reset
   useEffect(() => {
-    if (sessionMode !== 'relay' || !selectedSkipper?.rtdbUid) return;
+    if (sessionMode !== 'relay') return;
     return () => {
-      // On unmount/reset: clear the relaySession node
+      const rtdbUid = relayLeadUidRef.current;
+      if (!rtdbUid) return;
       import('../firebaseConfig').then(({ rtdb }) => {
         import('firebase/database').then(({ ref, remove }) => {
-          remove(ref(rtdb, `live_sessions/${selectedSkipper.rtdbUid}/relaySession`)).catch(() => {});
+          remove(ref(rtdb, `live_sessions/${rtdbUid}/relaySession`)).catch(() => {});
         });
       });
     };
-  }, [selectedSkipper?.rtdbUid, sessionMode]);
+  }, [sessionMode]);
   useEffect(() => {
     if (tuMissCountdown === null) return;
     if (tuMissCountdown <= 0) {
@@ -686,31 +776,35 @@ export default function CounterPage() {
       setTuMissCountdown(null);
       setTuIsActive(true);
       setTuIsFinished(false);
-      setShowConfigModal(false);
+      setSetupDone(true);
       return;
     }
 
     if (sessionMode === 'relay') {
-      // Build relay order from selected skippers (default order)
-      const defaultOrder = skippers.map(s => {
+      const order = selectedTeamOrder.length > 0 ? selectedTeamOrder : skippers.map(s => {
         const memberId = s.memberId || s.id;
         const profile  = clubMembers.find(m => m.id === memberId);
         return { memberId, name: profile ? `${profile.firstName} ${profile.lastName}` : memberId };
       });
-      setRelayOrder(defaultOrder);
-      setRelayResults(new Array(defaultOrder.length).fill({ steps: 0 }));
+      setRelayOrder(order);
+      setRelayResults(new Array(order.length).fill({ steps: 0 }));
       setCurrentSkipperIndex(0);
       setRelayIsActive(false);
       setRelayIsFinished(false);
       setRelaySkipperStart(null);
-      setRelayWarning(false);
       relayCurrentStepsRef.current = 0;
-      setShowConfigModal(false);
+      // Resolve the lead skipper's uid for RTDB sync (use first in order)
+      if (order.length > 0) {
+        UserMemberLinkFactory.getUidForMember(selectedClubId, order[0].memberId)
+          .then(uid => { relayLeadUidRef.current = uid || null; })
+          .catch(() => { relayLeadUidRef.current = null; });
+      }
+      setSetupDone(true);
       return;
     }
 
     await LiveSessionFactory.startCounter(selectedSkipper.rtdbUid, disciplineId, sessionType);
-    setShowConfigModal(false);
+    setSetupDone(true);
   };
 
   const handleCountStep = () => {
@@ -870,13 +964,15 @@ export default function CounterPage() {
 
   // Watch relayIsFinished to save session
   useEffect(() => {
-    if (!relayIsFinished || relayOrder.length === 0 || !selectedSkipper) return;
+    if (!relayIsFinished || relayOrder.length === 0) return;
     const saveRelaySession = async () => {
       const total = relayResults.reduce((s, r) => s + (r.steps || 0), 0);
-      const { clubId, memberId } = selectedSkipper;
+      // Save under the first skipper in the relay order (team lead)
+      const leadMemberId = relayOrder[0].memberId;
+      const clubId       = selectedClubId;
 
       try {
-        await ClubMemberFactory.saveSessionHistory(clubId, memberId, {
+        await ClubMemberFactory.saveSessionHistory(clubId, leadMemberId, {
           discipline: disciplineId, sessionType, score: total,
           avgBpm: 0, maxBpm: 0, sessionStart: null, telemetry: [],
           teamResults: relayResults.map((r, i) => ({ ...r, name: relayOrder[i]?.name || '' })),
@@ -885,9 +981,9 @@ export default function CounterPage() {
         });
       } catch (e) { console.error('Failed to save relay session:', e); }
 
-      const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, memberId);
+      const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, leadMemberId);
       try {
-        const newBadges = await BadgeFactory.checkAndAward(clubId, memberId, { score: total, discipline: disciplineId, sessionType }, freshHistory);
+        const newBadges = await BadgeFactory.checkAndAward(clubId, leadMemberId, { score: total, discipline: disciplineId, sessionType }, freshHistory);
         if (newBadges.length > 0) setNewlyEarnedBadges(newBadges);
       } catch (e) { console.error('Badge check failed:', e); }
     };
@@ -959,14 +1055,14 @@ export default function CounterPage() {
     telemetryRef.current = [];
     if (selectedSkipper?.rtdbUid) await LiveSessionFactory.resetSession(selectedSkipper.rtdbUid);
     setSelectedSkipper(null);
-    setShowConfigModal(false);
+    setSetupDone(false);
+    setSelectedTeamOrder([]);
     setIsProcessingQueue(false);
     setPendingQueue([]);
     setNewlyEarnedBadges([]);
-    // Reset TU
     setTuAttempts([]); setTuCurrentSteps(0); setTuMissCountdown(null); setTuIsActive(false); setTuIsFinished(false);
-    // Reset relay
     setRelayOrder([]); setRelayResults([]); setCurrentSkipperIndex(0); setRelayIsActive(false); setRelayIsFinished(false); setRelaySkipperStart(null);
+    relayLeadUidRef.current = null;
   };
 
   const handleNewSession = async () => {
@@ -978,9 +1074,13 @@ export default function CounterPage() {
     setIsProcessingQueue(false);
     setPendingQueue([]);
     setNewlyEarnedBadges([]);
+    setSetupDone(false);
+    setSelectedTeamOrder([]);
     setTuAttempts([]); setTuCurrentSteps(0); setTuMissCountdown(null); setTuIsActive(false); setTuIsFinished(false);
     setRelayOrder([]); setRelayResults([]); setCurrentSkipperIndex(0); setRelayIsActive(false); setRelayIsFinished(false); setRelaySkipperStart(null);
-    setShowConfigModal(true);
+    setTuAttempts([]); setTuCurrentSteps(0); setTuMissCountdown(null); setTuIsActive(false); setTuIsFinished(false);
+    setRelayOrder([]); setRelayResults([]); setCurrentSkipperIndex(0); setRelayIsActive(false); setRelayIsFinished(false); setRelaySkipperStart(null);
+    // Stay on same skipper but go back to setup (don't reset selectedSkipper)
   };
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -1008,45 +1108,141 @@ export default function CounterPage() {
     </div>
   );
 
-  // ── Screen 1: Skipper Selection ───────────────────────────────────────────
-  if (!selectedSkipper) {
+  // ── Setup screen (unified: discipline + skipper + relay order) ───────────
+  if (!setupDone) {
+    const isRelayDisc     = sessionMode === 'relay';
+    const isTuDisc        = sessionMode === 'triple_under';
+    const isIndividual    = sessionMode === 'individual';
+    const groupReady      = selectedClubId && selectedGroupId;
+    const disciplineReady = !!disciplineId;
+
+    // For relay: build team order from group's skippers (pre-populated, user drags to reorder)
+    // We keep selectedTeamOrder in sync whenever the group or discipline changes
+    const teamOrderForDisplay = selectedTeamOrder.length > 0
+      ? selectedTeamOrder
+      : skippers.map(s => {
+          const mid = s.memberId || s.id;
+          const p   = clubMembers.find(m => m.id === mid);
+          return { memberId: mid, name: p ? `${p.firstName} ${p.lastName}` : mid };
+        });
+
+    // Can we start?
+    const canStart = disciplineReady && groupReady && (
+      isRelayDisc  ? teamOrderForDisplay.length > 0 :
+      isTuDisc     ? !!selectedSkipper :
+      /* individual */ !!selectedSkipper
+    );
+
     return (
       <div style={st.container}>
         <div style={st.header}>
-          <h1 style={{ fontSize: '20px', display: 'flex', alignItems: 'center', gap: '10px', margin: 0 }}>
-            <Users size={24} color="#3b82f6" /> Voor wie ga jij tellen?
+          <h1 style={{ fontSize: '18px', fontWeight: '800', color: '#f1f5f9', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Hash size={20} color="#3b82f6" /> Nieuwe sessie
           </h1>
         </div>
-        <div style={st.selectionPanel}>
+
+        <div style={{ width: '100%', maxWidth: '500px', display: 'flex', flexDirection: 'column', gap: '0' }}>
+
+          {/* ── Step 1: Club (only when multi-club) ── */}
           {showClubPicker && (
-            <div style={st.field}>
-              <label style={st.label}><Building2 size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />Club</label>
+            <div style={st.setupSection}>
+              <div style={st.setupStepLabel}>Club</div>
               <div style={st.clubGrid}>
                 {memberClubs.map(club => (
-                  <button key={club.id} style={{ ...st.clubCard, ...(selectedClubId === club.id ? st.clubCardActive : {}) }} onClick={() => setSelectedClubId(club.id)}>
-                    {club.logoUrl ? <img src={club.logoUrl} style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', marginBottom: '8px' }} alt={club.name} /> : <Building2 size={28} color={selectedClubId === club.id ? '#3b82f6' : '#475569'} style={{ marginBottom: '8px' }} />}
-                    <div style={{ fontSize: '13px', fontWeight: '600', textAlign: 'center' }}>{club.name}</div>
+                  <button key={club.id}
+                    style={{ ...st.clubCard, ...(selectedClubId === club.id ? st.clubCardActive : {}) }}
+                    onClick={() => setSelectedClubId(club.id)}
+                  >
+                    {club.logoUrl
+                      ? <img src={club.logoUrl} style={{ width: '32px', height: '32px', borderRadius: '6px', objectFit: 'cover', marginBottom: '6px' }} alt={club.name} />
+                      : <Building2 size={24} color={selectedClubId === club.id ? '#3b82f6' : '#475569'} style={{ marginBottom: '6px' }} />}
+                    <div style={{ fontSize: '12px', fontWeight: '600', textAlign: 'center' }}>{club.name}</div>
                   </button>
                 ))}
               </div>
             </div>
           )}
+
+          {/* ── Step 2: Group (only when multi-group) ── */}
           {selectedClubId && showGroupPicker && (
-            <div style={st.field}>
-              <label style={st.label}><Users size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />Groep</label>
-              <div style={st.groupGrid}>
+            <div style={st.setupSection}>
+              <div style={st.setupStepLabel}>Groep</div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 {memberGroups.map(group => (
-                  <button key={group.id} style={{ ...st.groupCard, ...(selectedGroupId === group.id ? st.groupCardActive : {}) }} onClick={() => setSelectedGroupId(group.id)}>
-                    <Users size={22} color={selectedGroupId === group.id ? '#22c55e' : '#475569'} style={{ marginBottom: '6px' }} />
-                    <div style={{ fontSize: '13px', fontWeight: '600', textAlign: 'center' }}>{group.name}</div>
+                  <button key={group.id}
+                    style={{ ...st.groupPill, ...(selectedGroupId === group.id ? st.groupPillActive : {}) }}
+                    onClick={() => setSelectedGroupId(group.id)}
+                  >
+                    {group.name}
                   </button>
                 ))}
               </div>
             </div>
           )}
-          {selectedClubId && selectedGroupId && (
-            <div style={st.field}>
-              <label style={st.label}><Hash size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />Skipper</label>
+
+          {/* ── Step 3: Discipline ── */}
+          {(!showClubPicker || selectedClubId) && (!showGroupPicker || selectedGroupId) && (
+            <div style={st.setupSection}>
+              <div style={st.setupStepLabel}>Onderdeel</div>
+              {/* Discipline cards — richer than plain buttons */}
+              <DisciplineCardPicker
+                value={disciplineId}
+                onChange={(id) => {
+                  setDisciplineId(id);
+                  // Reset skipper when discipline changes (team vs individual mismatch)
+                  setSelectedSkipper(null);
+                  setSelectedTeamOrder([]);
+                }}
+                disciplines={disciplines}
+              />
+            </div>
+          )}
+
+          {/* ── Step 3b: Session type ── */}
+          {disciplineReady && (
+            <div style={st.setupSection}>
+              <div style={st.setupStepLabel}>Type sessie</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {['Training', 'Wedstrijd'].map(t => (
+                  <button key={t} onClick={() => setSessionType(t)} style={{
+                    flex: 1, padding: '11px', borderRadius: '10px',
+                    border: `1.5px solid ${sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#334155'}`,
+                    backgroundColor: sessionType === t ? (t === 'Wedstrijd' ? '#ef444422' : '#3b82f622') : 'transparent',
+                    color: sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#60a5fa') : '#64748b',
+                    fontWeight: sessionType === t ? '700' : '500',
+                    fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit',
+                  }}>
+                    {t === 'Training' ? '🏋️ Training' : '🏆 Wedstrijd'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 4a: Relay — team order ── */}
+          {disciplineReady && isRelayDisc && groupReady && (
+            <div style={st.setupSection}>
+              <div style={st.setupStepLabel}>
+                Startvolgorde
+                <span style={{ fontSize: '10px', color: '#475569', fontWeight: '400', marginLeft: '8px' }}>sleep om te herschikken</span>
+              </div>
+              {skippers.length === 0 ? (
+                <p style={{ color: '#475569', fontSize: '13px', padding: '8px 0' }}>Geen skippers in deze groep.</p>
+              ) : (
+                <RelayOrderPicker
+                  skippers={skippers}
+                  clubMembers={clubMembers}
+                  value={teamOrderForDisplay}
+                  onChange={setSelectedTeamOrder}
+                />
+              )}
+            </div>
+          )}
+
+          {/* ── Step 4b: Individual / Triple Under — pick skipper ── */}
+          {disciplineReady && !isRelayDisc && groupReady && (
+            <div style={st.setupSection}>
+              <div style={st.setupStepLabel}>Skipper</div>
               {skippers.length > 0 ? (
                 <div style={st.grid}>
                   {skippers.map(s => {
@@ -1055,14 +1251,24 @@ export default function CounterPage() {
                     const firstName = profile?.firstName || '?';
                     const lastName  = profile?.lastName  || '';
                     const initials  = `${firstName[0] || '?'}${lastName[0] || ''}`.toUpperCase();
+                    const isChosen  = selectedSkipper?.memberId === memberId;
                     return (
-                      <button key={memberId} style={st.card} onClick={async () => {
-                        const resolved = await resolveSkipperProfile(s);
-                        setSelectedSkipper(resolved);
-                        setShowConfigModal(true);
-                      }}>
-                        <div style={st.avatar}>{initials}</div>
-                        <div style={{ marginTop: '10px', fontSize: '14px', fontWeight: '600', textAlign: 'center' }}>{firstName} {lastName}</div>
+                      <button key={memberId}
+                        style={{ ...st.card, borderColor: isChosen ? '#3b82f6' : '#334155', backgroundColor: isChosen ? '#1e3a5f' : '#1e293b' }}
+                        onClick={async () => {
+                          const resolved = await resolveSkipperProfile(s);
+                          setSelectedSkipper(resolved);
+                        }}
+                      >
+                        <div style={{ ...st.avatar, backgroundColor: isChosen ? '#3b82f6' : '#334155', width: '44px', height: '44px', fontSize: '15px' }}>
+                          {initials}
+                        </div>
+                        <div style={{ marginTop: '8px', fontSize: '13px', fontWeight: isChosen ? '700' : '500', color: isChosen ? '#f1f5f9' : '#94a3b8', textAlign: 'center' }}>
+                          {firstName} {lastName}
+                        </div>
+                        {isChosen && (
+                          <div style={{ marginTop: '4px', fontSize: '10px', color: '#3b82f6', fontWeight: '700' }}>✓ Geselecteerd</div>
+                        )}
                       </button>
                     );
                   })}
@@ -1072,90 +1278,28 @@ export default function CounterPage() {
               )}
             </div>
           )}
-          {selectedClubId && showGroupPicker && !selectedGroupId && <p style={st.infoText}>Selecteer een groep om de skippers te zien.</p>}
-          {showClubPicker && !selectedClubId && <p style={st.infoText}>Selecteer een club om verder te gaan.</p>}
-        </div>
-      </div>
-    );
-  }
 
-  // ── Screen 2: Config Modal ────────────────────────────────────────────────
-  if (showConfigModal) {
-    const isRelayDisc = sessionMode === 'relay';
-    return (
-      <div style={st.modalOverlay}>
-        <div style={{ ...st.modalContent, fontFamily: 'sans-serif', maxHeight: '90vh', overflowY: 'auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-            <div style={{ ...st.avatar, margin: '0 auto 12px', width: '60px', height: '60px', fontSize: '20px' }}>
-              {selectedSkipper.firstName[0]}{selectedSkipper.lastName[0]}
+          {/* ── Best record hint ── */}
+          {selectedSkipper && isIndividual && bestRecord && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #facc1533', marginTop: '4px', marginBottom: '4px' }}>
+              <Trophy size={14} color="#facc15" />
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                Huidig record: <strong style={{ color: '#facc15' }}>{bestRecord.score} stappen</strong>
+              </span>
             </div>
-            <h2 style={{ margin: 0, fontSize: '22px', color: '#f1f5f9' }}>{selectedSkipper.firstName} {selectedSkipper.lastName}</h2>
-            <p style={{ color: '#94a3b8', margin: '4px 0 0' }}>Kies sessie-instellingen</p>
+          )}
+
+          {/* ── START button ── */}
+          <div style={{ padding: '16px 0 24px' }}>
+            <button
+              onClick={handleStartSession}
+              disabled={!canStart}
+              style={{ ...st.mainStartBtn, opacity: canStart ? 1 : 0.35 }}
+            >
+              <Play size={20} fill="white" /> SESSIE STARTEN
+            </button>
           </div>
 
-          <label style={{ ...st.label, fontFamily: 'sans-serif' }}>Type sessie</label>
-          <div style={st.toggleGroup}>
-            {['Training', 'Wedstrijd'].map(t => (
-              <button key={t} onClick={() => setSessionType(t)} style={{ ...st.toggleBtn, backgroundColor: sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#0f172a', borderColor: sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#334155' }}>
-                {t}
-              </button>
-            ))}
-          </div>
-
-          <label style={{ ...st.label, fontFamily: 'sans-serif' }}>Onderdeel</label>
-          <DisciplineSelector
-            value={disciplineId}
-            onChange={setDisciplineId}
-            style={{ marginBottom: '16px' }}
-          />
-
-          {/* Discipline info banner */}
-          {currentDisc && (
-            <div style={{ backgroundColor: '#0f172a', borderRadius: '8px', padding: '10px 12px', marginBottom: '16px', fontSize: '12px', color: '#64748b', border: '1px solid #1e293b', display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-              {currentDisc.durationSeconds
-                ? <span>⏱ {currentDisc.durationSeconds < 60 ? `${currentDisc.durationSeconds}s` : `${currentDisc.durationSeconds / 60} min`}</span>
-                : <span>⏱ Geen tijdslimiet</span>
-              }
-              <span>{currentDisc.isIndividual ? '👤 Individueel' : `👥 Team (${currentDisc.teamSize})`}</span>
-              {currentDisc.specialRule === 'triple_under' && <span style={{ color: '#f59e0b' }}>⚡ Triple Under regel (15s herstart)</span>}
-              {currentDisc.specialRule === 'relay'        && <span style={{ color: '#3b82f6' }}>🔄 Relay — beurtelings</span>}
-            </div>
-          )}
-
-          {/* Relay: skipper order */}
-          {isRelayDisc && relayOrder.length > 0 && (
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ ...st.label, fontFamily: 'sans-serif', display: 'block', marginBottom: '8px' }}>Startvolgorde skippers</label>
-              <RelayOrderPicker
-                skippers={skippers}
-                clubMembers={clubMembers}
-                value={relayOrder}
-                onChange={setRelayOrder}
-              />
-            </div>
-          )}
-
-          {/* Pre-populate relay order when discipline changes to relay */}
-          {isRelayDisc && relayOrder.length === 0 && (
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ ...st.label, fontFamily: 'sans-serif', display: 'block', marginBottom: '8px' }}>Startvolgorde skippers</label>
-              <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '12px 0' }}>
-                Volgorde wordt ingesteld bij het starten op basis van de groepslijst.
-              </p>
-            </div>
-          )}
-
-          {bestRecord && sessionMode === 'individual' && (
-            <div style={{ backgroundColor: '#0f172a', borderRadius: '8px', padding: '12px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Trophy size={18} color="#facc15" />
-              <div style={{ fontSize: '13px', color: '#94a3b8' }}>Huidig record: <strong style={{ color: '#facc15' }}>{bestRecord.score} steps</strong></div>
-            </div>
-          )}
-
-          <button onClick={handleStartSession} style={st.mainStartBtn}><Play size={20} fill="white" /> SESSIE STARTEN</button>
-          <button onClick={() => { setSelectedSkipper(null); setShowConfigModal(false); }} style={{ ...st.mainStartBtn, backgroundColor: 'transparent', border: '1px solid #334155', marginTop: '10px' }}>
-            Annuleren
-          </button>
         </div>
       </div>
     );
@@ -1486,9 +1630,14 @@ export default function CounterPage() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const st = {
   container:      { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
-  header:         { width: '100%', maxWidth: '500px', padding: '16px 0', borderBottom: '1px solid #1e293b', marginBottom: '24px' },
+  header:         { width: '100%', maxWidth: '500px', padding: '14px 0 16px', borderBottom: '1px solid #1e293b', marginBottom: '20px' },
   selectionPanel: { width: '100%', maxWidth: '500px' },
   spinner:        { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
+  // Setup page sections
+  setupSection:   { borderBottom: '1px solid #1e293b', paddingBottom: '18px', marginBottom: '18px', width: '100%' },
+  setupStepLabel: { fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' },
+  groupPill:      { padding: '8px 16px', borderRadius: '20px', border: '1px solid #334155', backgroundColor: 'transparent', color: '#64748b', fontWeight: '500', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
+  groupPillActive:{ border: '1px solid #22c55e', backgroundColor: '#22c55e22', color: '#22c55e', fontWeight: '700' },
   field:          { marginBottom: '24px' },
   label:          { display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '10px', fontWeight: '600' },
   clubGrid:       { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' },
