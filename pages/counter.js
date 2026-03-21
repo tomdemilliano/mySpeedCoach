@@ -532,7 +532,7 @@ function TripleUnderDisplay({ attempts, currentAttempt, missCountdown, onMisser 
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════════════════
 export default function CounterPage() {
-  const { disciplines, getDisc, getDuration } = useDisciplines();
+  const { disciplines, getDisc, getDuration, getLabel } = useDisciplines();
 
   // ── Current user (counter) ───────────────────────────────────────────────
   const [counterUser,   setCounterUser]   = useState(null);
@@ -1692,7 +1692,7 @@ export default function CounterPage() {
       <div style={st.historySection}>
         <h3 style={{ fontSize: '14px', color: '#94a3b8', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}><HistoryIcon size={16} /> Recente sessies</h3>
         {sessionHistory.slice(0, 5).map((item, idx) => {
-          const discLabel = item.disciplineName || item.discipline;
+          const discLabel = item.disciplineName || getLabel(item.discipline);
           return (
             <div key={idx} style={st.historyItem}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
