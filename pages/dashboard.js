@@ -13,6 +13,7 @@ import {
   UserFactory, LiveSessionFactory, ClubFactory, GroupFactory,
   ClubMemberFactory, UserMemberLinkFactory,
 } from '../constants/dbSchema';
+import { useDisciplines } from '../hooks/useDisciplines';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DEFAULT_ZONES = [
@@ -220,6 +221,7 @@ function SkipperCard({
   const stepDiff = ghostAtNow ? (session.steps || 0) - (ghostAtNow.ghostSteps || 0) : null;
   const disciplineDuration = DISCIPLINE_DURATION[session.discipline] || 30;
   const expectedScore = calcExpected(session);
+  const { getLabel } = useDisciplines();
 
   const displayName = member
     ? `${member.firstName || ''} ${member.lastName || ''}`.trim()
@@ -284,7 +286,7 @@ function SkipperCard({
             <div style={{ fontSize: '11px', color: '#64748b', marginTop: '1px' }}>
               {isRelay
                 ? `🔄 Relay · ${relaySession?.currentSkipperName?.split(' ')[0] || '—'}`
-                : `${session.discipline || '---'} · ${session.sessionType || 'Training'}`}
+                : `${getLabel(session.discipline) || '---'} · ${session.sessionType || 'Training'}`}
             </div>
           </div>
         </div>
@@ -337,7 +339,7 @@ function SkipperCard({
                 </span>
               ) : (
                 <span style={{ fontSize: '11px', color: '#facc15', fontWeight: '600' }}>
-                  {session.discipline || '---'} · {session.sessionType || 'Training'}
+                  {getLabel(session.discipline) || '---'} · {session.sessionType || 'Training'}
                 </span>
               )}
               {pb && !isRelay && (
