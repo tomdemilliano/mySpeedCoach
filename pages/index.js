@@ -3,6 +3,7 @@ import { UserFactory, ClubFactory, GroupFactory, LiveSessionFactory, ClubJoinReq
 import { useAuth } from '../contexts/AuthContext';
 import PushPermissionBanner, { PushSettingsToggle } from '../components/PushPermissionBanner';
 import AnnouncementsWidget from '../components/AnnouncementsWidget';
+import { useDisciplines } from '../hooks/useDisciplines';
 import {
   Bluetooth, BluetoothOff, Heart, Settings, Trophy,
   Target, Plus, Edit2, Trash2, Check, X, ChevronRight,
@@ -178,6 +179,7 @@ function StatCard({ icon: Icon, color, label, value, sub, href }) {
 // ─── Recent sessions mini list ────────────────────────────────────────────────
 function RecentSessionsList({ memberContext }) {
   const [sessions, setSessions] = useState([]);
+  const { getLabel } = useDisciplines();
   useEffect(() => {
     if (!memberContext) return;
     const { clubId, memberId } = memberContext;
@@ -195,7 +197,7 @@ function RecentSessionsList({ memberContext }) {
         return (
           <div key={s.id || i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b' }}>
             <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', backgroundColor: `${typeColor}22`, color: typeColor, border: `1px solid ${typeColor}40`, flexShrink: 0 }}>{s.sessionType || 'Training'}</span>
-            <span style={{ fontSize: '12px', color: '#64748b', flexShrink: 0 }}>{DISC_LABELS[s.discipline] || s.discipline}</span>
+            <span style={{ fontSize: '12px', color: '#64748b', flexShrink: 0 }}>{DISC_LABELS[s.discipline] || getLabel(s.discipline)}</span>
             <div style={{ flex: 1 }} />
             <span style={{ fontSize: '16px', fontWeight: '900', color: '#60a5fa' }}>{s.score}</span>
             <span style={{ fontSize: '10px', color: '#475569' }}>stps</span>
@@ -228,6 +230,7 @@ export default function IndexPage() {
   const [goals,          setGoals]          = useState([]);
   const [recentSessions, setRecentSessions] = useState([]);
   const [earnedBadges,   setEarnedBadges]   = useState([]);
+  const { getLabel } = useDisciplines();
 
   // Achievements queue
   const [achievementQueue,        setAchievementQueue]        = useState([]);
@@ -566,8 +569,8 @@ export default function IndexPage() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '24px' }}>
-          <StatCard icon={Hash} color="#60a5fa" label="Laatste sessie" value={lastSession?.score} sub={lastSession ? `${DISC_LABELS[lastSession.discipline]} · ${lastSession.sessionType}` : (memberContext ? 'Nog geen sessies' : 'Koppel clubprofiel')} />
-          <StatCard icon={Trophy} color="#facc15" label="Beste record" value={bestRecord?.score} sub={bestRecord ? `${DISC_LABELS[bestRecord.discipline]} · ${bestRecord.sessionType}` : (memberContext ? 'Nog geen record' : 'Koppel clubprofiel')} href="/achievements" />
+          <StatCard icon={Hash} color="#60a5fa" label="Laatste sessie" value={lastSession?.score} sub={lastSession ? `${getLabel(lastSession.discipline)} · ${lastSession.sessionType}` : (memberContext ? 'Nog geen sessies' : 'Koppel clubprofiel')} />
+          <StatCard icon={Trophy} color="#facc15" label="Beste record" value={bestRecord?.score} sub={bestRecord ? `${getLabel(lastSession.discipline)} · ${bestRecord.sessionType}` : (memberContext ? 'Nog geen record' : 'Koppel clubprofiel')} href="/achievements" />
           <StatCard icon={Target} color="#22c55e" label="Actieve doelen" value={activeGoals.length || null} sub={activeGoals.length > 0 ? `${activeGoals[0].discipline} → ${activeGoals[0].targetScore} stps` : 'Geen doelen'} href="/achievements" />
         </div>
 
