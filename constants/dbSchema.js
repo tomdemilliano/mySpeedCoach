@@ -18,8 +18,6 @@ export const SCHEMA = {
         lastConnection: "timestamp"
       },
       heartrateZones: [{ name: "string", min: "number", max: "number", color: "string" }],
-      // NOTE: sessionHistory, records, earnedBadges, goals have moved to
-      // clubs/{clubId}/members/{memberId}/… after Feature 8.4 migration.
     },
 
     // Feature 8.1
@@ -31,126 +29,142 @@ export const SCHEMA = {
       createdAt: "timestamp",
       createdBy: "uid",
       sessionHistory: {
-        discipline: "string",
-        sessionType: "string",
-        score: "number",
-        avgBpm: "number",
-        maxBpm: "number",
-        sessionStart: "timestamp",
-        sessionEnd: "timestamp",
-        countedBy: "string|null",
-        countedByName: "string|null",
+        discipline:     "string",   // Firestore discipline document ID
+        disciplineName: "string",   // discipline.name — used for badge matching
+        ropeType:       "SR|DD",    // discipline.ropeType — used for badge matching
+        sessionType:    "string",
+        score:          "number",
+        avgBpm:         "number",
+        maxBpm:         "number",
+        sessionStart:   "timestamp",
+        sessionEnd:     "timestamp",
+        countedBy:      "string|null",
+        countedByName:  "string|null",
         telemetry: [{ time: "number", steps: "number", heartRate: "number" }]
       },
       records: {
-        discipline: "string",
-        sessionType: "string",
-        score: "number",
-        achievedAt: "timestamp",
+        discipline:     "string",
+        disciplineName: "string",
+        ropeType:       "SR|DD",
+        sessionType:    "string",
+        score:          "number",
+        achievedAt:     "timestamp",
         telemetry: [{ time: "number", steps: "number", heartRate: "number" }]
       },
       earnedBadges: {
-        badgeId: "string",
-        badgeName: "string",
-        badgeEmoji: "string",
+        badgeId:       "string",
+        badgeName:     "string",
+        badgeEmoji:    "string",
         badgeImageUrl: "string",
         badgeCategory: "string",
-        earnedAt: "timestamp",
-        awardedBy: "system|coachUid",
+        earnedAt:      "timestamp",
+        awardedBy:     "system|coachUid",
         awardedByName: "string",
-        sessionId: "string|null",
-        note: "string",
+        sessionId:     "string|null",
+        note:          "string",
       },
-      goals: {
-        discipline: "string",
-        targetScore: "number",
-        targetDate: "timestamp",
-        achievedAt: "timestamp|null"
-      }
+      // Goals moved to sub-collection clubs/{clubId}/members/{memberId}/goals
+      // managed exclusively through GoalFactory
     },
 
     // Feature 8.2
     userMemberLinks: {
-      uid: "string",
-      clubId: "string",
-      memberId: "string",
+      uid:          "string",
+      clubId:       "string",
+      memberId:     "string",
       relationship: "self|parent|guardian|other",
-      canEdit: "boolean",
+      canEdit:       "boolean",
       canViewHealth: "boolean",
-      createdAt: "timestamp",
-      approvedBy: "uid|null",
+      createdAt:    "timestamp",
+      approvedBy:   "uid|null",
     },
 
     badges: {
-      name: "string",
+      name:        "string",
       description: "string",
-      emoji: "string",
-      imageUrl: "string",
-      type: "automatic|manual",
-      scope: "global|club",
-      clubId: "string|null",
-      category: "speed|milestone|consistency|skill",
+      emoji:       "string",
+      imageUrl:    "string",
+      type:        "automatic|manual",
+      scope:       "global|club",
+      clubId:      "string|null",
+      category:    "speed|milestone|consistency|skill",
       trigger: {
-        discipline: "30sec|2min|3min|any",
-        minScore: "number|null",
-        sessionType: "Training|Wedstrijd|any",
-        totalSessions: "number|null",
+        // New fields (discipline-name based)
+        disciplineName: "string",   // discipline.name or 'any'
+        ropeType:       "SR|DD|any",
+        // Trigger kinds (one of these will be set)
+        minScore:         "number|null",
+        firstSession:     "boolean|null",
+        totalSessions:    "number|null",
         consecutiveWeeks: "number|null",
-        firstSession: "boolean|null",
+        sessionType:      "Training|Wedstrijd|any",
       },
-      isActive: "boolean",
+      isActive:  "boolean",
       createdAt: "timestamp",
     },
+
     clubs: {
-      name: "string",
+      name:    "string",
       logoUrl: "string",
       groups: {
-        name: "string",
-        useHRM: "boolean",
-        isActive: "boolean",
-        // Feature 8.3: document ID is now memberId, not uid
+        name:    "string",
+        useHRM:  "boolean",
+        isActive:"boolean",
         members: {
-          memberId: "string",
-          isSkipper: "boolean",
-          isCoach: "boolean",
+          memberId:        "string",
+          isSkipper:       "boolean",
+          isCoach:         "boolean",
           startMembership: "timestamp",
-          endMembership: "timestamp"
+          endMembership:   "timestamp"
         }
       }
     },
-    clubJoinRequests: {
-      uid: "string",
-      firstName: "string",
-      lastName: "string",
-      email: "string",
-      clubId: "string",
-      clubName: "string",
-      message: "string",
-      status: "pending|approved|rejected",
-      rejectionReason: "string",
-      createdAt: "timestamp",
-      resolvedAt: "timestamp|null",
-      hidden: "boolean"
-    },
-    countedSessions: {
-      counterUid: "string",
-      counterName: "string",
-      // Feature 8.4: skipperMemberId replaces skipperUid
-      skipperMemberId: "string",
-      skipperClubId: "string",
-      discipline: "string",
-      sessionType: "string",
-      score: "number",
-      sessionEnd: "timestamp",
+
+    // Goals sub-collection (managed by GoalFactory)
+    "clubs/{clubId}/members/{memberId}/goals": {
+      discipline:     "string",   // Firestore discipline document ID
+      disciplineName: "string",   // human-readable name for display
+      targetScore:    "number",
+      targetDate:     "timestamp|null",
+      achievedAt:     "timestamp|null",
+      createdAt:      "timestamp",
     },
 
-    // Feature 12.1 — Message board
+    clubJoinRequests: {
+      uid:             "string",
+      firstName:       "string",
+      lastName:        "string",
+      email:           "string",
+      clubId:          "string",
+      clubName:        "string",
+      message:         "string",
+      status:          "pending|approved|rejected",
+      rejectionReason: "string",
+      createdAt:       "timestamp",
+      resolvedAt:      "timestamp|null",
+      hidden:          "boolean"
+    },
+
+    countedSessions: {
+      counterUid:      "string",
+      counterName:     "string",
+      skipperMemberId: "string",
+      skipperClubId:   "string",
+      discipline:      "string",
+      disciplineName:  "string",
+      ropeType:        "SR|DD",
+      sessionType:     "string",
+      score:           "number",
+      sessionEnd:      "timestamp",
+    },
+
+    // Feature 12.1
     announcements: {
       title:      "string",
       body:       "string",
       type:       "info|cancel|reminder|result",
       clubId:     "string",
-      groupIds:   ["string"],   // array of group IDs this announcement targets
+      groupIds:   ["string"],
       authorUid:  "string",
       authorName: "string",
       pinned:     "boolean",
@@ -166,13 +180,13 @@ export const SCHEMA = {
         lastHeartbeat: "timestamp",
         connectionStatus: "online|offline",
         session: {
-          isActive: "boolean",
-          isFinished: "boolean",
-          startTime: "timestamp",
-          steps: "number",
-          discipline: "30sec|2min|3min",
+          isActive:    "boolean",
+          isFinished:  "boolean",
+          startTime:   "timestamp",
+          steps:       "number",
+          discipline:  "string",
           sessionType: "training|wedstrijd",
-          lastStepTime: "timestamp",
+          lastStepTime:"timestamp",
           telemetry: [{ time: "number", steps: "number", heartRate: "number" }]
         }
       }
@@ -183,11 +197,6 @@ export const SCHEMA = {
 // ==========================================
 // 1. USER FACTORY
 // ==========================================
-// NOTE: saveSessionHistory, getSessionHistory, addRecord, subscribeToRecords,
-// getBestRecord, getSessionHistoryOnce, getGoals, markGoalAchieved have all
-// moved to ClubMemberFactory after Feature 8.4.
-// UserFactory retains only account-level data methods.
-
 export const UserFactory = {
   create: async (uid, userData) => {
     const defaultZones = [
@@ -213,7 +222,6 @@ export const UserFactory = {
   }),
 
   delete: async (uid) => {
-    // 1. Remove from all groups
     const clubsSnap = await getDocs(collection(db, "clubs"));
     for (const clubDoc of clubsSnap.docs) {
       const groupsSnap = await getDocs(collection(db, `clubs/${clubDoc.id}/groups`));
@@ -221,11 +229,7 @@ export const UserFactory = {
         await deleteDoc(doc(db, `clubs/${clubDoc.id}/groups/${groupDoc.id}/members`, uid));
       }
     }
- 
-    // 2. Remove the Firestore user document
     await deleteDoc(doc(db, "users", uid));
- 
-    // 3. Delete the Firebase Auth account via the server-side API route.
     try {
       const res = await fetch('/api/delete-user', {
         method:  'DELETE',
@@ -241,14 +245,14 @@ export const UserFactory = {
     }
   },
 
-  updateProfile: (uid, data) => updateDoc(doc(db, "users", uid), data),
-  updateZones:   (uid, zones) => updateDoc(doc(db, "users", uid), { heartrateZones: zones }),
+  updateProfile:   (uid, data)  => updateDoc(doc(db, "users", uid), data),
+  updateZones:     (uid, zones) => updateDoc(doc(db, "users", uid), { heartrateZones: zones }),
 
   assignDevice: (uid, deviceId, deviceName) =>
     updateDoc(doc(db, "users", uid), {
-      "assignedDevice.deviceId":        deviceId,
-      "assignedDevice.deviceName":      deviceName,
-      "assignedDevice.lastConnection":  serverTimestamp()
+      "assignedDevice.deviceId":       deviceId,
+      "assignedDevice.deviceName":     deviceName,
+      "assignedDevice.lastConnection": serverTimestamp()
     }),
 
   getLastVisited: async (uid) => {
@@ -284,8 +288,6 @@ export const ClubFactory = {
   }
 };
 
-// Feature 8.3: GroupFactory updated — document ID in the members sub-collection
-// is now memberId (from ClubMember), not uid.
 export const GroupFactory = {
   create: (clubId, groupData) =>
     addDoc(collection(db, `clubs/${clubId}/groups`), { ...groupData, isActive: true }),
@@ -301,7 +303,6 @@ export const GroupFactory = {
     return deleteDoc(doc(db, `clubs/${clubId}/groups`, groupId));
   },
 
-  // Feature 8.3: memberId is now the document ID; memberData.memberId stored as a field too
   addMember: (clubId, groupId, memberId, memberData) =>
     setDoc(doc(db, `clubs/${clubId}/groups/${groupId}/members`, memberId), {
       memberId,
@@ -327,7 +328,6 @@ export const GroupFactory = {
       callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }),
 
-  // Feature 8.3: returns docs keyed by memberId; each doc has a memberId field
   getMembersByGroup: (clubId, groupId, callback) =>
     onSnapshot(collection(db, `clubs/${clubId}/groups/${groupId}/members`), (snap) => {
       callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -343,13 +343,11 @@ export const GroupFactory = {
     });
   },
 
-  // Get all groups in a club (one-shot)
   getGroupsByClubOnce: async (clubId) => {
     const snap = await getDocs(collection(db, `clubs/${clubId}/groups`));
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
-  // Get all members of a group (one-shot)
   getMembersByGroupOnce: async (clubId, groupId) => {
     const snap = await getDocs(
       collection(db, `clubs/${clubId}/groups/${groupId}/members`)
@@ -447,11 +445,9 @@ export const ClubJoinRequestFactory = {
       callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }),
 
-  approve: (requestId, approvedByUid = null) =>
+  approve: (requestId) =>
     updateDoc(doc(db, 'clubJoinRequests', requestId), {
-      status: 'approved',
-      rejectionReason: '',
-      resolvedAt: serverTimestamp(),
+      status: 'approved', rejectionReason: '', resolvedAt: serverTimestamp(),
     }),
 
   reject: (requestId, reason) =>
@@ -468,9 +464,6 @@ export const ClubJoinRequestFactory = {
 // ==========================================
 // 5. BADGE FACTORY
 // ==========================================
-// Feature 8.4: award, getEarned, hasEarned, revokeEarned, checkAndAward,
-// getEarnedForUsers all now write to / read from
-// clubs/{clubId}/members/{memberId}/earnedBadges instead of users/{uid}/earnedBadges.
 
 export const BadgeFactory = {
 
@@ -514,22 +507,20 @@ export const BadgeFactory = {
     });
   },
 
-  // Feature 8.4: path is now clubs/{clubId}/members/{memberId}/earnedBadges
   award: (clubId, memberId, badgeData, awardedBy = 'system', awardedByName = 'Systeem', sessionId = null, note = '') =>
     addDoc(collection(db, `clubs/${clubId}/members/${memberId}/earnedBadges`), {
-      badgeId:      badgeData.id,
-      badgeName:    badgeData.name,
-      badgeEmoji:   badgeData.emoji    || '🏅',
+      badgeId:       badgeData.id,
+      badgeName:     badgeData.name,
+      badgeEmoji:    badgeData.emoji    || '🏅',
       badgeImageUrl: badgeData.imageUrl || '',
       badgeCategory: badgeData.category || 'skill',
-      earnedAt:     serverTimestamp(),
+      earnedAt:      serverTimestamp(),
       awardedBy,
       awardedByName,
       sessionId,
       note,
     }),
 
-  // Feature 8.4: realtime subscription on ClubMember path
   getEarned: (clubId, memberId, callback) =>
     onSnapshot(collection(db, `clubs/${clubId}/members/${memberId}/earnedBadges`), (snap) => {
       const sorted = snap.docs
@@ -538,7 +529,6 @@ export const BadgeFactory = {
       callback(sorted);
     }),
 
-  // Feature 8.4: batch fetch for leaderboard — now takes array of { clubId, memberId }
   getEarnedForMembers: async (members) => {
     const results = {};
     await Promise.all(members.map(async ({ clubId, memberId }) => {
@@ -562,7 +552,9 @@ export const BadgeFactory = {
   revokeEarned: (clubId, memberId, earnedBadgeId) =>
     deleteDoc(doc(db, `clubs/${clubId}/members/${memberId}/earnedBadges`, earnedBadgeId)),
 
-  // Feature 8.4: checkAndAward now operates on ClubMember path
+  // ── Updated checkAndAward — matches on disciplineName + ropeType ──────────
+  // sessionData must include: { score, discipline, disciplineName, ropeType, sessionType }
+  // Falls back to matching on raw discipline ID for old sessions without disciplineName.
   checkAndAward: async (clubId, memberId, sessionData, sessionHistory) => {
     const badgesSnap = await getDocs(query(
       collection(db, 'badges'),
@@ -579,23 +571,53 @@ export const BadgeFactory = {
       if (alreadyHas) continue;
 
       const t = badge.trigger;
+
+      // ── Discipline matching ───────────────────────────────────────────────
+      // Support both new (disciplineName) and legacy (discipline) trigger fields.
+      const triggerName = t.disciplineName || t.discipline || 'any';
+      const triggerRope = t.ropeType || 'any';
+
+      const discMatch =
+        triggerName === 'any' ||
+        triggerName === sessionData.disciplineName ||
+        triggerName === sessionData.discipline; // legacy fallback for old sessions
+
+      const ropeMatch =
+        triggerRope === 'any' ||
+        triggerRope === sessionData.ropeType;
+
+      const typeMatch =
+        !t.sessionType ||
+        t.sessionType === 'any' ||
+        t.sessionType === sessionData.sessionType;
+
       let earned = false;
 
+      // minScore trigger
       if (t.minScore != null) {
-        const discMatch = !t.discipline || t.discipline === 'any' || t.discipline === sessionData.discipline;
-        const typeMatch = !t.sessionType || t.sessionType === 'any' || t.sessionType === sessionData.sessionType;
-        if (discMatch && typeMatch && (sessionData.score || 0) >= t.minScore) earned = true;
+        if (discMatch && ropeMatch && typeMatch && (sessionData.score || 0) >= t.minScore) {
+          earned = true;
+        }
       }
 
+      // firstSession trigger
       if (!earned && t.firstSession) {
-        const discSessions = sessionHistory.filter(s => s.discipline === t.discipline);
-        if (discSessions.length <= 1 && sessionData.discipline === t.discipline) earned = true;
+        if (discMatch && ropeMatch && typeMatch) {
+          const discSessions = sessionHistory.filter(s =>
+            s.disciplineName === sessionData.disciplineName ||
+            s.discipline     === sessionData.discipline
+          );
+          // Current session is already in history after save, so ≤1 means it's the first
+          if (discSessions.length <= 1) earned = true;
+        }
       }
 
+      // totalSessions trigger
       if (!earned && t.totalSessions != null) {
         if (sessionHistory.length >= t.totalSessions) earned = true;
       }
 
+      // consecutiveWeeks trigger
       if (!earned && t.consecutiveWeeks != null) {
         const getWeekNumber = (date) => {
           const d = new Date(date);
@@ -630,23 +652,482 @@ export const BadgeFactory = {
     return awarded;
   },
 
+  // ── Full badge catalogue seeded from official IJRU disciplines ────────────
+  // Thresholds are calibrated against real world records:
+  //   SRSS WR = 119  |  SRSE (3 min) WR = 584  |  SRTU WR = 560
+  //   SRSR WR ~450   |  SRDR WR = 190           |  DDSS WR ~130
+  //   DDSR WR = 416
+  // Running seedDefaults again is safe — badges are skipped if the name exists.
   seedDefaults: async () => {
+    const existing = await getDocs(collection(db, 'badges'));
+    const existingNames = new Set(existing.docs.map(d => d.data().name));
+
     const defaults = [
-      { name: 'Eerste Sprong',    description: 'Eerste 30 seconden sessie geregistreerd', emoji: '🌱', category: 'milestone',   type: 'automatic', scope: 'global', trigger: { firstSession: true, discipline: '30sec' } },
-      { name: 'Eerste Marathon',  description: 'Eerste 2 minuten sessie geregistreerd',   emoji: '🌿', category: 'milestone',   type: 'automatic', scope: 'global', trigger: { firstSession: true, discipline: '2min'  } },
-      { name: 'Eerste Uithouding',description: 'Eerste 3 minuten sessie geregistreerd',   emoji: '🌳', category: 'milestone',   type: 'automatic', scope: 'global', trigger: { firstSession: true, discipline: '3min'  } },
-      { name: '10 Sessies',       description: '10 sessies voltooid',                     emoji: '🔟', category: 'milestone',   type: 'automatic', scope: 'global', trigger: { totalSessions: 10  } },
-      { name: '50 Sessies',       description: '50 sessies voltooid',                     emoji: '💪', category: 'milestone',   type: 'automatic', scope: 'global', trigger: { totalSessions: 50  } },
-      { name: '100 Sessies',      description: '100 sessies voltooid',                    emoji: '🏆', category: 'milestone',   type: 'automatic', scope: 'global', trigger: { totalSessions: 100 } },
-      { name: 'Wekelijkse Krijger',description: '5 weken op rij getraind',               emoji: '🗓️', category: 'consistency', type: 'automatic', scope: 'global', trigger: { consecutiveWeeks: 5 } },
-      { name: 'Haas',    description: '60 stappen in 30 seconden',  emoji: '🐇', category: 'speed', type: 'automatic', scope: 'global', trigger: { discipline: '30sec', minScore: 60,  sessionType: 'any' } },
-      { name: 'Vos',     description: '70 stappen in 30 seconden',  emoji: '🦊', category: 'speed', type: 'automatic', scope: 'global', trigger: { discipline: '30sec', minScore: 70,  sessionType: 'any' } },
-      { name: 'Gazelle', description: '80 stappen in 30 seconden',  emoji: '🦌', category: 'speed', type: 'automatic', scope: 'global', trigger: { discipline: '30sec', minScore: 80,  sessionType: 'any' } },
-      { name: 'Cheetah', description: '90 stappen in 30 seconden',  emoji: '🐆', category: 'speed', type: 'automatic', scope: 'global', trigger: { discipline: '30sec', minScore: 90,  sessionType: 'any' } },
-      { name: 'Bliksem', description: '100 stappen in 30 seconden', emoji: '⚡', category: 'speed', type: 'automatic', scope: 'global', trigger: { discipline: '30sec', minScore: 100, sessionType: 'any' } },
+
+      // ── Milestone: first session per discipline ──────────────────────────
+      {
+        name: 'Eerste Sprong', emoji: '🌱',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: 'Eerste Speed Sprint sessie voltooid',
+        trigger: { disciplineName: 'Speed Sprint', ropeType: 'SR', firstSession: true, sessionType: 'any' },
+      },
+      {
+        name: 'Eerste Uithouder', emoji: '🌿',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: 'Eerste Endurance 2 min sessie voltooid',
+        trigger: { disciplineName: 'Endurance 2 min', ropeType: 'SR', firstSession: true, sessionType: 'any' },
+      },
+      {
+        name: 'Eerste Marathonloper', emoji: '🌳',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: 'Eerste Endurance 3 min sessie voltooid',
+        trigger: { disciplineName: 'Endurance 3 min', ropeType: 'SR', firstSession: true, sessionType: 'any' },
+      },
+      {
+        name: 'Drievoudige Droom', emoji: '3️⃣',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: 'Eerste Triple Under poging geregistreerd',
+        trigger: { disciplineName: 'Triple Under', ropeType: 'SR', firstSession: true, sessionType: 'any' },
+      },
+      {
+        name: 'Teamspeler', emoji: '🤝',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: 'Eerste Speed Relay 4 sessie meegedaan',
+        trigger: { disciplineName: 'Speed Relay 4', ropeType: 'SR', firstSession: true, sessionType: 'any' },
+      },
+      {
+        name: 'Duo Debutant', emoji: '👯',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: 'Eerste Double Unders Relay sessie voltooid',
+        trigger: { disciplineName: 'Double Under', ropeType: 'SR', firstSession: true, sessionType: 'any' },
+      },
+      {
+        name: 'Dutch Courage', emoji: '🌀',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: 'Eerste Double Dutch Speed Sprint sessie voltooid',
+        trigger: { disciplineName: 'DD Speed Sprint', ropeType: 'DD', firstSession: true, sessionType: 'any' },
+      },
+      {
+        name: 'DD Teamlid', emoji: '🎪',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: 'Eerste Double Dutch Speed Relay sessie meegedaan',
+        trigger: { disciplineName: 'DD Speed Relay', ropeType: 'DD', firstSession: true, sessionType: 'any' },
+      },
+      {
+        name: 'Wedstrijddebutant', emoji: '🏟️',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: 'Eerste officiële wedstrijdsessie geregistreerd',
+        trigger: { disciplineName: 'any', ropeType: 'any', firstSession: true, sessionType: 'Wedstrijd' },
+      },
+
+      // ── Milestone: total session counts ─────────────────────────────────
+      {
+        name: 'Beginner', emoji: '🔰',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: '5 sessies voltooid',
+        trigger: { disciplineName: 'any', ropeType: 'any', totalSessions: 5 },
+      },
+      {
+        name: 'Vaste Springer', emoji: '🔟',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: '10 sessies voltooid',
+        trigger: { disciplineName: 'any', ropeType: 'any', totalSessions: 10 },
+      },
+      {
+        name: 'Toegewijde', emoji: '💪',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: '25 sessies voltooid',
+        trigger: { disciplineName: 'any', ropeType: 'any', totalSessions: 25 },
+      },
+      {
+        name: 'Halfhonderd', emoji: '🏅',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: '50 sessies voltooid',
+        trigger: { disciplineName: 'any', ropeType: 'any', totalSessions: 50 },
+      },
+      {
+        name: 'Eeuweling', emoji: '🏆',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: '100 sessies voltooid',
+        trigger: { disciplineName: 'any', ropeType: 'any', totalSessions: 100 },
+      },
+      {
+        name: 'IJzeren Springer', emoji: '🦾',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: '200 sessies voltooid',
+        trigger: { disciplineName: 'any', ropeType: 'any', totalSessions: 200 },
+      },
+      {
+        name: 'Legende', emoji: '👑',
+        category: 'milestone', type: 'automatic', scope: 'global',
+        description: '500 sessies voltooid — ware toewijding',
+        trigger: { disciplineName: 'any', ropeType: 'any', totalSessions: 500 },
+      },
+
+      // ── Consistency: consecutive weeks ───────────────────────────────────
+      {
+        name: 'Weekstarter', emoji: '📅',
+        category: 'consistency', type: 'automatic', scope: 'global',
+        description: '3 weken op rij getraind',
+        trigger: { disciplineName: 'any', ropeType: 'any', consecutiveWeeks: 3 },
+      },
+      {
+        name: 'Wekelijkse Krijger', emoji: '🗓️',
+        category: 'consistency', type: 'automatic', scope: 'global',
+        description: '5 weken op rij getraind',
+        trigger: { disciplineName: 'any', ropeType: 'any', consecutiveWeeks: 5 },
+      },
+      {
+        name: 'IJzeren Wil', emoji: '🔥',
+        category: 'consistency', type: 'automatic', scope: 'global',
+        description: '10 weken op rij getraind',
+        trigger: { disciplineName: 'any', ropeType: 'any', consecutiveWeeks: 10 },
+      },
+      {
+        name: 'Onstopbaar', emoji: '⚔️',
+        category: 'consistency', type: 'automatic', scope: 'global',
+        description: '20 weken op rij getraind',
+        trigger: { disciplineName: 'any', ropeType: 'any', consecutiveWeeks: 20 },
+      },
+      {
+        name: 'Seizoensveteraan', emoji: '🌟',
+        category: 'consistency', type: 'automatic', scope: 'global',
+        description: '40 weken op rij getraind — een heel seizoen',
+        trigger: { disciplineName: 'any', ropeType: 'any', consecutiveWeeks: 40 },
+      },
+
+      // ── Speed Sprint (SRSS 1×30s) — IJRU WR = 119 ───────────────────────
+      {
+        name: 'Haas', emoji: '🐇',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '40 stappen in Speed Sprint — eerste echte snelheid',
+        trigger: { disciplineName: 'Speed Sprint', ropeType: 'SR', minScore: 40, sessionType: 'any' },
+      },
+      {
+        name: 'Vos', emoji: '🦊',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '50 stappen in Speed Sprint',
+        trigger: { disciplineName: 'Speed Sprint', ropeType: 'SR', minScore: 50, sessionType: 'any' },
+      },
+      {
+        name: 'Gazelle', emoji: '🦌',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '60 stappen in Speed Sprint — clubniveau',
+        trigger: { disciplineName: 'Speed Sprint', ropeType: 'SR', minScore: 60, sessionType: 'any' },
+      },
+      {
+        name: 'Cheetah', emoji: '🐆',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '70 stappen in Speed Sprint',
+        trigger: { disciplineName: 'Speed Sprint', ropeType: 'SR', minScore: 70, sessionType: 'any' },
+      },
+      {
+        name: 'Bliksem', emoji: '⚡',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '80 stappen in Speed Sprint — sterk regionaal niveau',
+        trigger: { disciplineName: 'Speed Sprint', ropeType: 'SR', minScore: 80, sessionType: 'any' },
+      },
+      {
+        name: 'Tornado', emoji: '🌪️',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '90 stappen in Speed Sprint — nationaal niveau',
+        trigger: { disciplineName: 'Speed Sprint', ropeType: 'SR', minScore: 90, sessionType: 'any' },
+      },
+      {
+        name: 'Raket', emoji: '🚀',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '100 stappen in Speed Sprint — top nationaal',
+        trigger: { disciplineName: 'Speed Sprint', ropeType: 'SR', minScore: 100, sessionType: 'any' },
+      },
+      {
+        name: 'Supersonisch', emoji: '💥',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '110 stappen in Speed Sprint — internationaal niveau',
+        trigger: { disciplineName: 'Speed Sprint', ropeType: 'SR', minScore: 110, sessionType: 'any' },
+      },
+      {
+        name: 'Lichtsnelheid', emoji: '💫',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '119 stappen in Speed Sprint — wereldrecordniveau',
+        trigger: { disciplineName: 'Speed Sprint', ropeType: 'SR', minScore: 119, sessionType: 'any' },
+      },
+
+      // ── Endurance 2 min ──────────────────────────────────────────────────
+      {
+        name: 'Volhouder', emoji: '🏃',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '80 stappen in Endurance 2 min',
+        trigger: { disciplineName: 'Endurance 2 min', ropeType: 'SR', minScore: 80, sessionType: 'any' },
+      },
+      {
+        name: 'Loper', emoji: '🏃‍♂️',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '120 stappen in Endurance 2 min — clubniveau',
+        trigger: { disciplineName: 'Endurance 2 min', ropeType: 'SR', minScore: 120, sessionType: 'any' },
+      },
+      {
+        name: 'Doorzetter', emoji: '💚',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '160 stappen in Endurance 2 min',
+        trigger: { disciplineName: 'Endurance 2 min', ropeType: 'SR', minScore: 160, sessionType: 'any' },
+      },
+      {
+        name: 'Marathonvlieg', emoji: '🪰',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '200 stappen in Endurance 2 min — sterk regionaal',
+        trigger: { disciplineName: 'Endurance 2 min', ropeType: 'SR', minScore: 200, sessionType: 'any' },
+      },
+      {
+        name: 'Marathonraket', emoji: '🛸',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '240 stappen in Endurance 2 min — nationaal niveau',
+        trigger: { disciplineName: 'Endurance 2 min', ropeType: 'SR', minScore: 240, sessionType: 'any' },
+      },
+      {
+        name: 'Marathonlegende', emoji: '🌠',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '290 stappen in Endurance 2 min — internationaal niveau',
+        trigger: { disciplineName: 'Endurance 2 min', ropeType: 'SR', minScore: 290, sessionType: 'any' },
+      },
+
+      // ── Endurance 3 min (SRSE 1×180s) — IJRU WR = 584 ───────────────────
+      {
+        name: 'IJzersterk', emoji: '💪',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '120 stappen in Endurance 3 min',
+        trigger: { disciplineName: 'Endurance 3 min', ropeType: 'SR', minScore: 120, sessionType: 'any' },
+      },
+      {
+        name: 'Stalen Benen', emoji: '🦿',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '180 stappen in Endurance 3 min — clubniveau',
+        trigger: { disciplineName: 'Endurance 3 min', ropeType: 'SR', minScore: 180, sessionType: 'any' },
+      },
+      {
+        name: 'Titanium', emoji: '🔩',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '240 stappen in Endurance 3 min',
+        trigger: { disciplineName: 'Endurance 3 min', ropeType: 'SR', minScore: 240, sessionType: 'any' },
+      },
+      {
+        name: 'Onverwoestbaar', emoji: '🛡️',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '320 stappen in Endurance 3 min — sterk regionaal',
+        trigger: { disciplineName: 'Endurance 3 min', ropeType: 'SR', minScore: 320, sessionType: 'any' },
+      },
+      {
+        name: 'Fenomeen', emoji: '🌟',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '400 stappen in Endurance 3 min — nationaal niveau',
+        trigger: { disciplineName: 'Endurance 3 min', ropeType: 'SR', minScore: 400, sessionType: 'any' },
+      },
+      {
+        name: 'Endurance Elite', emoji: '👁️',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '500 stappen in Endurance 3 min — internationale top',
+        trigger: { disciplineName: 'Endurance 3 min', ropeType: 'SR', minScore: 500, sessionType: 'any' },
+      },
+      {
+        name: 'Wereldklasse', emoji: '🌍',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '584 stappen in Endurance 3 min — wereldrecordniveau',
+        trigger: { disciplineName: 'Endurance 3 min', ropeType: 'SR', minScore: 584, sessionType: 'any' },
+      },
+
+      // ── Triple Under (SRTU untimed) — WR = 560 ───────────────────────────
+      {
+        name: 'Eerste Drie', emoji: '3️⃣',
+        category: 'skill', type: 'automatic', scope: 'global',
+        description: '1 Triple Under gelukt — een zeldzame vaardigheid',
+        trigger: { disciplineName: 'Triple Under', ropeType: 'SR', minScore: 1, sessionType: 'any' },
+      },
+      {
+        name: 'Triple Talent', emoji: '🎯',
+        category: 'skill', type: 'automatic', scope: 'global',
+        description: '10 Triple Unders aaneengesloten',
+        trigger: { disciplineName: 'Triple Under', ropeType: 'SR', minScore: 10, sessionType: 'any' },
+      },
+      {
+        name: 'Triple Twintig', emoji: '🔮',
+        category: 'skill', type: 'automatic', scope: 'global',
+        description: '20 Triple Unders aaneengesloten',
+        trigger: { disciplineName: 'Triple Under', ropeType: 'SR', minScore: 20, sessionType: 'any' },
+      },
+      {
+        name: 'Triple Master', emoji: '🏅',
+        category: 'skill', type: 'automatic', scope: 'global',
+        description: '50 Triple Unders aaneengesloten — uitzonderlijk',
+        trigger: { disciplineName: 'Triple Under', ropeType: 'SR', minScore: 50, sessionType: 'any' },
+      },
+      {
+        name: 'Triple Honderd', emoji: '💯',
+        category: 'skill', type: 'automatic', scope: 'global',
+        description: '100 Triple Unders — nationaal topper',
+        trigger: { disciplineName: 'Triple Under', ropeType: 'SR', minScore: 100, sessionType: 'any' },
+      },
+      {
+        name: 'Triple Legende', emoji: '👑',
+        category: 'skill', type: 'automatic', scope: 'global',
+        description: '300 Triple Unders — wereld top 10',
+        trigger: { disciplineName: 'Triple Under', ropeType: 'SR', minScore: 300, sessionType: 'any' },
+      },
+      {
+        name: 'Triple Immortal', emoji: '⚗️',
+        category: 'skill', type: 'automatic', scope: 'global',
+        description: '560 Triple Unders — wereldrecordniveau',
+        trigger: { disciplineName: 'Triple Under', ropeType: 'SR', minScore: 560, sessionType: 'any' },
+      },
+
+      // ── Speed Relay 4×30 (SRSR) — WR ~450 ───────────────────────────────
+      {
+        name: 'Relayteam', emoji: '🤜',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '160 stappen in Speed Relay 4×30 — teamstart',
+        trigger: { disciplineName: 'Speed Relay 4', ropeType: 'SR', minScore: 160, sessionType: 'any' },
+      },
+      {
+        name: 'Snelle Wissel', emoji: '🔄',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '220 stappen in Speed Relay 4×30 — clubniveau',
+        trigger: { disciplineName: 'Speed Relay 4', ropeType: 'SR', minScore: 220, sessionType: 'any' },
+      },
+      {
+        name: 'Relayraketten', emoji: '🚀',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '300 stappen in Speed Relay 4×30 — regionaal niveau',
+        trigger: { disciplineName: 'Speed Relay 4', ropeType: 'SR', minScore: 300, sessionType: 'any' },
+      },
+      {
+        name: 'Relay Elite', emoji: '🥇',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '380 stappen in Speed Relay 4×30 — nationaal niveau',
+        trigger: { disciplineName: 'Speed Relay 4', ropeType: 'SR', minScore: 380, sessionType: 'any' },
+      },
+      {
+        name: 'Relay Champions', emoji: '🏆',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '450 stappen in Speed Relay 4×30 — wereldrecordniveau',
+        trigger: { disciplineName: 'Speed Relay 4', ropeType: 'SR', minScore: 450, sessionType: 'any' },
+      },
+
+      // ── Double Unders Relay (SRDR 2×30s) — WR = 190 ─────────────────────
+      {
+        name: 'Duo Starter', emoji: '👯‍♂️',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '40 stappen in Double Unders Relay',
+        trigger: { disciplineName: 'Double Under', ropeType: 'SR', minScore: 40, sessionType: 'any' },
+      },
+      {
+        name: 'Duo Kracht', emoji: '💪',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '80 stappen in Double Unders Relay — clubniveau',
+        trigger: { disciplineName: 'Double Under', ropeType: 'SR', minScore: 80, sessionType: 'any' },
+      },
+      {
+        name: 'Duo Snelheid', emoji: '⚡',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '120 stappen in Double Unders Relay — regionaal',
+        trigger: { disciplineName: 'Double Under', ropeType: 'SR', minScore: 120, sessionType: 'any' },
+      },
+      {
+        name: 'Duo Champions', emoji: '🎖️',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '160 stappen in Double Unders Relay — nationaal',
+        trigger: { disciplineName: 'Double Under', ropeType: 'SR', minScore: 160, sessionType: 'any' },
+      },
+      {
+        name: 'Duo Wereldtop', emoji: '🌍',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '190 stappen in Double Unders Relay — wereldrecord',
+        trigger: { disciplineName: 'Double Under', ropeType: 'SR', minScore: 190, sessionType: 'any' },
+      },
+
+      // ── DD Speed Sprint (DDSS 1×60s) — WR ~130 ──────────────────────────
+      {
+        name: 'DD Debutant', emoji: '🌀',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '25 stappen in DD Speed Sprint — welkom in de draden',
+        trigger: { disciplineName: 'DD Speed Sprint', ropeType: 'DD', minScore: 25, sessionType: 'any' },
+      },
+      {
+        name: 'DD Ritme', emoji: '🎵',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '40 stappen in DD Speed Sprint',
+        trigger: { disciplineName: 'DD Speed Sprint', ropeType: 'DD', minScore: 40, sessionType: 'any' },
+      },
+      {
+        name: 'DD Specialist', emoji: '🎪',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '60 stappen in DD Speed Sprint — clubniveau',
+        trigger: { disciplineName: 'DD Speed Sprint', ropeType: 'DD', minScore: 60, sessionType: 'any' },
+      },
+      {
+        name: 'DD Artiest', emoji: '🎭',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '80 stappen in DD Speed Sprint — regionaal niveau',
+        trigger: { disciplineName: 'DD Speed Sprint', ropeType: 'DD', minScore: 80, sessionType: 'any' },
+      },
+      {
+        name: 'DD Kampioen', emoji: '🏅',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '100 stappen in DD Speed Sprint — nationaal niveau',
+        trigger: { disciplineName: 'DD Speed Sprint', ropeType: 'DD', minScore: 100, sessionType: 'any' },
+      },
+      {
+        name: 'DD Elite', emoji: '💎',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '120 stappen in DD Speed Sprint — internationale top',
+        trigger: { disciplineName: 'DD Speed Sprint', ropeType: 'DD', minScore: 120, sessionType: 'any' },
+      },
+      {
+        name: 'DD Wereldster', emoji: '🌠',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '130 stappen in DD Speed Sprint — wereldrecordniveau',
+        trigger: { disciplineName: 'DD Speed Sprint', ropeType: 'DD', minScore: 130, sessionType: 'any' },
+      },
+
+      // ── DD Speed Relay (DDSR 4×30s) — WR = 416 ──────────────────────────
+      {
+        name: 'DD Relay Start', emoji: '🌀',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '120 stappen in DD Speed Relay — teamwork begint',
+        trigger: { disciplineName: 'DD Speed Relay', ropeType: 'DD', minScore: 120, sessionType: 'any' },
+      },
+      {
+        name: 'DD Relay Vlam', emoji: '🔥',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '200 stappen in DD Speed Relay — clubniveau',
+        trigger: { disciplineName: 'DD Speed Relay', ropeType: 'DD', minScore: 200, sessionType: 'any' },
+      },
+      {
+        name: 'DD Relay Kracht', emoji: '⚡',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '280 stappen in DD Speed Relay — regionaal niveau',
+        trigger: { disciplineName: 'DD Speed Relay', ropeType: 'DD', minScore: 280, sessionType: 'any' },
+      },
+      {
+        name: 'DD Relay Elite', emoji: '🥇',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '350 stappen in DD Speed Relay — nationaal niveau',
+        trigger: { disciplineName: 'DD Speed Relay', ropeType: 'DD', minScore: 350, sessionType: 'any' },
+      },
+      {
+        name: 'DD Relay Champions', emoji: '🏆',
+        category: 'speed', type: 'automatic', scope: 'global',
+        description: '416 stappen in DD Speed Relay — wereldrecordniveau',
+        trigger: { disciplineName: 'DD Speed Relay', ropeType: 'DD', minScore: 416, sessionType: 'any' },
+      },
     ];
+
     for (const badge of defaults) {
-      await addDoc(collection(db, 'badges'), { ...badge, imageUrl: '', isActive: true, createdAt: serverTimestamp() });
+      if (!existingNames.has(badge.name)) {
+        await addDoc(collection(db, 'badges'), {
+          ...badge,
+          imageUrl:  '',
+          isActive:  true,
+          createdAt: serverTimestamp(),
+        });
+      }
     }
   },
 };
@@ -674,7 +1155,6 @@ export const CounterBadgeFactory = {
     const counterBadges = badgesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
     for (const badge of counterBadges) {
-      // Counter badges still use the uid path for the counter's own earned badges
       const alreadyHas = await getDocs(query(
         collection(db, `users/${counterUid}/earnedBadges`),
         where('badgeId', '==', badge.id)
@@ -685,8 +1165,11 @@ export const CounterBadgeFactory = {
       let earned = false;
       if (t?.totalSessionsCounted != null && allCounted.length >= t.totalSessionsCounted) earned = true;
       if (!earned && t?.firstSessionCounted) {
-        const discCounted = allCounted.filter(s => s.discipline === t.discipline);
-        if (discCounted.length <= 1 && newSession.discipline === t.discipline) earned = true;
+        const discCounted = allCounted.filter(s =>
+          s.disciplineName === newSession.disciplineName ||
+          s.discipline     === newSession.discipline
+        );
+        if (discCounted.length <= 1) earned = true;
       }
 
       if (earned) {
@@ -708,7 +1191,7 @@ export const CounterBadgeFactory = {
 };
 
 // ==========================================
-// 7. CLUB MEMBER FACTORY  (Feature 8.1)
+// 7. CLUB MEMBER FACTORY
 // ==========================================
 
 export const ClubMemberFactory = {
@@ -755,22 +1238,23 @@ export const ClubMemberFactory = {
     return deleteDoc(doc(db, `clubs/${clubId}/members`, memberId));
   },
 
-  // ── Feature 8.4: session data sub-collections now live here ──────────────
-
+  // ── Session history — now stores disciplineName + ropeType ───────────────
   saveSessionHistory: (clubId, memberId, sessionData) => {
     const historyPromise = addDoc(
       collection(db, `clubs/${clubId}/members/${memberId}/sessionHistory`),
       {
-        discipline:    sessionData.discipline,
-        sessionType:   sessionData.sessionType,
-        score:         sessionData.score,
-        avgBpm:        sessionData.avgBpm   ?? 0,
-        maxBpm:        sessionData.maxBpm   ?? 0,
-        sessionStart:  sessionData.sessionStart || null,
-        sessionEnd:    serverTimestamp(),
-        countedBy:     sessionData.countedBy     || null,
-        countedByName: sessionData.countedByName || null,
-        telemetry:     sessionData.telemetry     || [],
+        discipline:     sessionData.discipline,
+        disciplineName: sessionData.disciplineName || sessionData.discipline,
+        ropeType:       sessionData.ropeType       || 'SR',
+        sessionType:    sessionData.sessionType,
+        score:          sessionData.score,
+        avgBpm:         sessionData.avgBpm   ?? 0,
+        maxBpm:         sessionData.maxBpm   ?? 0,
+        sessionStart:   sessionData.sessionStart || null,
+        sessionEnd:     serverTimestamp(),
+        countedBy:      sessionData.countedBy     || null,
+        countedByName:  sessionData.countedByName || null,
+        telemetry:      sessionData.telemetry     || [],
       }
     );
 
@@ -781,6 +1265,8 @@ export const ClubMemberFactory = {
         skipperMemberId: memberId,
         skipperClubId:   clubId,
         discipline:      sessionData.discipline,
+        disciplineName:  sessionData.disciplineName || sessionData.discipline,
+        ropeType:        sessionData.ropeType || 'SR',
         sessionType:     sessionData.sessionType,
         score:           sessionData.score,
         sessionEnd:      serverTimestamp(),
@@ -806,11 +1292,13 @@ export const ClubMemberFactory = {
 
   addRecord: (clubId, memberId, recordData) =>
     addDoc(collection(db, `clubs/${clubId}/members/${memberId}/records`), {
-      discipline:  recordData.discipline,
-      sessionType: recordData.sessionType,
-      score:       recordData.score,
-      achievedAt:  serverTimestamp(),
-      telemetry:   recordData.telemetry || [],
+      discipline:     recordData.discipline,
+      disciplineName: recordData.disciplineName || recordData.discipline,
+      ropeType:       recordData.ropeType       || 'SR',
+      sessionType:    recordData.sessionType,
+      score:          recordData.score,
+      achievedAt:     serverTimestamp(),
+      telemetry:      recordData.telemetry || [],
     }),
 
   getBestRecord: async (clubId, memberId, discipline, sessionType) => {
@@ -849,16 +1337,13 @@ export const ClubMemberFactory = {
 };
 
 // ==========================================
-// 8. USER MEMBER LINK FACTORY  (Feature 8.2)
+// 8. USER MEMBER LINK FACTORY
 // ==========================================
 
 export const UserMemberLinkFactory = {
   create: (uid, clubId, memberId, relationship = 'self', options = {}, approvedByUid = null) =>
     addDoc(collection(db, 'userMemberLinks'), {
-      uid,
-      clubId,
-      memberId,
-      relationship,
+      uid, clubId, memberId, relationship,
       canEdit:       options.canEdit       ?? (relationship === 'self'),
       canViewHealth: options.canViewHealth ?? false,
       createdAt:     serverTimestamp(),
@@ -873,7 +1358,6 @@ export const UserMemberLinkFactory = {
       const links = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const joined = await Promise.all(
         links.map(async (link) => {
-          // Defensive guard: skip links with no memberId (legacy/broken links)
           if (!link.memberId) return null;
           const memberSnap = await getDoc(doc(db, `clubs/${link.clubId}/members`, link.memberId));
           if (!memberSnap.exists()) return null;
@@ -900,7 +1384,7 @@ export const UserMemberLinkFactory = {
 
   approve: (linkId, approvedByUid) =>
     updateDoc(doc(db, 'userMemberLinks', linkId), { approvedBy: approvedByUid }),
-// Get all links for a user in a specific club (one-shot)
+
   getForUserInClub: async (uid, clubId) => {
     const q = query(
       collection(db, 'userMemberLinks'),
@@ -911,7 +1395,6 @@ export const UserMemberLinkFactory = {
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
-// Find the uid linked to a memberId with relationship 'self' (one-shot)
   getUidForMember: async (clubId, memberId) => {
     const q = query(
       collection(db, 'userMemberLinks'),
@@ -925,7 +1408,41 @@ export const UserMemberLinkFactory = {
 };
 
 // ==========================================
-// 9. AUTH FACTORY  (Feature 9.1 + 9.2)
+// 9. GOAL FACTORY
+// ==========================================
+// All goal CRUD goes through this factory — no direct Firestore calls in pages.
+// Path: clubs/{clubId}/members/{memberId}/goals/{goalId}
+
+export const GoalFactory = {
+  create: (clubId, memberId, data) =>
+    addDoc(collection(db, `clubs/${clubId}/members/${memberId}/goals`), {
+      discipline:     data.discipline     || '',
+      disciplineName: data.disciplineName || data.discipline || '',
+      targetScore:    data.targetScore    || 0,
+      targetDate:     data.targetDate     || null,
+      achievedAt:     null,
+      createdAt:      serverTimestamp(),
+    }),
+
+  update: (clubId, memberId, goalId, data) =>
+    updateDoc(doc(db, `clubs/${clubId}/members/${memberId}/goals`, goalId), data),
+
+  delete: (clubId, memberId, goalId) =>
+    deleteDoc(doc(db, `clubs/${clubId}/members/${memberId}/goals`, goalId)),
+
+  getAll: (clubId, memberId, callback) =>
+    onSnapshot(collection(db, `clubs/${clubId}/members/${memberId}/goals`), (snap) => {
+      callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }),
+
+  markAchieved: (clubId, memberId, goalId) =>
+    updateDoc(doc(db, `clubs/${clubId}/members/${memberId}/goals`, goalId), {
+      achievedAt: serverTimestamp(),
+    }),
+};
+
+// ==========================================
+// 10. AUTH FACTORY
 // ==========================================
 
 import {
@@ -942,24 +1459,13 @@ import {
 import { auth } from '../firebaseConfig';
 
 export const AuthFactory = {
-  // ── Session ──────────────────────────────────────────────────────────────
-  onAuthStateChanged: (callback) =>
-    onAuthStateChanged(auth, callback),
+  onAuthStateChanged: (callback) => onAuthStateChanged(auth, callback),
+  getCurrentUser:     () => auth.currentUser,
 
-  getCurrentUser: () => auth.currentUser,
+  signInWithEmail:  (email, password) => signInWithEmailAndPassword(auth, email, password),
+  signInWithGoogle: () => signInWithPopup(auth, new GoogleAuthProvider()),
+  registerWithEmail:(email, password) => createUserWithEmailAndPassword(auth, email, password),
 
-  // ── Sign-in ───────────────────────────────────────────────────────────────
-  signInWithEmail: (email, password) =>
-    signInWithEmailAndPassword(auth, email, password),
-
-  signInWithGoogle: () =>
-    signInWithPopup(auth, new GoogleAuthProvider()),
-
-  // ── Registration ──────────────────────────────────────────────────────────
-  registerWithEmail: (email, password) =>
-    createUserWithEmailAndPassword(auth, email, password),
-
-  // ── Email verification ────────────────────────────────────────────────────
   sendEmailVerification: () => {
     const user = auth.currentUser;
     if (!user) return Promise.reject(new Error('No current user'));
@@ -967,41 +1473,16 @@ export const AuthFactory = {
   },
 
   isEmailVerified: () => auth.currentUser?.emailVerified ?? false,
-
-  // ── Sign-out ──────────────────────────────────────────────────────────────
-  signOut: () => signOut(auth),
-
-  // ── Password ──────────────────────────────────────────────────────────────
-  sendPasswordReset: (email) =>
-    sendPasswordResetEmail(auth, email),
-
-  updatePassword: (newPassword) =>
-    updatePassword(auth.currentUser, newPassword),
+  signOut:         () => signOut(auth),
+  sendPasswordReset:(email) => sendPasswordResetEmail(auth, email),
+  updatePassword:  (newPassword) => updatePassword(auth.currentUser, newPassword),
 };
 
 // ==========================================
-// 10. ANNOUNCEMENT FACTORY  (Feature 12.1 — updated)
+// 11. ANNOUNCEMENT FACTORY
 // ==========================================
-// Schema (top-level collection):
-//
-// announcements/{announcementId}
-//   title:      string
-//   body:       string
-//   type:       "info" | "cancel" | "reminder" | "result"
-//   clubId:     string
-//   groupIds:   string[]   — group IDs this announcement targets.
-//                            Special tokens: "__ALL_USERS__", "__ALL_CLUBADMINS__"
-//   authorUid:  string
-//   authorName: string
-//   pinned:     boolean
-//   startsAt:   YYYY-MM-DD string | null   — visible from this date (default: today)
-//   expiresAt:  YYYY-MM-DD string | null   — hidden after this date (default: +30 days)
-//   createdAt:  timestamp
-//   updatedAt:  timestamp
 
 export const AnnouncementFactory = {
-  // ── Write ─────────────────────────────────────────────────────────────────
-
   create: (data, authorUid, authorName) =>
     addDoc(collection(db, 'announcements'), {
       title:      data.title      || '',
@@ -1012,8 +1493,8 @@ export const AnnouncementFactory = {
       authorUid,
       authorName,
       pinned:     data.pinned     || false,
-      startsAt:   data.startsAt   || null,   // YYYY-MM-DD string or null
-      expiresAt:  data.expiresAt  || null,   // YYYY-MM-DD string or null
+      startsAt:   data.startsAt   || null,
+      expiresAt:  data.expiresAt  || null,
       createdAt:  serverTimestamp(),
       updatedAt:  serverTimestamp(),
     }),
@@ -1024,20 +1505,11 @@ export const AnnouncementFactory = {
       updatedAt: serverTimestamp(),
     }),
 
-  delete: (announcementId) =>
-    deleteDoc(doc(db, 'announcements', announcementId)),
+  delete: (announcementId) => deleteDoc(doc(db, 'announcements', announcementId)),
 
   pin: (announcementId, pinned) =>
-    updateDoc(doc(db, 'announcements', announcementId), {
-      pinned,
-      updatedAt: serverTimestamp(),
-    }),
+    updateDoc(doc(db, 'announcements', announcementId), { pinned, updatedAt: serverTimestamp() }),
 
-  // ── Read ──────────────────────────────────────────────────────────────────
-
-  // One-shot fetch for given groupIds (pinned first, then createdAt desc).
-  // Start/expiry filtering is done client-side (isLive helper) so future-scheduled
-  // announcements are returned but hidden by the UI until their startsAt date.
   getForUser: async (groupIds) => {
     if (!groupIds || groupIds.length === 0) return [];
     const snap = await getDocs(
@@ -1055,12 +1527,8 @@ export const AnnouncementFactory = {
       });
   },
 
-  // Real-time subscription for a skipper.
   subscribeForUser: (groupIds, callback) => {
-    if (!groupIds || groupIds.length === 0) {
-      callback([]);
-      return () => {};
-    }
+    if (!groupIds || groupIds.length === 0) { callback([]); return () => {}; }
     return onSnapshot(
       query(
         collection(db, 'announcements'),
@@ -1080,8 +1548,6 @@ export const AnnouncementFactory = {
     );
   },
 
-  // Coach / manage panel: subscribe to all announcements for a specific group.
-  // Returns ALL (including inactive), so the manage panel can show/filter them.
   subscribeForGroup: (clubId, groupId, callback) =>
     onSnapshot(
       query(
@@ -1104,22 +1570,9 @@ export const AnnouncementFactory = {
 };
 
 // ==========================================
-// 11. DISCIPLINE FACTORY  (Feature: Dynamic Disciplines)
+// 12. DISCIPLINE FACTORY
 // ==========================================
-// Schema (Firestore top-level collection):
-//
-// disciplines/{disciplineId}
-//   name:            string       — e.g. "Speed Sprint"
-//   ropeType:        "SR"|"DD"   — Single Rope or Double Dutch
-//   durationSeconds: number|null  — null = untimed
-//   teamSize:        number       — 1 = individual, 2/4 = team
-//   isIndividual:    boolean
-//   specialRule:     null | "triple_under" | "relay"
-//   skippersCount:   number       — jumping skippers (differs for DD)
-//   isActive:        boolean
-//   sortOrder:       number
-//   createdAt:       timestamp
- 
+
 export const DisciplineFactory = {
   create: (data) =>
     addDoc(collection(db, 'disciplines'), {
@@ -1134,41 +1587,27 @@ export const DisciplineFactory = {
       sortOrder:       data.sortOrder       ?? 999,
       createdAt:       serverTimestamp(),
     }),
- 
-  update: (disciplineId, data) =>
-    updateDoc(doc(db, 'disciplines', disciplineId), data),
- 
-  delete: (disciplineId) =>
-    deleteDoc(doc(db, 'disciplines', disciplineId)),
- 
-  // Real-time subscription — ALL disciplines (including inactive), sorted client-side
-  // No composite index required.
+
+  update: (disciplineId, data) => updateDoc(doc(db, 'disciplines', disciplineId), data),
+  delete: (disciplineId)       => deleteDoc(doc(db, 'disciplines', disciplineId)),
+
   getAll: (callback) =>
-    onSnapshot(
-      collection(db, 'disciplines'),
-      (snap) => {
-        const docs = snap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
-        callback(docs);
-      }
-    ),
- 
-  // Real-time subscription — only active disciplines, sorted client-side
-  // No composite index required.
+    onSnapshot(collection(db, 'disciplines'), (snap) => {
+      const docs = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+      callback(docs);
+    }),
+
   getActive: (callback) =>
-    onSnapshot(
-      collection(db, 'disciplines'),
-      (snap) => {
-        const docs = snap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .filter(d => d.isActive !== false)
-          .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
-        callback(docs);
-      }
-    ),
- 
-  // One-shot fetch — active disciplines only, sorted client-side
+    onSnapshot(collection(db, 'disciplines'), (snap) => {
+      const docs = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(d => d.isActive !== false)
+        .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+      callback(docs);
+    }),
+
   getActiveOnce: async () => {
     const snap = await getDocs(collection(db, 'disciplines'));
     return snap.docs
@@ -1176,112 +1615,27 @@ export const DisciplineFactory = {
       .filter(d => d.isActive !== false)
       .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
   },
- 
-  // Seed standard rope-skipping disciplines.
-  // Idempotent: skips any discipline whose name already exists.
+
   seedDefaults: async () => {
     const existing = await getDocs(collection(db, 'disciplines'));
     const existingNames = new Set(existing.docs.map(d => d.data().name));
- 
+
     const defaults = [
-      {
-        name: 'Speed Sprint',
-        ropeType: 'SR',
-        durationSeconds: 30,
-        teamSize: 1,
-        isIndividual: true,
-        specialRule: null,
-        skippersCount: 1,
-        sortOrder: 1,
-      },
-      {
-        name: 'Endurance 2 min',
-        ropeType: 'SR',
-        durationSeconds: 120,
-        teamSize: 1,
-        isIndividual: true,
-        specialRule: null,
-        skippersCount: 1,
-        sortOrder: 2,
-      },
-      {
-        name: 'Endurance 3 min',
-        ropeType: 'SR',
-        durationSeconds: 180,
-        teamSize: 1,
-        isIndividual: true,
-        specialRule: null,
-        skippersCount: 1,
-        sortOrder: 3,
-      },
-      {
-        name: 'Triple Under',
-        ropeType: 'SR',
-        durationSeconds: null,
-        teamSize: 1,
-        isIndividual: true,
-        specialRule: 'triple_under',
-        skippersCount: 1,
-        sortOrder: 4,
-      },
-      {
-        name: 'Speed Relay 2',
-        ropeType: 'SR',
-        durationSeconds: 30,   // 30 sec per skipper
-        teamSize: 2,
-        isIndividual: false,
-        specialRule: 'relay',
-        skippersCount: 2,
-        sortOrder: 5,
-      },
-      {
-        name: 'Speed Relay 4',
-        ropeType: 'SR',
-        durationSeconds: 30,   // 30 sec per skipper
-        teamSize: 4,
-        isIndividual: false,
-        specialRule: 'relay',
-        skippersCount: 4,
-        sortOrder: 6,
-      },
-      {
-        name: 'Double Under',
-        ropeType: 'SR',
-        durationSeconds: 30,   // 30 sec per skipper
-        teamSize: 2,
-        isIndividual: false,
-        specialRule: 'relay',
-        skippersCount: 2,
-        sortOrder: 7,
-      },
-      {
-        name: 'DD Speed Relay',
-        ropeType: 'DD',
-        durationSeconds: 30,   // 30 sec per skipper
-        teamSize: 4,
-        isIndividual: false,
-        specialRule: 'relay',
-        skippersCount: 4,
-        sortOrder: 8,
-      },
-      {
-        name: 'DD Speed Sprint',
-        ropeType: 'DD',
-        durationSeconds: 60,
-        teamSize: 3,           // 1 jumping + 2 turning
-        isIndividual: false,
-        specialRule: null,
-        skippersCount: 1,      // only 1 does speed jumps
-        sortOrder: 9,
-      },
+      { name: 'Speed Sprint',    ropeType: 'SR', durationSeconds: 30,  teamSize: 1, isIndividual: true,  specialRule: null,         skippersCount: 1, sortOrder: 1 },
+      { name: 'Endurance 2 min', ropeType: 'SR', durationSeconds: 120, teamSize: 1, isIndividual: true,  specialRule: null,         skippersCount: 1, sortOrder: 2 },
+      { name: 'Endurance 3 min', ropeType: 'SR', durationSeconds: 180, teamSize: 1, isIndividual: true,  specialRule: null,         skippersCount: 1, sortOrder: 3 },
+      { name: 'Triple Under',    ropeType: 'SR', durationSeconds: null, teamSize: 1, isIndividual: true,  specialRule: 'triple_under', skippersCount: 1, sortOrder: 4 },
+      { name: 'Speed Relay 2',   ropeType: 'SR', durationSeconds: 30,  teamSize: 2, isIndividual: false, specialRule: 'relay',      skippersCount: 2, sortOrder: 5 },
+      { name: 'Speed Relay 4',   ropeType: 'SR', durationSeconds: 30,  teamSize: 4, isIndividual: false, specialRule: 'relay',      skippersCount: 4, sortOrder: 6 },
+      { name: 'Double Under',    ropeType: 'SR', durationSeconds: 30,  teamSize: 2, isIndividual: false, specialRule: 'relay',      skippersCount: 2, sortOrder: 7 },
+      { name: 'DD Speed Relay',  ropeType: 'DD', durationSeconds: 30,  teamSize: 4, isIndividual: false, specialRule: 'relay',      skippersCount: 4, sortOrder: 8 },
+      { name: 'DD Speed Sprint', ropeType: 'DD', durationSeconds: 60,  teamSize: 3, isIndividual: false, specialRule: null,         skippersCount: 1, sortOrder: 9 },
     ];
- 
+
     for (const disc of defaults) {
       if (!existingNames.has(disc.name)) {
         await addDoc(collection(db, 'disciplines'), {
-          ...disc,
-          isActive: true,
-          createdAt: serverTimestamp(),
+          ...disc, isActive: true, createdAt: serverTimestamp(),
         });
       }
     }
