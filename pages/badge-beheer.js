@@ -21,7 +21,21 @@ const CATEGORIES = [
   { value: 'consistency', label: 'Consistentie', emoji: '🗓️' },
   { value: 'skill',       label: 'Vaardigheid',  emoji: '🌟' },
 ];
-const DISCIPLINES   = ['any', '30sec', '2min', '3min'];
+
+// Discipline names match the default IJRU disciplines in DisciplineFactory.seedDefaults
+const DISCIPLINE_NAMES = [
+  'any',
+  'Speed Sprint',
+  'Endurance 2 min',
+  'Endurance 3 min',
+  'Triple Under',
+  'Speed Relay 2',
+  'Speed Relay 4',
+  'Double Under',
+  'DD Speed Sprint',
+  'DD Speed Relay',
+];
+const ROPE_TYPES  = ['any', 'SR', 'DD'];
 const SESSION_TYPES = ['any', 'Training', 'Wedstrijd'];
 const TRIGGER_KINDS = [
   { value: 'score',            label: 'Minimum score (stappen)' },
@@ -44,13 +58,191 @@ function detectTriggerKind(trigger) {
   if (trigger.minScore != null)         return 'score';
   return 'none';
 }
+
 function buildTrigger(kind, vals) {
-  const base = { discipline: vals.discipline || 'any', sessionType: vals.sessionType || 'any' };
+  const base = {
+    disciplineName: vals.disciplineName || 'any',
+    ropeType:       vals.ropeType       || 'any',
+    sessionType:    vals.sessionType    || 'any',
+  };
   if (kind === 'score')            return { ...base, minScore: parseInt(vals.minScore) || 0 };
   if (kind === 'firstSession')     return { ...base, firstSession: true };
   if (kind === 'totalSessions')    return { totalSessions: parseInt(vals.totalSessions) || 0 };
   if (kind === 'consecutiveWeeks') return { consecutiveWeeks: parseInt(vals.consecutiveWeeks) || 0 };
   return null;
+}
+
+// ─── Emoji Icon Library ───────────────────────────────────────────────────────
+const ICON_LIBRARY = {
+  'Snelheid & Kracht': [
+    '⚡','🚀','💥','🌪️','💫','🔥','💨','🛸','🌠','☄️','🌩️','🔋','⚡','🏎️',
+  ],
+  'Dieren': [
+    '🐇','🦊','🦌','🐆','🦁','🐎','🦅','🐬','🦈','🐝','🦋','🦓','🦒',
+    '🐘','🦏','🦍','🐺','🦬','🦙','🐃','🦅','🦆',
+  ],
+  'Trofeeën & Awards': [
+    '🏆','🥇','🥈','🥉','🏅','🎖️','👑','🎗️','🌟','⭐','💎','🔮','🪙','🎯',
+    '🎪','🎭','🎨','🥊','🎱','🎠',
+  ],
+  'Natuur & Groei': [
+    '🌱','🌿','🌳','🍃','🌲','🌾','🌺','🌸','🌻','🌼','🍀','🌈','❄️','🌊',
+    '🌙','☀️','🌤️','⛅','🌍','🌏','🌎','🔆',
+  ],
+  'Symbolen & Tekens': [
+    '💯','✅','❤️','💜','💙','💚','🧡','❤️‍🔥','💝','⚔️','🛡️','🔰','♾️',
+    '☯️','⚜️','🔱','💠','🔘','🔷','🔶','🟣','🟠','🟡',
+  ],
+  'Mensen & Sport': [
+    '🏃','🏃‍♂️','🤸','🤸‍♂️','💪','🦾','🧠','👊','✊','🤜','🤝','👯','👯‍♂️',
+    '🧗','🏋️','🏋️‍♂️','🤾','🤾‍♂️','⛹️','🤺','🏇',
+  ],
+  'Getallen & Mijlpalen': [
+    '1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','🔟','💯','🔰','🆙','🆕','🆒','🔝',
+  ],
+  'Touw & Skipping': [
+    '🪢','🌀','🔄','♻️','🌪️','💫','🎪','🎠','🎡','🎢',
+  ],
+  'Avontuur & Fantasy': [
+    '🧙','🧙‍♂️','🦸','🦸‍♂️','🧝','🧝‍♂️','🐉','🦄','⚗️','🔮','🗡️','🛡️',
+    '🏰','🗺️','🧭','🌋','🏔️','⛰️',
+  ],
+};
+
+// ─── EmojiPicker component ────────────────────────────────────────────────────
+function EmojiPicker({ value, onChange }) {
+  const [open,   setOpen]   = useState(false);
+  const [search, setSearch] = useState('');
+  const wrapRef = useRef(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false);
+        setSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const allEmojis = Object.values(ICON_LIBRARY).flat();
+  // Very simple search: just filter by the emoji character
+  const filtered  = search ? allEmojis.filter(e => e.includes(search)) : null;
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      {/* Trigger row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <button
+          type="button"
+          onClick={() => setOpen(v => !v)}
+          style={{
+            fontSize: '28px', width: '52px', height: '52px', borderRadius: '12px',
+            backgroundColor: '#0f172a', border: `1px solid ${open ? '#3b82f6' : '#334155'}`,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}
+        >
+          {value || '🏅'}
+        </button>
+        <div>
+          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '5px' }}>
+            Geselecteerd: <strong style={{ color: '#f1f5f9' }}>{value || '🏅'}</strong>
+          </div>
+          <button
+            type="button"
+            onClick={() => setOpen(v => !v)}
+            style={{
+              fontSize: '11px', padding: '5px 10px', borderRadius: '6px',
+              backgroundColor: '#1e293b', border: `1px solid ${open ? '#3b82f6' : '#334155'}`,
+              color: open ? '#60a5fa' : '#94a3b8', cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            {open ? '✕ Sluiten' : '📚 Bibliotheek openen'}
+          </button>
+        </div>
+      </div>
+
+      {/* Picker panel */}
+      {open && (
+        <div style={{
+          position: 'absolute', top: '60px', left: 0, zIndex: 300,
+          backgroundColor: '#1e293b', border: '1px solid #334155',
+          borderRadius: '14px', padding: '14px', width: '320px',
+          maxHeight: '380px', overflowY: 'auto',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+        }}>
+          {/* Search */}
+          <input
+            autoFocus
+            placeholder="Zoek emoji…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{
+              width: '100%', padding: '8px 10px', borderRadius: '8px',
+              backgroundColor: '#0f172a', border: '1px solid #334155',
+              color: 'white', fontSize: '13px', marginBottom: '12px',
+              boxSizing: 'border-box', fontFamily: 'inherit',
+            }}
+          />
+
+          {search && filtered !== null ? (
+            filtered.length === 0 ? (
+              <div style={{ fontSize: '12px', color: '#475569', textAlign: 'center', padding: '16px 0' }}>
+                Geen emoji gevonden.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                {filtered.map((emoji, i) => (
+                  <EmojiBtn key={i} emoji={emoji} selected={value === emoji}
+                    onClick={() => { onChange(emoji); setOpen(false); setSearch(''); }} />
+                ))}
+              </div>
+            )
+          ) : (
+            Object.entries(ICON_LIBRARY).map(([category, emojis]) => (
+              <div key={category} style={{ marginBottom: '14px' }}>
+                <div style={{
+                  fontSize: '10px', color: '#475569', fontWeight: '700',
+                  textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px',
+                }}>
+                  {category}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+                  {emojis.map((emoji, i) => (
+                    <EmojiBtn key={i} emoji={emoji} selected={value === emoji}
+                      onClick={() => { onChange(emoji); setOpen(false); }} />
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmojiBtn({ emoji, selected, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={emoji}
+      style={{
+        fontSize: '20px', width: '34px', height: '34px', borderRadius: '7px',
+        backgroundColor: selected ? '#3b82f622' : 'transparent',
+        border: selected ? '1px solid #3b82f6' : '1px solid transparent',
+        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'background-color 0.1s',
+      }}
+    >
+      {emoji}
+    </button>
+  );
 }
 
 // ─── Image Uploader ───────────────────────────────────────────────────────────
@@ -83,14 +275,14 @@ function ImageUploader({ currentUrl, onUploaded }) {
       <div style={{ flex: 1 }}>
         <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
         <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} style={bs.secondary}>
-          <Upload size={13} />{uploading ? 'Uploaden…' : preview ? 'Vervang' : 'Upload afbeelding'}
+          <Upload size={13} />{uploading ? 'Uploaden…' : preview ? 'Vervang afbeelding' : 'Upload afbeelding'}
         </button>
         {preview && (
           <button type="button" onClick={() => { setPreview(''); onUploaded(''); }} style={{ ...bs.ghost, marginLeft: '6px', color: '#ef4444' }}>
             <X size={12} /> Wis
           </button>
         )}
-        <p style={{ fontSize: '10px', color: '#475569', margin: '4px 0 0' }}>PNG / JPG · max 2 MB</p>
+        <p style={{ fontSize: '10px', color: '#475569', margin: '4px 0 0' }}>PNG / JPG · max 2 MB · overschrijft emoji</p>
       </div>
     </div>
   );
@@ -100,8 +292,8 @@ function ImageUploader({ currentUrl, onUploaded }) {
 function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, defaultScope, onSave, onClose }) {
   const isEdit = !!badge?.id;
 
-  const resolvedScope = isSuperAdmin ? (defaultScope || 'global') : 'club';
-  const defaultClubId = !isSuperAdmin && adminClubIds.length >= 1 ? adminClubIds[0] : null;
+  const resolvedScope   = isSuperAdmin ? (defaultScope || 'global') : 'club';
+  const defaultClubId   = !isSuperAdmin && adminClubIds.length >= 1 ? adminClubIds[0] : null;
 
   const [form, setForm] = useState(() => {
     if (badge) return { ...EMPTY_BADGE, ...badge };
@@ -110,8 +302,9 @@ function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, defaultScope
 
   const [triggerKind, setTriggerKind] = useState(detectTriggerKind(badge?.trigger));
   const [tv, setTv] = useState({
-    discipline:       badge?.trigger?.discipline       || 'any',
-    sessionType:      badge?.trigger?.sessionType      || 'any',
+    disciplineName: badge?.trigger?.disciplineName || badge?.trigger?.discipline || 'any',
+    ropeType:       badge?.trigger?.ropeType       || 'any',
+    sessionType:    badge?.trigger?.sessionType    || 'any',
     minScore:         badge?.trigger?.minScore         ?? '',
     totalSessions:    badge?.trigger?.totalSessions    ?? '',
     consecutiveWeeks: badge?.trigger?.consecutiveWeeks ?? '',
@@ -142,17 +335,21 @@ function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, defaultScope
           <button style={s.iconBtn} onClick={onClose}><X size={18} /></button>
         </div>
 
-        <label style={s.fieldLabel}>Afbeelding (optioneel)</label>
+        {/* Custom image upload (takes priority over emoji when set) */}
+        <label style={s.fieldLabel}>Afbeelding (optioneel — overschrijft emoji)</label>
         <ImageUploader currentUrl={form.imageUrl} onUploaded={url => set('imageUrl', url)} />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', gap: '10px', marginBottom: '12px' }}>
+        {/* Emoji / Icon picker */}
+        <div style={{ marginBottom: '14px' }}>
+          <label style={s.fieldLabel}>Icoon (emoji)</label>
+          <EmojiPicker value={form.emoji} onChange={(e) => set('emoji', e)} />
+        </div>
+
+        {/* Name */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px', marginBottom: '12px' }}>
           <div>
             <label style={s.fieldLabel}>Naam *</label>
             <input style={s.input} value={form.name} onChange={e => set('name', e.target.value)} placeholder="bijv. Club Kampioen" autoFocus />
-          </div>
-          <div>
-            <label style={s.fieldLabel}>Emoji</label>
-            <input style={{ ...s.input, textAlign: 'center', fontSize: '22px' }} value={form.emoji} onChange={e => set('emoji', e.target.value)} maxLength={2} />
           </div>
         </div>
 
@@ -196,7 +393,6 @@ function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, defaultScope
           )}
         </div>
 
-        {/* Only show club selector when there are multiple clubs to choose from */}
         {(form.scope === 'club' || !isSuperAdmin) && availableClubs.length > 1 && (
           <>
             <label style={s.fieldLabel}>Club</label>
@@ -207,7 +403,6 @@ function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, defaultScope
           </>
         )}
 
-        {/* Show which club the badge will be linked to (read-only, single club) */}
         {!isSuperAdmin && availableClubs.length === 1 && (
           <div style={{ marginBottom: '12px', padding: '8px 12px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #334155', fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Building2 size={12} color="#475569" />
@@ -215,22 +410,63 @@ function BadgeFormModal({ badge, clubs, adminClubIds, isSuperAdmin, defaultScope
           </div>
         )}
 
+        {/* ── Automatic trigger ── */}
         {form.type === 'automatic' && (
           <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', padding: '12px', marginBottom: '12px', border: '1px solid #1e293b' }}>
             <label style={{ ...s.fieldLabel, marginBottom: '8px' }}>🎯 Trigger</label>
+
+            <label style={{ ...s.fieldLabel, fontSize: '10px' }}>Trigger type</label>
             <select style={{ ...s.input, marginBottom: '10px' }} value={triggerKind} onChange={e => setTriggerKind(e.target.value)}>
               {TRIGGER_KINDS.map(k => <option key={k.value} value={k.value}>{k.label}</option>)}
             </select>
-            {triggerKind === 'score' && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-                <div><label style={s.fieldLabel}>Min. stappen</label><input type="number" style={s.input} value={tv.minScore} onChange={e => setTv(v => ({ ...v, minScore: e.target.value }))} placeholder="60" /></div>
-                <div><label style={s.fieldLabel}>Onderdeel</label><select style={s.input} value={tv.discipline} onChange={e => setTv(v => ({ ...v, discipline: e.target.value }))}>{DISCIPLINES.map(d => <option key={d}>{d}</option>)}</select></div>
-                <div><label style={s.fieldLabel}>Sessie type</label><select style={s.input} value={tv.sessionType} onChange={e => setTv(v => ({ ...v, sessionType: e.target.value }))}>{SESSION_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+
+            {/* Discipline name + rope type — shown for score and firstSession */}
+            {(triggerKind === 'score' || triggerKind === 'firstSession') && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+                <div>
+                  <label style={{ ...s.fieldLabel, fontSize: '10px' }}>Discipline</label>
+                  <select style={s.input} value={tv.disciplineName} onChange={e => setTv(v => ({ ...v, disciplineName: e.target.value }))}>
+                    {DISCIPLINE_NAMES.map(d => <option key={d} value={d}>{d === 'any' ? 'Alle disciplines' : d}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ ...s.fieldLabel, fontSize: '10px' }}>Touw type</label>
+                  <select style={s.input} value={tv.ropeType} onChange={e => setTv(v => ({ ...v, ropeType: e.target.value }))}>
+                    {ROPE_TYPES.map(r => <option key={r} value={r}>{r === 'any' ? 'SR + DD' : r === 'SR' ? '🪢 Single Rope' : '🌀 Double Dutch'}</option>)}
+                  </select>
+                </div>
               </div>
             )}
-            {triggerKind === 'firstSession'     && <div><label style={s.fieldLabel}>Onderdeel</label><select style={s.input} value={tv.discipline} onChange={e => setTv(v => ({ ...v, discipline: e.target.value }))}>{DISCIPLINES.filter(d => d !== 'any').map(d => <option key={d}>{d}</option>)}</select></div>}
-            {triggerKind === 'totalSessions'    && <div><label style={s.fieldLabel}>Aantal sessies</label><input type="number" style={s.input} value={tv.totalSessions} onChange={e => setTv(v => ({ ...v, totalSessions: e.target.value }))} placeholder="10" /></div>}
-            {triggerKind === 'consecutiveWeeks' && <div><label style={s.fieldLabel}>Weken op rij</label><input type="number" style={s.input} value={tv.consecutiveWeeks} onChange={e => setTv(v => ({ ...v, consecutiveWeeks: e.target.value }))} placeholder="5" /></div>}
+
+            {/* Session type — shown for score and firstSession */}
+            {(triggerKind === 'score' || triggerKind === 'firstSession') && (
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ ...s.fieldLabel, fontSize: '10px' }}>Sessie type</label>
+                <select style={s.input} value={tv.sessionType} onChange={e => setTv(v => ({ ...v, sessionType: e.target.value }))}>
+                  {SESSION_TYPES.map(t => <option key={t} value={t}>{t === 'any' ? 'Training + Wedstrijd' : t}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Trigger-specific value inputs */}
+            {triggerKind === 'score' && (
+              <div>
+                <label style={{ ...s.fieldLabel, fontSize: '10px' }}>Minimum stappen</label>
+                <input type="number" style={s.input} value={tv.minScore} onChange={e => setTv(v => ({ ...v, minScore: e.target.value }))} placeholder="bijv. 80" />
+              </div>
+            )}
+            {triggerKind === 'totalSessions' && (
+              <div>
+                <label style={{ ...s.fieldLabel, fontSize: '10px' }}>Aantal sessies</label>
+                <input type="number" style={s.input} value={tv.totalSessions} onChange={e => setTv(v => ({ ...v, totalSessions: e.target.value }))} placeholder="bijv. 10" />
+              </div>
+            )}
+            {triggerKind === 'consecutiveWeeks' && (
+              <div>
+                <label style={{ ...s.fieldLabel, fontSize: '10px' }}>Weken op rij</label>
+                <input type="number" style={s.input} value={tv.consecutiveWeeks} onChange={e => setTv(v => ({ ...v, consecutiveWeeks: e.target.value }))} placeholder="bijv. 5" />
+              </div>
+            )}
           </div>
         )}
 
@@ -340,14 +576,28 @@ function AwardBadgeModal({ member, clubId, adminName, onClose }) {
 }
 
 // ─── Badge Grid ───────────────────────────────────────────────────────────────
-// Reusable grid used by both the club-badges and global-badges tabs.
-// canEdit: false → read-only (no edit / deactivate / delete buttons)
 function BadgeGrid({ badges, allClubs, isSuperAdmin, canEdit, onEdit }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' }}>
       {badges.map(badge => {
         const catColor = CATEGORY_COLORS[badge.category] || '#64748b';
         const club = badge.clubId ? allClubs.find(c => c.id === badge.clubId) : null;
+
+        // Summarise trigger for display
+        const triggerSummary = (() => {
+          const t = badge.trigger;
+          if (!t) return null;
+          const parts = [];
+          const discLabel = t.disciplineName || t.discipline || '';
+          if (discLabel && discLabel !== 'any') parts.push(discLabel);
+          if (t.ropeType && t.ropeType !== 'any') parts.push(t.ropeType);
+          if (t.minScore         != null) parts.push(`≥ ${t.minScore} stappen`);
+          if (t.firstSession)             parts.push('eerste sessie');
+          if (t.totalSessions    != null) parts.push(`${t.totalSessions} sessies`);
+          if (t.consecutiveWeeks != null) parts.push(`${t.consecutiveWeeks} weken op rij`);
+          return parts.join(' · ') || null;
+        })();
+
         return (
           <div key={badge.id} style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: `1px solid ${badge.isActive ? '#334155' : '#1e293b'}`, padding: '14px', opacity: badge.isActive ? 1 : 0.55, display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -368,16 +618,12 @@ function BadgeGrid({ badges, allClubs, isSuperAdmin, canEdit, onEdit }) {
               </span>
             </div>
 
-            {badge.trigger && badge.type === 'automatic' && (
+            {triggerSummary && badge.type === 'automatic' && (
               <div style={{ fontSize: '11px', color: '#64748b', backgroundColor: '#0f172a', borderRadius: '6px', padding: '6px 8px' }}>
-                {badge.trigger.minScore != null         && `≥ ${badge.trigger.minScore} stappen`}
-                {badge.trigger.firstSession             && `Eerste ${badge.trigger.discipline} sessie`}
-                {badge.trigger.totalSessions != null    && `${badge.trigger.totalSessions} sessies totaal`}
-                {badge.trigger.consecutiveWeeks != null && `${badge.trigger.consecutiveWeeks} weken op rij`}
+                {triggerSummary}
               </div>
             )}
 
-            {/* Action buttons — only shown when canEdit is true */}
             {canEdit && (
               <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
                 <button onClick={() => onEdit(badge)} style={{ ...bs.ghost, flex: 1, justifyContent: 'center' }}>
@@ -392,7 +638,6 @@ function BadgeGrid({ badges, allClubs, isSuperAdmin, canEdit, onEdit }) {
               </div>
             )}
 
-            {/* Read-only indicator for non-editable badges */}
             {!canEdit && (
               <div style={{ marginTop: 'auto', fontSize: '10px', color: '#475569', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <Shield size={9} /> Alleen lezen
@@ -410,23 +655,20 @@ function BadgeGrid({ badges, allClubs, isSuperAdmin, canEdit, onEdit }) {
 // ════════════════════════════════════════════════════════════════════════════
 export default function BadgeBeheerPage() {
   const { uid, loading: authLoading } = useAuth();
-  const [currentUser,    setCurrentUser]    = useState(null);
-  const [isSuperAdmin,   setIsSuperAdmin]   = useState(false);
-  const [adminClubs,     setAdminClubs]     = useState([]);
-  const [allClubs,       setAllClubs]       = useState([]);
-  const [activeTab,      setActiveTab]      = useState('club-badges');
-  // bootstrapDone prevents showing the page before adminClubs is resolved,
-  // ensuring adminClubIds is always populated when the modal opens.
-  const [bootstrapDone,  setBootstrapDone]  = useState(false);
+  const [currentUser,   setCurrentUser]   = useState(null);
+  const [isSuperAdmin,  setIsSuperAdmin]  = useState(false);
+  const [adminClubs,    setAdminClubs]    = useState([]);
+  const [allClubs,      setAllClubs]      = useState([]);
+  const [activeTab,     setActiveTab]     = useState('club-badges');
+  const [bootstrapDone, setBootstrapDone] = useState(false);
 
-  // Badge management
-  const [badges,          setBadges]          = useState([]);
+  const [badges,            setBadges]            = useState([]);
   const [clubBadgeFilter,   setClubBadgeFilter]   = useState('all');
   const [globalBadgeFilter, setGlobalBadgeFilter] = useState('all');
-  const [isBadgeFormOpen, setIsBadgeFormOpen] = useState(false);
-  const [editingBadge,    setEditingBadge]    = useState(null);
+  const [isBadgeFormOpen,   setIsBadgeFormOpen]   = useState(false);
+  const [editingBadge,      setEditingBadge]      = useState(null);
+  const [seeding,           setSeeding]           = useState(false);
 
-  // Award tab
   const [selectedClubId,  setSelectedClubId]  = useState('');
   const [groups,          setGroups]          = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState('');
@@ -439,26 +681,18 @@ export default function BadgeBeheerPage() {
   useEffect(() => {
     if (authLoading || !uid) return;
 
-    // Resolves uid → memberId per club via UserMemberLinks, then checks
-    // each group in each club to see if that member has isCoach: true.
     const findCoachClubs = async (allClubs) => {
       const found = [];
-
-      // Step 1: resolve uid → memberId for each club
       const memberIdByClub = {};
       await new Promise(resolve => {
         const unsub = UserMemberLinkFactory.getForUser(uid, (profiles) => {
           unsub();
           profiles.forEach(p => {
-            if (p.link.relationship === 'self') {
-              memberIdByClub[p.member.clubId] = p.member.id;
-            }
+            if (p.link.relationship === 'self') memberIdByClub[p.member.clubId] = p.member.id;
           });
           resolve();
         });
       });
-
-      // Step 2: for each club, check if this member is a coach in any group
       for (const club of allClubs) {
         const memberId = memberIdByClub[club.id];
         if (!memberId) continue;
@@ -466,19 +700,14 @@ export default function BadgeBeheerPage() {
         for (const group of groups) {
           const members = await GroupFactory.getMembersByGroupOnce(club.id, group.id);
           const me = members.find(m => (m.memberId || m.id) === memberId);
-          if (me?.isCoach) {
-            found.push(club);
-            break; // found coach role in this club, no need to check further groups
-          }
+          if (me?.isCoach) { found.push(club); break; }
         }
       }
-
       return found;
     };
 
     UserFactory.get(uid).then(snap => {
       if (!snap.exists()) { setBootstrapDone(true); return; }
-
       const user = { id: uid, ...snap.data() };
       setCurrentUser(user);
       const role = user.role || 'user';
@@ -486,62 +715,41 @@ export default function BadgeBeheerPage() {
       if (role === 'superadmin') {
         setIsSuperAdmin(true);
         ClubFactory.getAll(clubs => {
-          setAllClubs(clubs);
-          setAdminClubs(clubs);
-          setBootstrapDone(true);
+          setAllClubs(clubs); setAdminClubs(clubs); setBootstrapDone(true);
         });
-
       } else if (role === 'clubadmin') {
         ClubFactory.getAll(allClubs => {
           setAllClubs(allClubs);
           findCoachClubs(allClubs).then(found => {
-            // clubadmin always gets access; scope to their coach clubs if found,
-            // otherwise fall back to all clubs they belong to
             setAdminClubs(found.length > 0 ? found : allClubs);
             setBootstrapDone(true);
-          }).catch(() => {
-            setAdminClubs(allClubs);
-            setBootstrapDone(true);
-          });
+          }).catch(() => { setAdminClubs(allClubs); setBootstrapDone(true); });
         });
-
       } else {
-        // Regular user — only gets access if they are a coach in at least one group
         ClubFactory.getAll(allClubs => {
           setAllClubs(allClubs);
           findCoachClubs(allClubs).then(found => {
-            setAdminClubs(found);
-            setBootstrapDone(true);
-          }).catch(() => {
-            setAdminClubs([]);
-            setBootstrapDone(true);
-          });
+            setAdminClubs(found); setBootstrapDone(true);
+          }).catch(() => { setAdminClubs([]); setBootstrapDone(true); });
         });
       }
     });
   }, [uid, authLoading]);
 
-  // Auto-select club for the Award tab if there's only one
   useEffect(() => {
-    if (adminClubs.length === 1 && !selectedClubId) {
-      setSelectedClubId(adminClubs[0].id);
-    }
+    if (adminClubs.length === 1 && !selectedClubId) setSelectedClubId(adminClubs[0].id);
   }, [adminClubs]);
 
-  // ── Badges ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!adminClubs.length) return;
     const adminClubIds = adminClubs.map(c => c.id);
     const u = BadgeFactory.getAll(all => {
-      const visible = isSuperAdmin
-        ? all
-        : all.filter(b => b.scope === 'global' || adminClubIds.includes(b.clubId));
+      const visible = isSuperAdmin ? all : all.filter(b => b.scope === 'global' || adminClubIds.includes(b.clubId));
       setBadges(visible);
     });
     return () => u();
   }, [adminClubs, isSuperAdmin]);
 
-  // ── Groups for Award tab ───────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedClubId) return;
     const u = GroupFactory.getGroupsByClub(selectedClubId, setGroups);
@@ -550,15 +758,22 @@ export default function BadgeBeheerPage() {
 
   useEffect(() => {
     if (!selectedClubId || !selectedGroupId) return;
-    const u  = GroupFactory.getMembersByGroup(selectedClubId, selectedGroupId, setGroupMembers);
+    const u1 = GroupFactory.getMembersByGroup(selectedClubId, selectedGroupId, setGroupMembers);
     const u2 = ClubMemberFactory.getAll(selectedClubId, setClubMembers);
-    return () => { u(); u2(); };
+    return () => { u1(); u2(); };
   }, [selectedClubId, selectedGroupId]);
 
-  // ── Handlers ──────────────────────────────────────────────────────────────
   const handleBadgeSave = async (data) => {
     if (data.id) { const { id, ...rest } = data; await BadgeFactory.update(id, rest); }
     else await BadgeFactory.create(data);
+  };
+
+  const handleSeedBadges = async () => {
+    if (!confirm('Standaard badges toevoegen op basis van de IJRU disciplines? Bestaande badges met dezelfde naam worden overgeslagen.')) return;
+    setSeeding(true);
+    try { await BadgeFactory.seedDefaults(); }
+    catch (e) { alert('Seeden mislukt: ' + e.message); }
+    finally { setSeeding(false); }
   };
 
   const adminClubIds = adminClubs.map(c => c.id);
@@ -569,7 +784,7 @@ export default function BadgeBeheerPage() {
     if (filter === 'manual')    return b.type === 'manual';
     if (filter === 'inactive')  return !b.isActive;
     if (filter === 'active')    return b.isActive;
-    return true; // 'all'
+    return true;
   });
 
   const allClubBadges   = badges.filter(b => b.scope === 'club');
@@ -581,8 +796,6 @@ export default function BadgeBeheerPage() {
     `${m.firstName} ${m.lastName}`.toLowerCase().includes(memberSearch.toLowerCase())
   );
 
-  // ── Guards ─────────────────────────────────────────────────────────────────
-  // Show spinner until both auth and the async bootstrap are complete
   if (authLoading || !bootstrapDone) return (
     <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <style>{pageCSS}</style>
@@ -590,11 +803,7 @@ export default function BadgeBeheerPage() {
     </div>
   );
 
-  // After bootstrap, deny access if the user is not an admin role and
-  // has no coach clubs
-  const hasAccess = isSuperAdmin
-    || currentUser?.role === 'clubadmin'
-    || adminClubs.length > 0;
+  const hasAccess = isSuperAdmin || currentUser?.role === 'clubadmin' || adminClubs.length > 0;
 
   if (!hasAccess) return (
     <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px', fontFamily: 'system-ui,sans-serif' }}>
@@ -614,7 +823,6 @@ export default function BadgeBeheerPage() {
     <div style={s.page}>
       <style>{pageCSS}</style>
 
-      {/* ── Header ── */}
       <header style={s.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{ width: '34px', height: '34px', borderRadius: '9px', backgroundColor: '#a78bfa22', border: '1px solid #a78bfa44', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -627,7 +835,6 @@ export default function BadgeBeheerPage() {
         </div>
       </header>
 
-      {/* ── Tab bar ── */}
       <div style={{ backgroundColor: '#1e293b', borderBottom: '1px solid #334155', display: 'flex' }}>
         {tabs.map(tab => {
           const Icon = tab.icon;
@@ -700,18 +907,24 @@ export default function BadgeBeheerPage() {
                   {allGlobalBadges.filter(b => b.isActive).length} actief · {allGlobalBadges.length} totaal
                 </div>
               </div>
-              {isSuperAdmin && (
-                <button onClick={() => { setEditingBadge(null); setIsBadgeFormOpen(true); }} style={bs.primary}>
-                  <Plus size={15} /> Nieuwe badge
-                </button>
-              )}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {isSuperAdmin && (
+                  <>
+                    <button onClick={handleSeedBadges} disabled={seeding} style={bs.secondary}>
+                      {seeding ? '🌱 Bezig…' : '🌱 Standaard badges laden'}
+                    </button>
+                    <button onClick={() => { setEditingBadge(null); setIsBadgeFormOpen(true); }} style={bs.primary}>
+                      <Plus size={15} /> Nieuwe badge
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
-            {/* Read-only notice for non-superadmins */}
             {!isSuperAdmin && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#a78bfa11', border: '1px solid #a78bfa33', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#a78bfa' }}>
                 <Shield size={13} style={{ flexShrink: 0 }} />
-                Globale badges worden beheerd door de systeembeheerder. Je kunt ze hier bekijken als referentie om dubbele badges te vermijden.
+                Globale badges worden beheerd door de systeembeheerder. Je kunt ze hier bekijken als referentie.
               </div>
             )}
 
@@ -726,7 +939,12 @@ export default function BadgeBeheerPage() {
             {allGlobalBadges.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 20px' }}>
                 <Shield size={40} color="#334155" style={{ marginBottom: '12px' }} />
-                <p style={{ color: '#475569', fontSize: '14px' }}>Geen globale badges gevonden.</p>
+                <p style={{ color: '#475569', fontSize: '14px', marginBottom: isSuperAdmin ? '16px' : '0' }}>Geen globale badges gevonden.</p>
+                {isSuperAdmin && (
+                  <button onClick={handleSeedBadges} disabled={seeding} style={bs.primary}>
+                    🌱 {seeding ? 'Bezig…' : 'Standaard badges laden'}
+                  </button>
+                )}
               </div>
             ) : globalBadges.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px 20px' }}>
@@ -817,7 +1035,6 @@ export default function BadgeBeheerPage() {
         )}
       </div>
 
-      {/* ── Modals ── */}
       {isBadgeFormOpen && (
         <BadgeFormModal
           badge={editingBadge}
