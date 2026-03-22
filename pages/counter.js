@@ -1468,7 +1468,7 @@ export default function CounterPage() {
             </div>
           )}
 
-          {/* ── AI beta entry ── *\/}
+          {/* ── AI beta entry ── */}
           {disciplineReady && !isRelayDisc && (
              <div style={{ padding: '0 0 4px' }}>
                <AiBetaBanner />
