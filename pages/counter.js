@@ -11,6 +11,7 @@ import {
   Award, Check, X, Zap, Medal, ChevronRight,
   SkipForward, AlertTriangle, GripVertical, RefreshCw,
 } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const AUTO_STOP_IDLE_MS  = 15000;  // individual idle auto-stop
@@ -525,6 +526,69 @@ function TripleUnderDisplay({ attempts, currentAttempt, missCountdown, onMisser 
         </button>
       )}
     </div>
+  );
+}
+
+function AiBetaBanner() {
+  return (
+    <a
+      href="/ai-counter"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        padding: '11px 14px',
+        backgroundColor: '#1e293b',
+        border: '1px solid #f59e0b44',
+        borderRadius: '10px',
+        textDecoration: 'none',
+        marginBottom: '4px',
+        transition: 'border-color 0.15s',
+      }}
+    >
+      {/* Icon */}
+      <div style={{
+        width: '34px',
+        height: '34px',
+        borderRadius: '9px',
+        backgroundColor: '#f59e0b22',
+        border: '1px solid #f59e0b44',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}>
+        {/* Use the Sparkles icon imported from lucide-react */}
+        <Sparkles size={16} color="#f59e0b" />
+      </div>
+ 
+      {/* Text */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+          <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>
+            AI Stapteller
+          </span>
+          <span style={{
+            fontSize: '9px',
+            fontWeight: '800',
+            color: '#f59e0b',
+            backgroundColor: '#f59e0b22',
+            border: '1px solid #f59e0b44',
+            borderRadius: '8px',
+            padding: '1px 6px',
+            letterSpacing: '0.5px',
+          }}>
+            BETA
+          </span>
+        </div>
+        <div style={{ fontSize: '11px', color: '#64748b' }}>
+          Automatisch tellen via camera of video
+        </div>
+      </div>
+ 
+      {/* Arrow */}
+      <ChevronRight size={15} color="#475569" style={{ flexShrink: 0 }} />
+    </a>
   );
 }
 
@@ -1402,6 +1466,13 @@ export default function CounterPage() {
                 Huidig record: <strong style={{ color: '#facc15' }}>{bestRecord.score} stappen</strong>
               </span>
             </div>
+          )}
+
+          {/* ── AI beta entry ── *\/}
+          {disciplineReady && !isRelayDisc && (
+             <div style={{ padding: '0 0 4px' }}>
+               <AiBetaBanner />
+             </div>
           )}
 
           {/* ── START button ── */}
