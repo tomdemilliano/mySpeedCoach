@@ -977,17 +977,28 @@ export default function CounterPage() {
       const bestScore = Math.max(...allAttempts.map(a => a.steps), 0);
 
       try {
+        const _tuDisc = getDisc(disciplineId);
         await ClubMemberFactory.saveSessionHistory(clubId, memberId, {
-          discipline: disciplineId, sessionType, score: bestScore,
+          discipline:     disciplineId,
+          disciplineName: _tuDisc?.name     || disciplineId,
+          ropeType:       _tuDisc?.ropeType || 'SR',
+          sessionType, score: bestScore,
           avgBpm: 0, maxBpm: 0, sessionStart: null, telemetry: [],
-          countedBy: counterUser?.id || null,
+          countedBy:     counterUser?.id || null,
           countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
         });
       } catch (e) { console.error('Failed to save TU session:', e); }
 
       const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, memberId);
       try {
-        const newBadges = await BadgeFactory.checkAndAward(clubId, memberId, { score: bestScore, discipline: disciplineId, sessionType }, freshHistory);
+        const _tuDiscBadge = getDisc(disciplineId);
+        const newBadges = await BadgeFactory.checkAndAward(clubId, memberId, {
+          score: bestScore,
+          discipline:     disciplineId,
+          disciplineName: _tuDiscBadge?.name     || disciplineId,
+          ropeType:       _tuDiscBadge?.ropeType || 'SR',
+          sessionType,
+        }, freshHistory);
         if (newBadges.length > 0) setNewlyEarnedBadges(newBadges);
       } catch (e) { console.error('Badge check failed:', e); }
 
@@ -1061,18 +1072,29 @@ export default function CounterPage() {
       const clubId       = selectedClubId;
 
       try {
+        const _relayDisc = getDisc(disciplineId);
         await ClubMemberFactory.saveSessionHistory(clubId, leadMemberId, {
-          discipline: disciplineId, sessionType, score: total,
+          discipline:     disciplineId,
+          disciplineName: _relayDisc?.name     || disciplineId,
+          ropeType:       _relayDisc?.ropeType || 'SR',
+          sessionType, score: total,
           avgBpm: 0, maxBpm: 0, sessionStart: null, telemetry: [],
           teamResults: relayResults.map((r, i) => ({ ...r, name: relayOrder[i]?.name || '' })),
-          countedBy: counterUser?.id || null,
+          countedBy:     counterUser?.id || null,
           countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
         });
       } catch (e) { console.error('Failed to save relay session:', e); }
 
       const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, leadMemberId);
       try {
-        const newBadges = await BadgeFactory.checkAndAward(clubId, leadMemberId, { score: total, discipline: disciplineId, sessionType }, freshHistory);
+        const _relayDiscBadge = getDisc(disciplineId);
+        const newBadges = await BadgeFactory.checkAndAward(clubId, leadMemberId, {
+          score: total,
+          discipline:     disciplineId,
+          disciplineName: _relayDiscBadge?.name     || disciplineId,
+          ropeType:       _relayDiscBadge?.ropeType || 'SR',
+          sessionType,
+        }, freshHistory);
         if (newBadges.length > 0) setNewlyEarnedBadges(newBadges);
       } catch (e) { console.error('Badge check failed:', e); }
     };
@@ -1092,17 +1114,28 @@ export default function CounterPage() {
     const maxBpm    = bpmValues.length ? Math.max(...bpmValues) : liveBpm;
 
     try {
+      const _disc = getDisc(disciplineId);
       await ClubMemberFactory.saveSessionHistory(clubId, memberId, {
-        discipline: disciplineId, sessionType, score, avgBpm, maxBpm,
+        discipline:     disciplineId,
+        disciplineName: _disc?.name     || disciplineId,
+        ropeType:       _disc?.ropeType || 'SR',
+        sessionType, score, avgBpm, maxBpm,
         sessionStart: currentData.startTime || sessionStartRef.current, telemetry,
-        countedBy: counterUser?.id || null,
+        countedBy:     counterUser?.id || null,
         countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
       });
     } catch (e) { console.error('Failed to save session history:', e); }
 
     const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, memberId);
     try {
-      const newBadges = await BadgeFactory.checkAndAward(clubId, memberId, { score, discipline: disciplineId, sessionType }, freshHistory);
+      const _discForBadge = getDisc(disciplineId);
+      const newBadges = await BadgeFactory.checkAndAward(clubId, memberId, {
+        score,
+        discipline:     disciplineId,
+        disciplineName: _discForBadge?.name     || disciplineId,
+        ropeType:       _discForBadge?.ropeType || 'SR',
+        sessionType,
+      }, freshHistory);
       if (newBadges.length > 0) setNewlyEarnedBadges(newBadges);
     } catch (e) { console.error('Badge check failed:', e); }
 
