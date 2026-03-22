@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
-import { BadgeFactory, ClubMemberFactory, UserMemberLinkFactory, UserFactory } from '../constants/dbSchema';
+import {
+  BadgeFactory, ClubMemberFactory, UserMemberLinkFactory,
+  GoalFactory,
+} from '../constants/dbSchema';
 import { useDisciplines } from '../hooks/useDisciplines';
 import {
   Trophy, Target, Medal, Award, Check, ChevronDown, ChevronUp,
   Zap, Plus, Trash2, Star, Timer
 } from 'lucide-react';
-import { db } from '../firebaseConfig';
-import { addDoc, collection, deleteDoc, doc } from 'firebase/firestore';
 
 const COOKIE_KEY = 'msc_uid';
 const getCookie = () => {
@@ -60,7 +61,7 @@ function BadgeItem({ badge, earned, earnedDate, awardedByName, note }) {
 // ─── Badges tab ───────────────────────────────────────────────────────────────
 function BadgesTab({ memberContext }) {
   const [earnedBadges, setEarnedBadges] = useState([]);
-  const [allBadges, setAllBadges] = useState([]);
+  const [allBadges,    setAllBadges]    = useState([]);
   const [activeCategory, setActiveCategory] = useState('all');
 
   useEffect(() => {
@@ -128,7 +129,7 @@ function BadgesTab({ memberContext }) {
 // ─── Records tab ──────────────────────────────────────────────────────────────
 function RecordsTab({ memberContext }) {
   const [records, setRecords] = useState([]);
-  const { disciplines } = useDisciplines();
+  const { disciplines, getLabel } = useDisciplines();
 
   useEffect(() => {
     if (!memberContext || disciplines.length === 0) return;
@@ -164,7 +165,9 @@ function RecordsTab({ memberContext }) {
           <div>
             <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Beste persoonlijk record</div>
             <div style={{ fontSize: '32px', fontWeight: '900', color: '#facc15', lineHeight: 1 }}>{bestOverall.score}<span style={{ fontSize: '14px', color: '#94a3b8', fontWeight: '400', marginLeft: '6px' }}>stappen</span></div>
-            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{bestOverall.disciplineName || bestOverall.discipline} · {bestOverall.sessionType}</div>
+            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+              {bestOverall.disciplineName || getLabel(bestOverall.discipline)} · {bestOverall.sessionType}
+            </div>
           </div>
         </div>
       )}
@@ -207,17 +210,22 @@ function RecordsTab({ memberContext }) {
 
 // ─── Goals tab ────────────────────────────────────────────────────────────────
 function GoalsTab({ memberContext }) {
-  const [goals, setGoals] = useState([]);
+  const [goals,   setGoals]   = useState([]);
   const [records, setRecords] = useState([]);
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ disciplineId: '', targetScore: '', targetDate: '' });
-  const { disciplines } = useDisciplines();
+  const [form, setForm] = useState({ disciplineId: '', disciplineName: '', targetScore: '', targetDate: '' });
+  const { disciplines, getLabel } = useDisciplines();
 
+  // Subscribe to goals via GoalFactory
   useEffect(() => {
     if (!memberContext || disciplines.length === 0) return;
     const { clubId, memberId } = memberContext;
-    const unsub = ClubMemberFactory.getGoals(clubId, memberId, setGoals);
-    const unsubs2 = [];
+
+    // Goals via GoalFactory
+    const unsubGoals = GoalFactory.getAll(clubId, memberId, setGoals);
+
+    // Records for progress bars
+    const unsubs = [];
     disciplines.forEach(disc => SESSION_TYPES.forEach(st => {
       const u = ClubMemberFactory.subscribeToRecords(clubId, memberId, disc.id, st, (rec) => {
         if (rec) {
@@ -227,44 +235,52 @@ function GoalsTab({ memberContext }) {
           });
         }
       });
-      unsubs2.push(u);
+      unsubs.push(u);
     }));
-    return () => { unsub(); unsubs2.forEach(u => u && u()); };
+
+    return () => { unsubGoals(); unsubs.forEach(u => u && u()); };
   }, [memberContext, disciplines]);
 
   // Set default discipline when loaded
   useEffect(() => {
     if (disciplines.length > 0 && !form.disciplineId) {
-      setForm(f => ({ ...f, disciplineId: disciplines[0].id }));
+      setForm(f => ({
+        ...f,
+        disciplineId:   disciplines[0].id,
+        disciplineName: disciplines[0].name,
+      }));
     }
   }, [disciplines]);
 
   const handleAdd = async () => {
     if (!form.targetScore || !memberContext || !form.disciplineId) return;
     const { clubId, memberId } = memberContext;
-    await addDoc(collection(db, `clubs/${clubId}/members/${memberId}/goals`), {
-      discipline: form.disciplineId,
-      targetScore: parseInt(form.targetScore),
-      targetDate: form.targetDate ? new Date(form.targetDate) : null,
-      achievedAt: null,
+
+    await GoalFactory.create(clubId, memberId, {
+      discipline:     form.disciplineId,
+      disciplineName: form.disciplineName,
+      targetScore:    parseInt(form.targetScore),
+      targetDate:     form.targetDate ? new Date(form.targetDate) : null,
     });
-    setForm({ disciplineId: disciplines[0]?.id || '', targetScore: '', targetDate: '' });
+
+    setForm(f => ({
+      ...f,
+      disciplineId:   disciplines[0]?.id   || '',
+      disciplineName: disciplines[0]?.name || '',
+      targetScore:    '',
+      targetDate:     '',
+    }));
     setShowModal(false);
   };
 
   const handleDelete = async (goalId) => {
     if (!window.confirm('Doel verwijderen?') || !memberContext) return;
     const { clubId, memberId } = memberContext;
-    await deleteDoc(doc(db, `clubs/${clubId}/members/${memberId}/goals`, goalId));
+    await GoalFactory.delete(clubId, memberId, goalId);
   };
 
   const getBestRecord = (disciplineId) =>
     records.filter(r => r.discipline === disciplineId).reduce((best, r) => r.score > (best?.score || 0) ? r : best, null);
-
-  const getDiscName = (disciplineId) => {
-    const disc = disciplines.find(d => d.id === disciplineId);
-    return disc?.name || disciplineId;
-  };
 
   const activeGoals   = goals.filter(g => !g.achievedAt);
   const achievedGoals = goals.filter(g => !!g.achievedAt);
@@ -287,13 +303,14 @@ function GoalsTab({ memberContext }) {
               <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>Actief</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {activeGoals.map(g => {
-                  const best = getBestRecord(g.discipline);
+                  const best     = getBestRecord(g.discipline);
                   const progress = best ? Math.min(100, Math.round((best.score / g.targetScore) * 100)) : 0;
+                  const discName = g.disciplineName || getLabel(g.discipline);
                   return (
                     <div key={g.id} style={{ backgroundColor: '#1e293b', borderRadius: '12px', padding: '14px', border: '1px solid #334155' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                         <div>
-                          <div style={{ fontWeight: '700', fontSize: '15px', color: '#f1f5f9' }}>{getDiscName(g.discipline)} — {g.targetScore} stappen</div>
+                          <div style={{ fontWeight: '700', fontSize: '15px', color: '#f1f5f9' }}>{discName} — {g.targetScore} stappen</div>
                           {g.targetDate && <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Deadline: {new Date(g.targetDate?.seconds ? g.targetDate.seconds * 1000 : g.targetDate).toLocaleDateString('nl-BE')}</div>}
                         </div>
                         <button onClick={() => handleDelete(g.id)} style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', padding: '4px' }}><Trash2 size={14} /></button>
@@ -315,16 +332,19 @@ function GoalsTab({ memberContext }) {
             <div>
               <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>Bereikt 🎉</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {achievedGoals.map(g => (
-                  <div key={g.id} style={{ backgroundColor: '#1e293b', borderRadius: '10px', padding: '12px 14px', border: '1px solid #22c55e33', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#22c55e22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Check size={14} color="#22c55e" /></div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '14px', fontWeight: '600', color: '#22c55e' }}>{getDiscName(g.discipline)} — {g.targetScore} stappen</div>
-                      {g.achievedAt?.seconds && <div style={{ fontSize: '11px', color: '#475569', marginTop: '1px' }}>Bereikt op {new Date(g.achievedAt.seconds * 1000).toLocaleDateString('nl-BE')}</div>}
+                {achievedGoals.map(g => {
+                  const discName = g.disciplineName || getLabel(g.discipline);
+                  return (
+                    <div key={g.id} style={{ backgroundColor: '#1e293b', borderRadius: '10px', padding: '12px 14px', border: '1px solid #22c55e33', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#22c55e22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Check size={14} color="#22c55e" /></div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '14px', fontWeight: '600', color: '#22c55e' }}>{discName} — {g.targetScore} stappen</div>
+                        {g.achievedAt?.seconds && <div style={{ fontSize: '11px', color: '#475569', marginTop: '1px' }}>Bereikt op {new Date(g.achievedAt.seconds * 1000).toLocaleDateString('nl-BE')}</div>}
+                      </div>
+                      <button onClick={() => handleDelete(g.id)} style={{ background: 'none', border: 'none', color: '#334155', cursor: 'pointer', padding: '4px' }}><Trash2 size={14} /></button>
                     </div>
-                    <button onClick={() => handleDelete(g.id)} style={{ background: 'none', border: 'none', color: '#334155', cursor: 'pointer', padding: '4px' }}><Trash2 size={14} /></button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -338,14 +358,29 @@ function GoalsTab({ memberContext }) {
               <h3 style={{ margin: 0, color: '#f1f5f9', fontSize: '16px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px' }}><Target size={18} color="#22c55e" /> Doel toevoegen</h3>
               <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}>✕</button>
             </div>
+
             <label style={css.label}>Onderdeel</label>
-            <select style={css.select} value={form.disciplineId} onChange={e => setForm({ ...form, disciplineId: e.target.value })}>
+            <select
+              style={css.select}
+              value={form.disciplineId}
+              onChange={e => {
+                const disc = disciplines.find(d => d.id === e.target.value);
+                setForm(f => ({
+                  ...f,
+                  disciplineId:   e.target.value,
+                  disciplineName: disc?.name || '',
+                }));
+              }}
+            >
               {disciplines.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
+
             <label style={{ ...css.label, marginTop: '14px' }}>Doelstelling (stappen)</label>
             <input style={css.input} type="number" placeholder="bijv. 150" value={form.targetScore} onChange={e => setForm({ ...form, targetScore: e.target.value })} />
+
             <label style={{ ...css.label, marginTop: '14px' }}>Deadline (optioneel)</label>
             <input style={css.input} type="date" value={form.targetDate} onChange={e => setForm({ ...form, targetDate: e.target.value })} />
+
             <button onClick={handleAdd} style={{ width: '100%', padding: '13px', backgroundColor: '#22c55e', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '15px', cursor: 'pointer', marginTop: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
               <Plus size={16} /> Doel toevoegen
             </button>
@@ -360,9 +395,9 @@ function GoalsTab({ memberContext }) {
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════
 export default function AchievementsPage() {
-  const [activeTab, setActiveTab] = useState('badges');
-  const [memberContext, setMemberContext] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [activeTab,      setActiveTab]      = useState('badges');
+  const [memberContext,  setMemberContext]  = useState(null);
+  const [loading,        setLoading]        = useState(true);
 
   useEffect(() => {
     const uid = getCookie();
@@ -407,9 +442,9 @@ export default function AchievementsPage() {
 
       <div style={{ backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: '52px', zIndex: 40 }}>
         <div style={{ maxWidth: '680px', margin: '0 auto', display: 'flex' }}>
-          <TabBtn active={activeTab === 'badges'} onClick={() => setActiveTab('badges')} icon={Medal}  label="Badges"  color="#f59e0b" />
+          <TabBtn active={activeTab === 'badges'}  onClick={() => setActiveTab('badges')}  icon={Medal}  label="Badges"  color="#f59e0b" />
           <TabBtn active={activeTab === 'records'} onClick={() => setActiveTab('records')} icon={Trophy} label="Records" color="#facc15" />
-          <TabBtn active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} icon={Target} label="Doelen"  color="#22c55e" />
+          <TabBtn active={activeTab === 'goals'}   onClick={() => setActiveTab('goals')}   icon={Target} label="Doelen"  color="#22c55e" />
         </div>
       </div>
 
@@ -425,11 +460,11 @@ export default function AchievementsPage() {
 const pageCSS = `* { box-sizing: border-box; } @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`;
 
 const css = {
-  statCard: { backgroundColor: '#1e293b', borderRadius: '12px', padding: '16px', border: '1px solid #334155', textAlign: 'center' },
-  emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 20px', textAlign: 'center' },
+  statCard:     { backgroundColor: '#1e293b', borderRadius: '12px', padding: '16px', border: '1px solid #334155', textAlign: 'center' },
+  emptyState:   { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 20px', textAlign: 'center' },
   modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 500 },
-  modal: { backgroundColor: '#1e293b', borderRadius: '20px 20px 0 0', padding: '24px', width: '100%', maxWidth: '480px', border: '1px solid #334155', maxHeight: '90vh', overflowY: 'auto' },
-  label: { display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: '600' },
-  input: { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '16px', boxSizing: 'border-box' },
-  select: { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '16px' },
+  modal:        { backgroundColor: '#1e293b', borderRadius: '20px 20px 0 0', padding: '24px', width: '100%', maxWidth: '480px', border: '1px solid #334155', maxHeight: '90vh', overflowY: 'auto' },
+  label:        { display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: '600' },
+  input:        { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '16px', boxSizing: 'border-box' },
+  select:       { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '16px' },
 };
