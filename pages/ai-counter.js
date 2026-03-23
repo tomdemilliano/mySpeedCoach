@@ -26,7 +26,7 @@ import {
   ArrowLeft, Camera, Upload, FlipHorizontal, Play, Square,
   Zap, AlertTriangle, CheckCircle2, RefreshCw, Eye, EyeOff,
   Trophy, Info, Video, SlidersHorizontal, ChevronDown, ChevronUp,
-  Users, Cpu,
+  Users, Cpu, Volume2, VolumeX,
 } from 'lucide-react';
 
 // ─── CDN URLs ─────────────────────────────────────────────────────────────────
@@ -39,9 +39,6 @@ const MP_CAMERA  = 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.167
 const MP_DRAWING = 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js';
 
 // ─── Backend definitions ──────────────────────────────────────────────────────
-// Ankle keypoint indices:
-//   MediaPipe  left=27  right=28  (coords normalised 0-1)
-//   TF.js      left=15  right=16  (coords in pixels; we normalise after)
 export const BACKENDS = {
   'mediapipe': {
     id: 'mediapipe', label: 'MediaPipe BlazePose',
@@ -71,7 +68,6 @@ export const BACKENDS = {
   },
 };
 
-// Cache TF.js detector instances so switching back doesn't reload the model
 const _tfjsCache = {};
 
 // ─── Script loader ────────────────────────────────────────────────────────────
@@ -86,23 +82,19 @@ function loadScript(src) {
   });
 }
 
-// ─── Backend loader (lazy, cached) ───────────────────────────────────────────
+// ─── Backend loader ───────────────────────────────────────────────────────────
 async function loadBackend(backendId) {
   const def = BACKENDS[backendId];
   if (!def) throw new Error('Unknown backend: ' + backendId);
-
   if (backendId === 'mediapipe') {
     await Promise.all([loadScript(MP_POSE), loadScript(MP_CAMERA), loadScript(MP_DRAWING)]);
-    return null; // MediaPipe detector created per-session
+    return null;
   }
-
-  // TF.js path (serial loads to avoid race conditions)
   await loadScript(TFJS_CORE);
   await loadScript(TFJS_CONV);
   await loadScript(TFJS_WEBGL);
   await loadScript(TFJS_POSE);
   if (!window.poseDetection) throw new Error('TF.js pose-detection not available');
-
   if (_tfjsCache[backendId]) return _tfjsCache[backendId];
   const model    = window.poseDetection.SupportedModels[def.tfjsModel];
   const detector = await window.poseDetection.createDetector(model, def.tfjsConfig());
@@ -115,107 +107,40 @@ const DEFAULT_CONFIG = {
   peakMinProminence:  0.012,
   peakMinIntervalMs: 120,
   missGapMs:         600,
-  kalmanEnabled:     true,   // run ankle Y through Kalman filter before step detection
-  kalmanProcessNoise: 0.01,  // Q — how much the true ankle position can jump frame-to-frame
-                             //   low  (~0.001): trusts the model less, very smooth but lags
-                             //   high (~0.1):   trusts the model more, follows real motion closely
+  kalmanEnabled:     true,
+  kalmanProcessNoise: 0.01,
 };
 
 // ─── Ankle Kalman Filter ──────────────────────────────────────────────────────
-//
-// A scalar (1-D) Kalman filter for the normalised ankle Y coordinate.
-//
-// State: x̂  — estimated true ankle Y (0-1)
-// Noise:
-//   Q  — process noise  (how fast the ankle actually moves, tunable)
-//   R  — measurement noise (model uncertainty, scaled by 1/confidence²)
-//
-// On occlusion (confidence < threshold) we skip the measurement update entirely
-// and let the filter coast on its own velocity estimate, so the StepDetector
-// sees a smooth extrapolated curve instead of a sudden jump to 0 or NaN.
-//
-// Two-state model: [position, velocity]
-//   x[k+1] = F·x[k] + w     (w ~ N(0,Q))
-//   z[k]   = H·x[k] + v     (v ~ N(0,R))
-//
 class AnkleKalmanFilter {
   constructor() { this.reset(); }
-
   reset() {
-    // State vector  [y, dy/dt]
-    this._x = null;          // null = not yet initialised
-    this._v = 0;             // velocity estimate (normalised units / frame)
-    // Error covariance  (2×2 as 4 scalars: [p00, p01, p10, p11])
-    this._p00 = 1; this._p01 = 0;
-    this._p10 = 0; this._p11 = 1;
+    this._x = null; this._v = 0;
+    this._p00 = 1; this._p01 = 0; this._p10 = 0; this._p11 = 1;
     this._lastT = null;
   }
-
-  // Returns the filtered Y value.
-  // rawY        — normalised 0-1 from the pose model (may be stale/occluded)
-  // confidence  — model confidence 0-1 (set to 0 when ankle not visible)
-  // t           — timestamp in ms (Date.now())
-  // Q           — process noise variance (from user config)
   update(rawY, confidence, t, Q = 0.01) {
-    // ── First ever call: initialise directly from measurement ──────────────
-    if (this._x === null) {
-      this._x = rawY; this._v = 0; this._lastT = t;
-      return rawY;
-    }
-
-    // ── dt in "frame units" (normalise to 33 ms ≈ 30 FPS baseline) ─────────
-    const dt = Math.min((t - this._lastT) / 33.0, 4.0); // clamp to 4 frames
+    if (this._x === null) { this._x = rawY; this._v = 0; this._lastT = t; return rawY; }
+    const dt = Math.min((t - this._lastT) / 33.0, 4.0);
     this._lastT = t;
-
-    // ── Predict step ────────────────────────────────────────────────────────
-    // x_pred = x + v·dt
     const xPred = this._x + this._v * dt;
-    const vPred = this._v; // constant-velocity model: velocity stays the same
-
-    // Propagate covariance:  P_pred = F·P·Fᵀ + Q_mat
-    // F = [[1, dt],[0, 1]]
+    const vPred = this._v;
     const p00 = this._p00 + dt * (this._p10 + this._p01) + dt * dt * this._p11 + Q;
     const p01 = this._p01 + dt * this._p11;
     const p10 = this._p10 + dt * this._p11;
-    const p11 = this._p11 + Q * 0.1; // velocity process noise (10% of position)
-
-    // ── Update step ─────────────────────────────────────────────────────────
-    // Only update from measurement if confidence is high enough.
-    // R scales inversely with confidence² — a half-confident reading is
-    // four times noisier than a fully confident one.
-    const CONF_THRESHOLD = 0.25; // below this, treat as fully occluded
+    const p11 = this._p11 + Q * 0.1;
+    const CONF_THRESHOLD = 0.25;
     if (confidence >= CONF_THRESHOLD) {
-      // Measurement noise: base value 0.0025 + uncertainty from low confidence
       const R = 0.0025 / Math.max(confidence * confidence, 0.04);
-
-      // Kalman gain:  K = P_pred·Hᵀ / (H·P_pred·Hᵀ + R)
-      // H = [1, 0]  (we observe position only, not velocity)
-      const S  = p00 + R;            // innovation covariance
-      const K0 = p00 / S;            // gain for position state
-      const K1 = p10 / S;            // gain for velocity state
-
-      const innov = rawY - xPred;    // innovation (measurement residual)
-
-      this._x   = xPred + K0 * innov;
-      this._v   = vPred + K1 * innov;
-
-      // Update covariance:  P = (I - K·H)·P_pred
-      this._p00 = (1 - K0) * p00;
-      this._p01 = (1 - K0) * p01;
-      this._p10 = p10 - K1 * p00;
-      this._p11 = p11 - K1 * p01;
+      const S  = p00 + R; const K0 = p00 / S; const K1 = p10 / S;
+      const innov = rawY - xPred;
+      this._x = xPred + K0 * innov; this._v = vPred + K1 * innov;
+      this._p00 = (1 - K0) * p00; this._p01 = (1 - K0) * p01;
+      this._p10 = p10 - K1 * p00; this._p11 = p11 - K1 * p01;
     } else {
-      // Occluded: coast on prediction, widen covariance so next measurement
-      // gets more weight once the ankle reappears.
-      this._x   = xPred;
-      this._v   = vPred;
-      this._p00 = p00 * 1.5;
-      this._p01 = p01;
-      this._p10 = p10;
-      this._p11 = p11 * 1.5;
+      this._x = xPred; this._v = vPred;
+      this._p00 = p00 * 1.5; this._p01 = p01; this._p10 = p10; this._p11 = p11 * 1.5;
     }
-
-    // Clamp to valid range
     this._x = Math.max(0, Math.min(1, this._x));
     return this._x;
   }
@@ -283,6 +208,86 @@ function waitForVideoReady(video, ms = 12000) {
   });
 }
 
+// ─── Live Signal Graph Overlay ────────────────────────────────────────────────
+// Shown as a floating panel at the bottom of the video during active analysis.
+function LiveSignalOverlay({ signalHistory, config, visible }) {
+  const gRef = useRef(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    const canvas = gRef.current; if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Background
+    ctx.fillStyle = 'rgba(15,23,42,0.82)';
+    ctx.roundRect(0, 0, w, h, 6); ctx.fill();
+
+    // Grid
+    ctx.strokeStyle = 'rgba(51,65,85,0.5)'; ctx.lineWidth = 1;
+    for (let i = 1; i <= 3; i++) {
+      ctx.beginPath(); ctx.moveTo(0, (h / 4) * i); ctx.lineTo(w, (h / 4) * i); ctx.stroke();
+    }
+
+    if (!signalHistory || signalHistory.length < 2) {
+      ctx.fillStyle = 'rgba(100,116,139,0.7)';
+      ctx.font = '9px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText('wacht op signaal…', w / 2, h / 2 + 3);
+      return;
+    }
+
+    const vals = signalHistory.map(p => p.y);
+    const mn = Math.min(...vals), mx = Math.max(...vals), rng = mx - mn || 0.01;
+    const toY = v => h - ((v - mn) / rng) * h * 0.82 - h * 0.09;
+
+    // Threshold line
+    const ty = h - ((config.peakMinProminence / (rng + config.peakMinProminence)) * h * 0.75 + h * 0.09);
+    ctx.strokeStyle = 'rgba(245,158,11,0.45)'; ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(w, ty); ctx.stroke(); ctx.setLineDash([]);
+
+    // Raw signal when Kalman on
+    const hasRaw = config.kalmanEnabled && signalHistory.some(p => p.raw !== undefined && Math.abs(p.raw - p.y) > 0.001);
+    if (hasRaw) {
+      ctx.strokeStyle = 'rgba(71,85,105,0.7)'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      signalHistory.forEach((p, i) => {
+        const x = (i / (signalHistory.length - 1)) * w;
+        i === 0 ? ctx.moveTo(x, toY(p.raw ?? p.y)) : ctx.lineTo(x, toY(p.raw ?? p.y));
+      });
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+
+    // Filtered signal
+    ctx.strokeStyle = config.kalmanEnabled ? '#00d4aa' : '#60a5fa'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    signalHistory.forEach((p, i) => {
+      const x = (i / (signalHistory.length - 1)) * w;
+      i === 0 ? ctx.moveTo(x, toY(p.y)) : ctx.lineTo(x, toY(p.y));
+    });
+    ctx.stroke();
+  }, [signalHistory, visible, config.peakMinProminence, config.kalmanEnabled]);
+
+  if (!visible) return null;
+
+  return (
+    <div style={{ position: 'absolute', bottom: '18px', left: '10px', right: '10px', zIndex: 16, pointerEvents: 'none' }}>
+      <canvas ref={gRef} width={300} height={54}
+        style={{ width: '100%', height: '54px', borderRadius: '6px', display: 'block', border: '1px solid rgba(51,65,85,0.5)' }} />
+      <div style={{ display: 'flex', gap: '12px', marginTop: '3px', paddingLeft: '2px' }}>
+        <span style={{ fontSize: '9px', color: '#00d4aa', display: 'flex', alignItems: 'center', gap: '3px' }}>
+          <span style={{ width: '10px', height: '2px', backgroundColor: '#00d4aa', display: 'inline-block' }} />
+          enkel
+        </span>
+        <span style={{ fontSize: '9px', color: 'rgba(245,158,11,0.8)', display: 'flex', alignItems: 'center', gap: '3px' }}>
+          <span style={{ width: '10px', height: '0px', borderTop: '1px dashed rgba(245,158,11,0.7)', display: 'inline-block' }} />
+          drempel
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ─── Backend Selector ─────────────────────────────────────────────────────────
 function BackendSelector({ value, onChange, disabled, loadingId }) {
   return (
@@ -292,8 +297,7 @@ function BackendSelector({ value, onChange, disabled, loadingId }) {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
         {Object.values(BACKENDS).map(b => {
-          const sel = value === b.id;
-          const ldr = loadingId === b.id;
+          const sel = value === b.id; const ldr = loadingId === b.id;
           return (
             <button key={b.id} onClick={() => !disabled && !ldr && onChange(b.id)} disabled={disabled}
               style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderRadius: '9px',
@@ -333,12 +337,9 @@ function MissFlash({ visible }) {
 }
 
 // ─── Detection Tuning Panel ───────────────────────────────────────────────────
-function DetectionTuningPanel({ config, onChange, signalHistory, isActive }) {
+function DetectionTuningPanel({ config, onChange, signalHistory }) {
   const [open, setOpen] = useState(false);
   const gRef = useRef(null);
-
-  // Auto-open when a session becomes active so the signal graph is immediately visible
-  useEffect(() => { if (isActive) setOpen(true); }, [isActive]);
 
   useEffect(() => {
     if (!open) return;
@@ -346,46 +347,25 @@ function DetectionTuningPanel({ config, onChange, signalHistory, isActive }) {
     const ctx = canvas.getContext('2d');
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
-
-    // Background grid
     ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) { ctx.beginPath(); ctx.moveTo(0, (h / 4) * i); ctx.lineTo(w, (h / 4) * i); ctx.stroke(); }
-
     if (!signalHistory || signalHistory.length < 2) return;
-
-    // Use filtered Y for scale, fall back to raw if filtered not present
     const vals = signalHistory.map(p => p.y);
     const mn = Math.min(...vals), mx = Math.max(...vals), rng = mx - mn || 0.01;
-
     const toY = v => h - ((v - mn) / rng) * h * 0.85 - h * 0.075;
-
-    // Threshold line
     const ty = h - ((config.peakMinProminence / (rng + config.peakMinProminence)) * h * 0.8 + h * 0.1);
     ctx.strokeStyle = '#f59e0b55'; ctx.setLineDash([4, 4]);
     ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(w, ty); ctx.stroke(); ctx.setLineDash([]);
-
-    // Raw signal (grey, dashed) — only shown when Kalman is on and there's a difference
     const hasRaw = config.kalmanEnabled && signalHistory.some(p => p.raw !== undefined && Math.abs(p.raw - p.y) > 0.001);
     if (hasRaw) {
       ctx.strokeStyle = '#475569'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
       ctx.beginPath();
-      signalHistory.forEach((p, i) => {
-        const x = (i / (signalHistory.length - 1)) * w;
-        const y = toY(p.raw ?? p.y);
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      });
+      signalHistory.forEach((p, i) => { const x = (i / (signalHistory.length - 1)) * w; i === 0 ? ctx.moveTo(x, toY(p.raw ?? p.y)) : ctx.lineTo(x, toY(p.raw ?? p.y)); });
       ctx.stroke(); ctx.setLineDash([]);
     }
-
-    // Filtered (or raw when Kalman off) signal — teal, solid
-    ctx.strokeStyle = config.kalmanEnabled ? '#00d4aa' : '#60a5fa';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = config.kalmanEnabled ? '#00d4aa' : '#60a5fa'; ctx.lineWidth = 2;
     ctx.beginPath();
-    signalHistory.forEach((p, i) => {
-      const x = (i / (signalHistory.length - 1)) * w;
-      const y = toY(p.y);
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    });
+    signalHistory.forEach((p, i) => { const x = (i / (signalHistory.length - 1)) * w; i === 0 ? ctx.moveTo(x, toY(p.y)) : ctx.lineTo(x, toY(p.y)); });
     ctx.stroke();
   }, [signalHistory, open, config.peakMinProminence, config.kalmanEnabled]);
 
@@ -411,56 +391,35 @@ function DetectionTuningPanel({ config, onChange, signalHistory, isActive }) {
       </button>
       {open && (
         <div style={{ padding: '0 14px 14px', borderTop: '1px solid #1e293b' }}>
-
-          {/* ── Kalman filter section ── */}
+          {/* Kalman filter */}
           <div style={{ marginTop: '14px', marginBottom: '14px', backgroundColor: '#0f172a', borderRadius: '10px', border: `1px solid ${config.kalmanEnabled ? '#3b82f644' : '#1e293b'}`, padding: '10px 12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: config.kalmanEnabled ? '12px' : '0' }}>
               <div>
-                <div style={{ fontSize: '12px', fontWeight: '700', color: config.kalmanEnabled ? '#60a5fa' : '#64748b' }}>
-                  Kalman-filter
-                </div>
-                <div style={{ fontSize: '10px', color: '#475569', marginTop: '2px' }}>
-                  Smootht de enkelpositie en bridget occlusies (aanbevolen)
-                </div>
+                <div style={{ fontSize: '12px', fontWeight: '700', color: config.kalmanEnabled ? '#60a5fa' : '#64748b' }}>Kalman-filter</div>
+                <div style={{ fontSize: '10px', color: '#475569', marginTop: '2px' }}>Smootht de enkelpositie en bridget occlusies (aanbevolen)</div>
               </div>
-              {/* Toggle switch */}
-              <button
-                onClick={() => onChange({ kalmanEnabled: !config.kalmanEnabled })}
-                style={{
-                  width: '44px', height: '24px', borderRadius: '12px', border: 'none', cursor: 'pointer',
-                  backgroundColor: config.kalmanEnabled ? '#3b82f6' : '#334155',
-                  position: 'relative', flexShrink: 0, transition: 'background-color 0.2s',
-                }}
-              >
-                <div style={{
-                  width: '18px', height: '18px', borderRadius: '50%', backgroundColor: 'white',
-                  position: 'absolute', top: '3px',
-                  left: config.kalmanEnabled ? '23px' : '3px',
-                  transition: 'left 0.2s',
-                }} />
+              <button onClick={() => onChange({ kalmanEnabled: !config.kalmanEnabled })}
+                style={{ width: '44px', height: '24px', borderRadius: '12px', border: 'none', cursor: 'pointer',
+                  backgroundColor: config.kalmanEnabled ? '#3b82f6' : '#334155', position: 'relative', flexShrink: 0, transition: 'background-color 0.2s' }}>
+                <div style={{ width: '18px', height: '18px', borderRadius: '50%', backgroundColor: 'white', position: 'absolute', top: '3px',
+                  left: config.kalmanEnabled ? '23px' : '3px', transition: 'left 0.2s' }} />
               </button>
             </div>
-
             {config.kalmanEnabled && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
                   <span style={{ fontSize: '11px', fontWeight: '600', color: '#94a3b8' }}>Procesruis (Q)</span>
-                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#60a5fa', fontFamily: 'monospace' }}>
-                    {config.kalmanProcessNoise.toFixed(4)}
-                  </span>
+                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#60a5fa', fontFamily: 'monospace' }}>{config.kalmanProcessNoise.toFixed(4)}</span>
                 </div>
                 <input type="range" min={0.001} max={0.1} step={0.001} value={config.kalmanProcessNoise}
-                  onChange={e => onChange({ kalmanProcessNoise: Number(e.target.value) })}
-                  style={{ width: '100%', accentColor: '#3b82f6' }} />
+                  onChange={e => onChange({ kalmanProcessNoise: Number(e.target.value) })} style={{ width: '100%', accentColor: '#3b82f6' }} />
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: '#334155', marginTop: '2px' }}>
-                  <span>0.001 — meer smoothing, meer vertraging</span>
-                  <span>0.1 — volgt model nauwer</span>
+                  <span>0.001 — meer smoothing, meer vertraging</span><span>0.1 — volgt model nauwer</span>
                 </div>
               </div>
             )}
           </div>
-
-          {/* ── Presets ── */}
+          {/* Presets */}
           <div style={{ marginBottom: '14px' }}>
             <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '7px' }}>Snelkeuze</div>
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -468,8 +427,7 @@ function DetectionTuningPanel({ config, onChange, signalHistory, isActive }) {
               <button onClick={() => onChange(DEFAULT_CONFIG)} style={{ padding: '5px 11px', borderRadius: '14px', border: '1px solid #334155', background: 'transparent', color: '#64748b', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>Reset</button>
             </div>
           </div>
-
-          {/* ── Detection sliders ── */}
+          {/* Sliders */}
           {sliders.map(sl => (
             <div key={sl.key} style={{ marginBottom: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
@@ -481,11 +439,10 @@ function DetectionTuningPanel({ config, onChange, signalHistory, isActive }) {
               <div style={{ fontSize: '10px', color: '#475569', marginTop: '3px' }}>{sl.hint}</div>
             </div>
           ))}
-
-          {/* ── Signal graph ── */}
+          {/* Signal graph */}
           <div style={{ marginTop: '6px' }}>
             <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>Live enkelsignaal</span>
+              <span>Enkelsignaal</span>
               {config.kalmanEnabled && (
                 <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '400' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
@@ -496,16 +453,12 @@ function DetectionTuningPanel({ config, onChange, signalHistory, isActive }) {
                     <span style={{ width: '12px', height: '1px', backgroundColor: '#475569', display: 'inline-block', borderTop: '1px dashed #475569' }} />
                     <span>ruw</span>
                   </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                    <span style={{ width: '10px', height: '1px', backgroundColor: '#f59e0b55', display: 'inline-block', borderTop: '1px dashed #f59e0b' }} />
-                    <span style={{ color: '#f59e0b' }}>drempel</span>
-                  </span>
                 </span>
               )}
             </div>
             <canvas ref={gRef} width={320} height={80}
               style={{ width: '100%', height: '80px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b', display: 'block' }} />
-            {(!signalHistory || signalHistory.length < 5) && <div style={{ fontSize: '10px', color: '#334155', textAlign: 'center', marginTop: '4px' }}>Start een sessie om het signaal te zien</div>}
+            {(!signalHistory || signalHistory.length < 5) && <div style={{ fontSize: '10px', color: '#334155', textAlign: 'center', marginTop: '4px' }}>Geen signaaldata beschikbaar</div>}
           </div>
         </div>
       )}
@@ -666,6 +619,8 @@ export default function AiCounterPage() {
   const [savedOk,        setSavedOk]        = useState(false);
   const [detCfg,         setDetCfg]         = useState({ ...DEFAULT_CONFIG });
   const [signalHist,     setSignalHist]     = useState([]);
+  // ── Audio toggle for uploaded videos ──────────────────────────────────────
+  const [videoMuted,     setVideoMuted]     = useState(true);
 
   const videoRef       = useRef(null);
   const canvasRef      = useRef(null);
@@ -673,7 +628,7 @@ export default function AiCounterPage() {
   const fileInputRef   = useRef(null);
   const detectorRef    = useRef(new StepDetector(DEFAULT_CONFIG));
   const kalmanRef      = useRef(new AnkleKalmanFilter());
-  const lastAnkleYRef  = useRef(0.8); // last known good ankle Y, used when occluded
+  const lastAnkleYRef  = useRef(0.8);
   const missTimerRef   = useRef(null);
   const elapsedRef     = useRef(null);
   const frameRef       = useRef(null);
@@ -689,6 +644,11 @@ export default function AiCounterPage() {
   useEffect(() => { backendRef.current  = backendId;   }, [backendId]);
   useEffect(() => { detectorRef.current.updateConfig(detCfg); }, [detCfg]);
 
+  // Sync muted prop whenever it changes (also handles on-the-fly toggle during playback)
+  useEffect(() => {
+    if (uploadVideoRef.current) uploadVideoRef.current.muted = videoMuted;
+  }, [videoMuted]);
+
   const { disciplines, getDisc } = useDisciplines();
   useEffect(() => {
     const uid = getCookie(); if (!uid) return;
@@ -696,30 +656,23 @@ export default function AiCounterPage() {
   }, []);
   useEffect(() => { if (disciplines.length > 0 && !disciplineId) setDisciplineId(disciplines[0].id); }, [disciplines]);
 
-  // ── Shared ankle processor — backend-agnostic ──────────────────────────
-  // ankleY, ankleX: normalised 0-1 from the pose model.
-  // confidence: model's keypoint score (0-1). Pass 0 when ankle not visible.
-  // image: drawn to canvas when provided (MediaPipe passes the frame here).
+  // ── Shared ankle processor ────────────────────────────────────────────────
   const processAnkle = useCallback((ankleY, ankleX, confidence, image) => {
     const canvas = canvasRef.current;
     if (!canvas || canvas.width === 0) return;
     const ctx = canvas.getContext('2d');
     if (image) { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(image, 0, 0, canvas.width, canvas.height); }
 
-    // ── Kalman filter ──────────────────────────────────────────────────────
-    // Apply before passing to StepDetector. When disabled, raw value passes through.
     const cfg = detectorRef.current.config;
     const filteredY = cfg.kalmanEnabled
       ? kalmanRef.current.update(ankleY, confidence, Date.now(), cfg.kalmanProcessNoise)
       : ankleY;
 
-    // Draw ankle indicator at the FILTERED position (more stable visually)
     const ax = ankleX * canvas.width;
     const ay = filteredY * canvas.height;
     ctx.beginPath(); ctx.arc(ax, ay, 18, 0, Math.PI * 2); ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 3; ctx.stroke();
     ctx.beginPath(); ctx.arc(ax, ay, 8,  0, Math.PI * 2); ctx.fillStyle   = '#f59e0b'; ctx.fill();
 
-    // Draw raw position as a smaller faded dot so the user can compare
     if (cfg.kalmanEnabled && Math.abs(ankleY - filteredY) > 0.002) {
       const rawAy = ankleY * canvas.height;
       ctx.beginPath(); ctx.arc(ax, rawAy, 5, 0, Math.PI * 2);
@@ -728,7 +681,6 @@ export default function AiCounterPage() {
 
     if (isRunRef.current) {
       const ev = detectorRef.current.push(filteredY, Date.now());
-      // Store both raw and filtered for the signal graph
       setSignalHist(prev => {
         const n = [...prev, { y: filteredY, raw: ankleY, t: Date.now() }];
         return n.length > 90 ? n.slice(-90) : n;
@@ -747,7 +699,7 @@ export default function AiCounterPage() {
     }
   }, []);
 
-  // ── MediaPipe results callback ─────────────────────────────────────────
+  // ── MediaPipe results callback ─────────────────────────────────────────────
   const onMpResults = useCallback((results) => {
     const canvas = canvasRef.current; if (!canvas || canvas.width === 0) return;
     const ctx = canvas.getContext('2d');
@@ -764,15 +716,14 @@ export default function AiCounterPage() {
     const idx = trackedRef.current === 'left' ? 27 : 28;
     const ank = lms[idx];
     if (ank && ank.visibility > 0.25) {
-      lastAnkleYRef.current = ank.y; // remember last good position
+      lastAnkleYRef.current = ank.y;
       processAnkle(ank.y, ank.x, ank.visibility, null);
     } else {
-      // Ankle occluded — pass confidence=0 so Kalman coasts on its own prediction
       processAnkle(lastAnkleYRef.current, 0.5, 0, null);
     }
   }, [processAnkle]);
 
-  // ── TF.js frame processing ─────────────────────────────────────────────
+  // ── TF.js frame processing ─────────────────────────────────────────────────
   const processTfjsFrame = useCallback(async (videoEl) => {
     const canvas = canvasRef.current; if (!canvas || !videoEl || videoEl.videoWidth === 0) return;
     if (canvas.width !== videoEl.videoWidth)  canvas.width  = videoEl.videoWidth;
@@ -788,8 +739,7 @@ export default function AiCounterPage() {
     catch (e) { console.warn('[AI Counter] estimatePoses error:', e?.message); return; }
     if (!poses || poses.length === 0) return;
 
-    const bdef = BACKENDS[bid];
-    const kps  = poses[0].keypoints;
+    const bdef = BACKENDS[bid]; const kps = poses[0].keypoints;
 
     if (overlayRef.current) {
       ctx.globalAlpha = 0.55; ctx.strokeStyle = '#00d4aa'; ctx.lineWidth = 2;
@@ -805,18 +755,16 @@ export default function AiCounterPage() {
       ctx.globalAlpha = 1;
     }
 
-    const ai  = trackedRef.current === 'left' ? bdef.ankleLeft : bdef.ankleRight;
+    const ai = trackedRef.current === 'left' ? bdef.ankleLeft : bdef.ankleRight;
     const ank = kps[ai];
     if (!ank || (ank.score ?? 1) < 0.15) {
-      // Ankle not visible — coast Kalman with confidence=0
-      processAnkle(lastAnkleYRef.current, 0.5, 0, null);
-      return;
+      processAnkle(lastAnkleYRef.current, 0.5, 0, null); return;
     }
     lastAnkleYRef.current = ank.y / canvas.height;
     processAnkle(ank.y / canvas.height, ank.x / canvas.width, ank.score ?? 1, null);
   }, [processAnkle]);
 
-  // ── Init backend ───────────────────────────────────────────────────────
+  // ── Init backend ───────────────────────────────────────────────────────────
   const initBackend = useCallback(async (bid, videoEl, isLive) => {
     setBackendError(''); setBackendLoading(bid);
     try { await loadBackend(bid); }
@@ -844,11 +792,10 @@ export default function AiCounterPage() {
         await cam.start(); mpCamRef.current = cam;
       }
     }
-    // TF.js detector already cached inside loadBackend
     return true;
   }, [onMpResults, facingMode]);
 
-  // ── Camera start ───────────────────────────────────────────────────────
+  // ── Camera start ───────────────────────────────────────────────────────────
   const startCamera = useCallback(async () => {
     const video = videoRef.current; if (!video) return;
     const ok = await initBackend(backendId, video, true); if (!ok) return;
@@ -877,11 +824,10 @@ export default function AiCounterPage() {
   const flipCamera = useCallback(() => setFacingMode(p => p === 'environment' ? 'user' : 'environment'), []);
   useEffect(() => { if (mode === 'camera') startCamera(); }, [facingMode]); // eslint-disable-line
 
-  // ── Session controls ───────────────────────────────────────────────────
+  // ── Session controls ───────────────────────────────────────────────────────
   const startSession = useCallback(() => {
     detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
-    kalmanRef.current.reset();
-    lastAnkleYRef.current = 0.8;
+    kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
     setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false); setSavedOk(false); setSignalHist([]);
     isRunRef.current = true; setIsRunning(true);
     elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
@@ -893,20 +839,22 @@ export default function AiCounterPage() {
     setFinalSteps(detectorRef.current.steps); setFinalMisses(detectorRef.current.misses); setSessionDone(true);
   }, []);
 
-  // ── File select ────────────────────────────────────────────────────────
+  // ── File select ────────────────────────────────────────────────────────────
   const handleFileSelect = useCallback((e) => {
     const file = e.target.files?.[0]; if (!file || !file.type.startsWith('video/')) return;
     setCodecError(false); setBackendError(''); setUploadProgress(0); setSessionDone(false); setSavedOk(false);
     if (uploadUrl) URL.revokeObjectURL(uploadUrl);
     const url = URL.createObjectURL(file);
     setUploadFile(file); setUploadUrl(url); setMode('upload');
+    setVideoMuted(true); // always start muted for new file
   }, [uploadUrl]);
 
-  // ── Process video ──────────────────────────────────────────────────────
+  // ── Process video ──────────────────────────────────────────────────────────
   const processVideo = useCallback(async () => {
     const video = uploadVideoRef.current, canvas = canvasRef.current;
     if (!video || !canvas) return;
     setBackendError(''); setCodecError(false); setUploadProgress(0);
+    video.muted = videoMuted; // apply current mute preference
     video.load();
     try { await waitForVideoReady(video, 12000); } catch { setCodecError(true); return; }
     if (!video.videoWidth) { setCodecError(true); return; }
@@ -914,8 +862,7 @@ export default function AiCounterPage() {
 
     const ok = await initBackend(backendId, video, false); if (!ok) return;
     detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
-    kalmanRef.current.reset();
-    lastAnkleYRef.current = 0.8;
+    kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
     setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false); setSignalHist([]);
     isRunRef.current = true; setIsRunning(true); setMode('running');
 
@@ -961,9 +908,18 @@ export default function AiCounterPage() {
       try { await video.play(); } catch (e) { setBackendError('Video afspelen mislukt: ' + e.message); clearInterval(elapsedRef.current); isRunRef.current = false; setIsRunning(false); return; }
       frameRef.current = requestAnimationFrame(loop);
     }
-  }, [backendId, detCfg, initBackend, processTfjsFrame, onMpResults, stopSession]);
+  }, [backendId, detCfg, initBackend, processTfjsFrame, onMpResults, stopSession, videoMuted]);
 
-  // ── Save ───────────────────────────────────────────────────────────────
+  // ── Toggle audio on the fly ────────────────────────────────────────────────
+  const toggleVideoAudio = useCallback(() => {
+    setVideoMuted(prev => {
+      const next = !prev;
+      if (uploadVideoRef.current) uploadVideoRef.current.muted = next;
+      return next;
+    });
+  }, []);
+
+  // ── Save ───────────────────────────────────────────────────────────────────
   const saveSession = useCallback(async () => {
     if (!selSkipper || !disciplineId) return;
     setSaving(true);
@@ -982,7 +938,7 @@ export default function AiCounterPage() {
     finally { setSaving(false); }
   }, [selSkipper, disciplineId, sessionType, finalSteps, counterUser, getDisc, backendId, detCfg, trackedFoot]);
 
-  // ── Reset all ──────────────────────────────────────────────────────────
+  // ── Reset all ──────────────────────────────────────────────────────────────
   const resetAll = useCallback(() => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
     isRunRef.current = false; stopCameraStream();
@@ -990,9 +946,8 @@ export default function AiCounterPage() {
     setUploadFile(null); setMode('idle'); setIsRunning(false);
     setSessionDone(false); setSteps(0); setMisses(0); setElapsed(0);
     setUploadProgress(0); setCodecError(false); setBackendError(''); setSavedOk(false); setSignalHist([]);
-    detectorRef.current.reset();
-    kalmanRef.current.reset();
-    lastAnkleYRef.current = 0.8;
+    setVideoMuted(true);
+    detectorRef.current.reset(); kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
   }, [uploadUrl, stopCameraStream]);
 
   useEffect(() => () => {
@@ -1005,6 +960,14 @@ export default function AiCounterPage() {
   const progress    = durationSec ? Math.min(1, elapsed / (durationSec * 1000)) : 0;
   const isVideoMode = mode === 'upload' || mode === 'running';
   const activeBdef  = BACKENDS[backendId];
+
+  // ── Derived visibility flags ───────────────────────────────────────────────
+  // Settings panels (model selector + tuning) are hidden while a session runs.
+  const showSettingsPanels = !isRunning;
+  // Live graph floats over the video only while running.
+  const showLiveGraph      = isRunning && (mode === 'camera' || mode === 'running');
+  // Audio toggle appears for uploaded video (both in upload-ready and running states).
+  const showAudioToggle    = (mode === 'upload' || mode === 'running') && !sessionDone;
 
   return (
     <div style={s.page}>
@@ -1023,7 +986,7 @@ export default function AiCounterPage() {
 
       <div style={s.body}>
 
-        {/* Config strip */}
+        {/* Config strip — always visible */}
         <div style={s.configStrip}>
           <div style={s.configGroup}>
             <span style={s.configLabel}>Onderdeel</span>
@@ -1058,11 +1021,24 @@ export default function AiCounterPage() {
         {/* Video area */}
         <div style={s.videoWrap}>
           <video ref={videoRef} style={s.hiddenVideo} playsInline muted />
-          {uploadUrl && <video ref={uploadVideoRef} src={uploadUrl} style={s.hiddenVideo} playsInline muted preload="auto" onError={() => setCodecError(true)} />}
+          {uploadUrl && (
+            <video
+              ref={uploadVideoRef}
+              src={uploadUrl}
+              style={s.hiddenVideo}
+              playsInline
+              muted={videoMuted}
+              preload="auto"
+              onError={() => setCodecError(true)}
+            />
+          )}
           <div style={s.canvasLetterbox}>
             <canvas ref={canvasRef} style={{ ...s.canvas, display: (mode === 'camera' || mode === 'running') ? 'block' : 'none' }} />
           </div>
           <MissFlash visible={showMiss} />
+
+          {/* ── Live signal graph overlay ── only while running ── */}
+          <LiveSignalOverlay signalHistory={signalHist} config={detCfg} visible={showLiveGraph} />
 
           {/* Active backend badge */}
           {(mode === 'camera' || mode === 'running') && (
@@ -1074,6 +1050,25 @@ export default function AiCounterPage() {
             </div>
           )}
 
+          {/* ── Audio toggle button — top-left corner over video ── */}
+          {showAudioToggle && (
+            <button
+              onClick={toggleVideoAudio}
+              title={videoMuted ? 'Geluid aan' : 'Geluid uit'}
+              style={{
+                position: 'absolute', top: '10px', left: '10px', zIndex: 18,
+                width: '36px', height: '36px', borderRadius: '10px',
+                backgroundColor: videoMuted ? 'rgba(0,0,0,0.55)' : 'rgba(59,130,246,0.8)',
+                border: `1px solid ${videoMuted ? 'rgba(255,255,255,0.15)' : 'rgba(96,165,250,0.5)'}`,
+                color: 'white', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                backdropFilter: 'blur(4px)', transition: 'background-color 0.15s',
+              }}
+            >
+              {videoMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+            </button>
+          )}
+
           {/* Idle */}
           {mode === 'idle' && (
             <div style={s.centeredOverlay}>
@@ -1082,8 +1077,7 @@ export default function AiCounterPage() {
               <p style={s.idleSubtitle}>Gebruik je camera voor live tellen of upload een video.</p>
               {backendError && <div style={s.errorBanner}><AlertTriangle size={14} style={{ flexShrink: 0 }} />{backendError}</div>}
               <div style={s.idleBtns}>
-                <button style={s.primaryBtn} disabled={!!backendLoading}
-                  onClick={startCamera}>
+                <button style={s.primaryBtn} disabled={!!backendLoading} onClick={startCamera}>
                   {backendLoading
                     ? <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Laden…</>
                     : <><Camera size={16} /> Live camera</>}
@@ -1170,22 +1164,24 @@ export default function AiCounterPage() {
           {(mode === 'camera' || isVideoMode) && !isRunning && !sessionDone && <button style={s.ghostBtn} onClick={resetAll}><ArrowLeft size={14} /> Terug</button>}
         </div>
 
-        {/* Settings panels — always visible; backend switching locked while running */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <BackendSelector value={backendId} disabled={isRunning} loadingId={backendLoading}
-            onChange={async bid => {
-              if (isRunning) return;
-              stopCameraStream();
-              if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
-              setBackendId(bid); setBackendError('');
-              setBackendLoading(bid);
-              try { await loadBackend(bid); } catch (e) { setBackendError(`Model laden mislukt: ${e.message}`); }
-              setBackendLoading(null);
-              if (mode === 'camera') setTimeout(() => startCamera(), 100);
-            }}
-          />
-          <DetectionTuningPanel config={detCfg} onChange={p => setDetCfg(prev => ({ ...prev, ...p }))} signalHistory={signalHist} isActive={isRunning} />
-        </div>
+        {/* ── Settings panels — hidden while session is running ── */}
+        {showSettingsPanels && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <BackendSelector value={backendId} disabled={isRunning} loadingId={backendLoading}
+              onChange={async bid => {
+                if (isRunning) return;
+                stopCameraStream();
+                if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
+                setBackendId(bid); setBackendError('');
+                setBackendLoading(bid);
+                try { await loadBackend(bid); } catch (e) { setBackendError(`Model laden mislukt: ${e.message}`); }
+                setBackendLoading(null);
+                if (mode === 'camera') setTimeout(() => startCamera(), 100);
+              }}
+            />
+            <DetectionTuningPanel config={detCfg} onChange={p => setDetCfg(prev => ({ ...prev, ...p }))} signalHistory={signalHist} />
+          </div>
+        )}
 
         {/* Results */}
         {sessionDone && (
