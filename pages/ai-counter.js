@@ -115,7 +115,111 @@ const DEFAULT_CONFIG = {
   peakMinProminence:  0.012,
   peakMinIntervalMs: 120,
   missGapMs:         600,
+  kalmanEnabled:     true,   // run ankle Y through Kalman filter before step detection
+  kalmanProcessNoise: 0.01,  // Q — how much the true ankle position can jump frame-to-frame
+                             //   low  (~0.001): trusts the model less, very smooth but lags
+                             //   high (~0.1):   trusts the model more, follows real motion closely
 };
+
+// ─── Ankle Kalman Filter ──────────────────────────────────────────────────────
+//
+// A scalar (1-D) Kalman filter for the normalised ankle Y coordinate.
+//
+// State: x̂  — estimated true ankle Y (0-1)
+// Noise:
+//   Q  — process noise  (how fast the ankle actually moves, tunable)
+//   R  — measurement noise (model uncertainty, scaled by 1/confidence²)
+//
+// On occlusion (confidence < threshold) we skip the measurement update entirely
+// and let the filter coast on its own velocity estimate, so the StepDetector
+// sees a smooth extrapolated curve instead of a sudden jump to 0 or NaN.
+//
+// Two-state model: [position, velocity]
+//   x[k+1] = F·x[k] + w     (w ~ N(0,Q))
+//   z[k]   = H·x[k] + v     (v ~ N(0,R))
+//
+class AnkleKalmanFilter {
+  constructor() { this.reset(); }
+
+  reset() {
+    // State vector  [y, dy/dt]
+    this._x = null;          // null = not yet initialised
+    this._v = 0;             // velocity estimate (normalised units / frame)
+    // Error covariance  (2×2 as 4 scalars: [p00, p01, p10, p11])
+    this._p00 = 1; this._p01 = 0;
+    this._p10 = 0; this._p11 = 1;
+    this._lastT = null;
+  }
+
+  // Returns the filtered Y value.
+  // rawY        — normalised 0-1 from the pose model (may be stale/occluded)
+  // confidence  — model confidence 0-1 (set to 0 when ankle not visible)
+  // t           — timestamp in ms (Date.now())
+  // Q           — process noise variance (from user config)
+  update(rawY, confidence, t, Q = 0.01) {
+    // ── First ever call: initialise directly from measurement ──────────────
+    if (this._x === null) {
+      this._x = rawY; this._v = 0; this._lastT = t;
+      return rawY;
+    }
+
+    // ── dt in "frame units" (normalise to 33 ms ≈ 30 FPS baseline) ─────────
+    const dt = Math.min((t - this._lastT) / 33.0, 4.0); // clamp to 4 frames
+    this._lastT = t;
+
+    // ── Predict step ────────────────────────────────────────────────────────
+    // x_pred = x + v·dt
+    const xPred = this._x + this._v * dt;
+    const vPred = this._v; // constant-velocity model: velocity stays the same
+
+    // Propagate covariance:  P_pred = F·P·Fᵀ + Q_mat
+    // F = [[1, dt],[0, 1]]
+    const p00 = this._p00 + dt * (this._p10 + this._p01) + dt * dt * this._p11 + Q;
+    const p01 = this._p01 + dt * this._p11;
+    const p10 = this._p10 + dt * this._p11;
+    const p11 = this._p11 + Q * 0.1; // velocity process noise (10% of position)
+
+    // ── Update step ─────────────────────────────────────────────────────────
+    // Only update from measurement if confidence is high enough.
+    // R scales inversely with confidence² — a half-confident reading is
+    // four times noisier than a fully confident one.
+    const CONF_THRESHOLD = 0.25; // below this, treat as fully occluded
+    if (confidence >= CONF_THRESHOLD) {
+      // Measurement noise: base value 0.0025 + uncertainty from low confidence
+      const R = 0.0025 / Math.max(confidence * confidence, 0.04);
+
+      // Kalman gain:  K = P_pred·Hᵀ / (H·P_pred·Hᵀ + R)
+      // H = [1, 0]  (we observe position only, not velocity)
+      const S  = p00 + R;            // innovation covariance
+      const K0 = p00 / S;            // gain for position state
+      const K1 = p10 / S;            // gain for velocity state
+
+      const innov = rawY - xPred;    // innovation (measurement residual)
+
+      this._x   = xPred + K0 * innov;
+      this._v   = vPred + K1 * innov;
+
+      // Update covariance:  P = (I - K·H)·P_pred
+      this._p00 = (1 - K0) * p00;
+      this._p01 = (1 - K0) * p01;
+      this._p10 = p10 - K1 * p00;
+      this._p11 = p11 - K1 * p01;
+    } else {
+      // Occluded: coast on prediction, widen covariance so next measurement
+      // gets more weight once the ankle reappears.
+      this._x   = xPred;
+      this._v   = vPred;
+      this._p00 = p00 * 1.5;
+      this._p01 = p01;
+      this._p10 = p10;
+      this._p11 = p11 * 1.5;
+    }
+
+    // Clamp to valid range
+    this._x = Math.max(0, Math.min(1, this._x));
+    return this._x;
+  }
+}
 
 // ─── Step Detector ────────────────────────────────────────────────────────────
 class StepDetector {
@@ -232,27 +336,55 @@ function MissFlash({ visible }) {
 function DetectionTuningPanel({ config, onChange, signalHistory }) {
   const [open, setOpen] = useState(false);
   const gRef = useRef(null);
+
   useEffect(() => {
     if (!open) return;
     const canvas = gRef.current; if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
+
+    // Background grid
     ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) { ctx.beginPath(); ctx.moveTo(0, (h / 4) * i); ctx.lineTo(w, (h / 4) * i); ctx.stroke(); }
+
     if (!signalHistory || signalHistory.length < 2) return;
+
+    // Use filtered Y for scale, fall back to raw if filtered not present
     const vals = signalHistory.map(p => p.y);
     const mn = Math.min(...vals), mx = Math.max(...vals), rng = mx - mn || 0.01;
+
+    const toY = v => h - ((v - mn) / rng) * h * 0.85 - h * 0.075;
+
+    // Threshold line
     const ty = h - ((config.peakMinProminence / (rng + config.peakMinProminence)) * h * 0.8 + h * 0.1);
-    ctx.strokeStyle = '#f59e0b44'; ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = '#f59e0b55'; ctx.setLineDash([4, 4]);
     ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(w, ty); ctx.stroke(); ctx.setLineDash([]);
-    ctx.strokeStyle = '#00d4aa'; ctx.lineWidth = 2; ctx.beginPath();
+
+    // Raw signal (grey, dashed) — only shown when Kalman is on and there's a difference
+    const hasRaw = config.kalmanEnabled && signalHistory.some(p => p.raw !== undefined && Math.abs(p.raw - p.y) > 0.001);
+    if (hasRaw) {
+      ctx.strokeStyle = '#475569'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      signalHistory.forEach((p, i) => {
+        const x = (i / (signalHistory.length - 1)) * w;
+        const y = toY(p.raw ?? p.y);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      });
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+
+    // Filtered (or raw when Kalman off) signal — teal, solid
+    ctx.strokeStyle = config.kalmanEnabled ? '#00d4aa' : '#60a5fa';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
     signalHistory.forEach((p, i) => {
       const x = (i / (signalHistory.length - 1)) * w;
-      const y = h - ((p.y - mn) / rng) * h * 0.85 - h * 0.075;
+      const y = toY(p.y);
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    }); ctx.stroke();
-  }, [signalHistory, open, config.peakMinProminence]);
+    });
+    ctx.stroke();
+  }, [signalHistory, open, config.peakMinProminence, config.kalmanEnabled]);
 
   const sliders = [
     { key: 'peakMinProminence', label: 'Pieksensitiviteit',  hint: 'Hoe groot de beweging. Lager = gevoeliger.',         min: 0.003, max: 0.05,  step: 0.001, fmt: v => v.toFixed(3) },
@@ -276,13 +408,65 @@ function DetectionTuningPanel({ config, onChange, signalHistory }) {
       </button>
       {open && (
         <div style={{ padding: '0 14px 14px', borderTop: '1px solid #1e293b' }}>
-          <div style={{ marginBottom: '14px', paddingTop: '12px' }}>
+
+          {/* ── Kalman filter section ── */}
+          <div style={{ marginTop: '14px', marginBottom: '14px', backgroundColor: '#0f172a', borderRadius: '10px', border: `1px solid ${config.kalmanEnabled ? '#3b82f644' : '#1e293b'}`, padding: '10px 12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: config.kalmanEnabled ? '12px' : '0' }}>
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: '700', color: config.kalmanEnabled ? '#60a5fa' : '#64748b' }}>
+                  Kalman-filter
+                </div>
+                <div style={{ fontSize: '10px', color: '#475569', marginTop: '2px' }}>
+                  Smootht de enkelpositie en bridget occlusies (aanbevolen)
+                </div>
+              </div>
+              {/* Toggle switch */}
+              <button
+                onClick={() => onChange({ kalmanEnabled: !config.kalmanEnabled })}
+                style={{
+                  width: '44px', height: '24px', borderRadius: '12px', border: 'none', cursor: 'pointer',
+                  backgroundColor: config.kalmanEnabled ? '#3b82f6' : '#334155',
+                  position: 'relative', flexShrink: 0, transition: 'background-color 0.2s',
+                }}
+              >
+                <div style={{
+                  width: '18px', height: '18px', borderRadius: '50%', backgroundColor: 'white',
+                  position: 'absolute', top: '3px',
+                  left: config.kalmanEnabled ? '23px' : '3px',
+                  transition: 'left 0.2s',
+                }} />
+              </button>
+            </div>
+
+            {config.kalmanEnabled && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: '600', color: '#94a3b8' }}>Procesruis (Q)</span>
+                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#60a5fa', fontFamily: 'monospace' }}>
+                    {config.kalmanProcessNoise.toFixed(4)}
+                  </span>
+                </div>
+                <input type="range" min={0.001} max={0.1} step={0.001} value={config.kalmanProcessNoise}
+                  onChange={e => onChange({ kalmanProcessNoise: Number(e.target.value) })}
+                  style={{ width: '100%', accentColor: '#3b82f6' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: '#334155', marginTop: '2px' }}>
+                  <span>0.001 — meer smoothing, meer vertraging</span>
+                  <span>0.1 — volgt model nauwer</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Presets ── */}
+          <div style={{ marginBottom: '14px' }}>
             <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '7px' }}>Snelkeuze</div>
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               {presets.map(p => <button key={p.label} onClick={() => onChange(p.config)} style={{ padding: '5px 11px', borderRadius: '14px', border: '1px solid #334155', background: 'transparent', color: '#94a3b8', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }}>{p.label}</button>)}
               <button onClick={() => onChange(DEFAULT_CONFIG)} style={{ padding: '5px 11px', borderRadius: '14px', border: '1px solid #334155', background: 'transparent', color: '#64748b', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>Reset</button>
             </div>
           </div>
+
+          {/* ── Detection sliders ── */}
           {sliders.map(sl => (
             <div key={sl.key} style={{ marginBottom: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
@@ -294,9 +478,27 @@ function DetectionTuningPanel({ config, onChange, signalHistory }) {
               <div style={{ fontSize: '10px', color: '#475569', marginTop: '3px' }}>{sl.hint}</div>
             </div>
           ))}
+
+          {/* ── Signal graph ── */}
           <div style={{ marginTop: '6px' }}>
-            <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
-              Live enkelsignaal <span style={{ color: '#f59e0b' }}>— gele lijn = drempel</span>
+            <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>Live enkelsignaal</span>
+              {config.kalmanEnabled && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '400' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                    <span style={{ width: '12px', height: '2px', backgroundColor: '#00d4aa', display: 'inline-block' }} />
+                    <span style={{ color: '#00d4aa' }}>gefilterd</span>
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                    <span style={{ width: '12px', height: '1px', backgroundColor: '#475569', display: 'inline-block', borderTop: '1px dashed #475569' }} />
+                    <span>ruw</span>
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                    <span style={{ width: '10px', height: '1px', backgroundColor: '#f59e0b55', display: 'inline-block', borderTop: '1px dashed #f59e0b' }} />
+                    <span style={{ color: '#f59e0b' }}>drempel</span>
+                  </span>
+                </span>
+              )}
             </div>
             <canvas ref={gRef} width={320} height={80}
               style={{ width: '100%', height: '80px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b', display: 'block' }} />
@@ -467,6 +669,8 @@ export default function AiCounterPage() {
   const uploadVideoRef = useRef(null);
   const fileInputRef   = useRef(null);
   const detectorRef    = useRef(new StepDetector(DEFAULT_CONFIG));
+  const kalmanRef      = useRef(new AnkleKalmanFilter());
+  const lastAnkleYRef  = useRef(0.8); // last known good ankle Y, used when occluded
   const missTimerRef   = useRef(null);
   const elapsedRef     = useRef(null);
   const frameRef       = useRef(null);
@@ -490,20 +694,42 @@ export default function AiCounterPage() {
   useEffect(() => { if (disciplines.length > 0 && !disciplineId) setDisciplineId(disciplines[0].id); }, [disciplines]);
 
   // ── Shared ankle processor — backend-agnostic ──────────────────────────
-  // ankleX, ankleY are normalised 0-1. image is drawn to canvas if provided.
-  const processAnkle = useCallback((ankleY, ankleX, image) => {
+  // ankleY, ankleX: normalised 0-1 from the pose model.
+  // confidence: model's keypoint score (0-1). Pass 0 when ankle not visible.
+  // image: drawn to canvas when provided (MediaPipe passes the frame here).
+  const processAnkle = useCallback((ankleY, ankleX, confidence, image) => {
     const canvas = canvasRef.current;
     if (!canvas || canvas.width === 0) return;
     const ctx = canvas.getContext('2d');
     if (image) { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(image, 0, 0, canvas.width, canvas.height); }
 
-    const ax = ankleX * canvas.width, ay = ankleY * canvas.height;
+    // ── Kalman filter ──────────────────────────────────────────────────────
+    // Apply before passing to StepDetector. When disabled, raw value passes through.
+    const cfg = detectorRef.current.config;
+    const filteredY = cfg.kalmanEnabled
+      ? kalmanRef.current.update(ankleY, confidence, Date.now(), cfg.kalmanProcessNoise)
+      : ankleY;
+
+    // Draw ankle indicator at the FILTERED position (more stable visually)
+    const ax = ankleX * canvas.width;
+    const ay = filteredY * canvas.height;
     ctx.beginPath(); ctx.arc(ax, ay, 18, 0, Math.PI * 2); ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 3; ctx.stroke();
     ctx.beginPath(); ctx.arc(ax, ay, 8,  0, Math.PI * 2); ctx.fillStyle   = '#f59e0b'; ctx.fill();
 
+    // Draw raw position as a smaller faded dot so the user can compare
+    if (cfg.kalmanEnabled && Math.abs(ankleY - filteredY) > 0.002) {
+      const rawAy = ankleY * canvas.height;
+      ctx.beginPath(); ctx.arc(ax, rawAy, 5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(148,163,184,0.5)'; ctx.fill();
+    }
+
     if (isRunRef.current) {
-      const ev = detectorRef.current.push(ankleY, Date.now());
-      setSignalHist(prev => { const n = [...prev, { y: ankleY, t: Date.now() }]; return n.length > 90 ? n.slice(-90) : n; });
+      const ev = detectorRef.current.push(filteredY, Date.now());
+      // Store both raw and filtered for the signal graph
+      setSignalHist(prev => {
+        const n = [...prev, { y: filteredY, raw: ankleY, t: Date.now() }];
+        return n.length > 90 ? n.slice(-90) : n;
+      });
       if (ev === 'step') setSteps(detectorRef.current.steps);
       if (ev === 'miss') {
         setMisses(detectorRef.current.misses); setShowMiss(true);
@@ -534,7 +760,13 @@ export default function AiCounterPage() {
     }
     const idx = trackedRef.current === 'left' ? 27 : 28;
     const ank = lms[idx];
-    if (ank && ank.visibility > 0.5) processAnkle(ank.y, ank.x, null);
+    if (ank && ank.visibility > 0.25) {
+      lastAnkleYRef.current = ank.y; // remember last good position
+      processAnkle(ank.y, ank.x, ank.visibility, null);
+    } else {
+      // Ankle occluded — pass confidence=0 so Kalman coasts on its own prediction
+      processAnkle(lastAnkleYRef.current, 0.5, 0, null);
+    }
   }, [processAnkle]);
 
   // ── TF.js frame processing ─────────────────────────────────────────────
@@ -572,8 +804,13 @@ export default function AiCounterPage() {
 
     const ai  = trackedRef.current === 'left' ? bdef.ankleLeft : bdef.ankleRight;
     const ank = kps[ai];
-    if (!ank || (ank.score ?? 1) < 0.3) return;
-    processAnkle(ank.y / canvas.height, ank.x / canvas.width, null);
+    if (!ank || (ank.score ?? 1) < 0.15) {
+      // Ankle not visible — coast Kalman with confidence=0
+      processAnkle(lastAnkleYRef.current, 0.5, 0, null);
+      return;
+    }
+    lastAnkleYRef.current = ank.y / canvas.height;
+    processAnkle(ank.y / canvas.height, ank.x / canvas.width, ank.score ?? 1, null);
   }, [processAnkle]);
 
   // ── Init backend ───────────────────────────────────────────────────────
@@ -640,6 +877,8 @@ export default function AiCounterPage() {
   // ── Session controls ───────────────────────────────────────────────────
   const startSession = useCallback(() => {
     detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
+    kalmanRef.current.reset();
+    lastAnkleYRef.current = 0.8;
     setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false); setSavedOk(false); setSignalHist([]);
     isRunRef.current = true; setIsRunning(true);
     elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
@@ -672,6 +911,8 @@ export default function AiCounterPage() {
 
     const ok = await initBackend(backendId, video, false); if (!ok) return;
     detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
+    kalmanRef.current.reset();
+    lastAnkleYRef.current = 0.8;
     setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false); setSignalHist([]);
     isRunRef.current = true; setIsRunning(true); setMode('running');
 
@@ -747,6 +988,8 @@ export default function AiCounterPage() {
     setSessionDone(false); setSteps(0); setMisses(0); setElapsed(0);
     setUploadProgress(0); setCodecError(false); setBackendError(''); setSavedOk(false); setSignalHist([]);
     detectorRef.current.reset();
+    kalmanRef.current.reset();
+    lastAnkleYRef.current = 0.8;
   }, [uploadUrl, stopCameraStream]);
 
   useEffect(() => () => {
