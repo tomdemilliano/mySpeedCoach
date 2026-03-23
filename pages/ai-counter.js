@@ -271,7 +271,7 @@ function LiveSignalOverlay({ signalHistory, config, visible }) {
   if (!visible) return null;
 
   return (
-    <div style={{ position: 'absolute', bottom: '18px', left: '10px', right: '10px', zIndex: 16, pointerEvents: 'none' }}>
+    <div style={{ backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #334155', padding: '8px 10px' }}>
       <canvas ref={gRef} width={300} height={54}
         style={{ width: '100%', height: '54px', borderRadius: '6px', display: 'block', border: '1px solid rgba(51,65,85,0.5)' }} />
       <div style={{ display: 'flex', gap: '12px', marginTop: '3px', paddingLeft: '2px' }}>
@@ -1037,8 +1037,7 @@ export default function AiCounterPage() {
           </div>
           <MissFlash visible={showMiss} />
 
-          {/* ── Live signal graph overlay ── only while running ── */}
-          <LiveSignalOverlay signalHistory={signalHist} config={detCfg} visible={showLiveGraph} />
+
 
           {/* Active backend badge */}
           {(mode === 'camera' || mode === 'running') && (
@@ -1056,7 +1055,7 @@ export default function AiCounterPage() {
               onClick={toggleVideoAudio}
               title={videoMuted ? 'Geluid aan' : 'Geluid uit'}
               style={{
-                position: 'absolute', top: '10px', left: '10px', zIndex: 18,
+                position: 'absolute', top: '10px', right: '10px', zIndex: 18,
                 width: '36px', height: '36px', borderRadius: '10px',
                 backgroundColor: videoMuted ? 'rgba(0,0,0,0.55)' : 'rgba(59,130,246,0.8)',
                 border: `1px solid ${videoMuted ? 'rgba(255,255,255,0.15)' : 'rgba(96,165,250,0.5)'}`,
@@ -1155,6 +1154,9 @@ export default function AiCounterPage() {
           {mode === 'running' && isRunning && <div style={s.progressBar}><div style={{ ...s.progressFill, width: `${uploadProgress}%`, backgroundColor: '#3b82f6' }} /></div>}
           {mode === 'camera' && isRunning && durationSec && <div style={s.progressBar}><div style={{ ...s.progressFill, width: `${progress * 100}%`, backgroundColor: progress > 0.8 ? '#ef4444' : '#3b82f6' }} /></div>}
         </div>
+
+        {/* ── Live ankle signal graph — shown below video while running ── */}
+        <LiveSignalOverlay signalHistory={signalHist} config={detCfg} visible={showLiveGraph} />
 
         {/* Controls */}
         <div style={s.controls}>
