@@ -3,43 +3,56 @@
  *
  * AI-powered rope-skipping step counter (Beta)
  *
- * Fixes applied vs v1:
- *  - Video upload now waits for canplay + non-zero dimensions before sending frames
+ * Improvements vs previous version:
+ *  - Video fits the frame properly (object-fit: contain) — vertical videos no longer cropped
+ *  - Group & skipper picker added — results can be saved to skipper session history
+ *  - Session saves include countingMethod: 'AI' or 'manual' (badge/record flow disabled for AI)
+ *  - Detection tuning panel: sliders for prominence, min interval, miss gap with live signal preview
  *  - MediaPipe is re-initialised after every abort (WASM fatal errors are not recoverable)
  *  - Frame loop uses a flag-based guard to skip frames with zero dimensions
  *  - .MOV / HEVC files: shows a clear warning when the browser can't decode the codec
- *  - Canvas dimensions are set from video intrinsics, never from CSS layout size
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ClubMemberFactory, UserMemberLinkFactory, UserFactory,
-  BadgeFactory,
+  BadgeFactory, ClubFactory, GroupFactory,
 } from '../constants/dbSchema';
 import { useDisciplines } from '../hooks/useDisciplines';
 import {
   ArrowLeft, Camera, Upload, FlipHorizontal, Play, Square,
   Zap, AlertTriangle, CheckCircle2, X, RefreshCw, Eye, EyeOff,
-  ChevronRight, Trophy, Info, Video,
+  ChevronRight, Trophy, Info, Video, SlidersHorizontal, ChevronDown, ChevronUp,
+  Users, Building2,
 } from 'lucide-react';
 
-// ─── Step Detector ────────────────────────────────────────────────────────────
-const PEAK_MIN_PROMINENCE = 0.012;
-const PEAK_MIN_INTERVAL_MS = 120;
-const MISS_GAP_MS = 600;
+// ─── Default detection config ─────────────────────────────────────────────────
+const DEFAULT_CONFIG = {
+  peakMinProminence:  0.012,  // min Y-delta to count as a peak
+  peakMinIntervalMs: 120,     // min ms between steps
+  missGapMs:         600,     // ms of no step before a miss is counted
+};
 
+// ─── Step Detector ────────────────────────────────────────────────────────────
 class StepDetector {
-  constructor() { this.reset(); }
+  constructor(config = DEFAULT_CONFIG) {
+    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.reset();
+  }
+
+  updateConfig(config) {
+    this.config = { ...this.config, ...config };
+  }
 
   reset() {
-    this.signal = [];
-    this.steps = 0;
-    this.misses = 0;
-    this.lastStepTime = 0;
-    this.lastMissTime = 0;
-    this.inPeak = false;
-    this.peakY = null;
-    this.valleyY = null;
+    this.signal      = [];
+    this.steps       = 0;
+    this.misses      = 0;
+    this.lastStepTime  = 0;
+    this.lastMissTime  = 0;
+    this.inPeak      = false;
+    this.peakY       = null;
+    this.valleyY     = null;
     this.sessionStart = null;
   }
 
@@ -51,26 +64,27 @@ class StepDetector {
   }
 
   _detect(y, t) {
+    const { peakMinProminence, peakMinIntervalMs, missGapMs } = this.config;
     const n = this.signal.length;
     if (n < 5) return null;
     const recent = this.signal.slice(-5);
-    const avgY = recent.reduce((s, p) => s + p.y, 0) / recent.length;
+    const avgY   = recent.reduce((s, p) => s + p.y, 0) / recent.length;
 
     if (this.valleyY === null) { this.valleyY = avgY; return null; }
 
-    const isUp = (this.valleyY - avgY) > PEAK_MIN_PROMINENCE;
+    const isUp = (this.valleyY - avgY) > peakMinProminence;
     if (!this.inPeak && isUp) { this.inPeak = true; this.peakY = avgY; }
 
     if (this.inPeak) {
       if (avgY < this.peakY) this.peakY = avgY;
-      if (avgY > this.peakY + PEAK_MIN_PROMINENCE * 0.8) {
-        this.inPeak = false;
+      if (avgY > this.peakY + peakMinProminence * 0.8) {
+        this.inPeak  = false;
         this.valleyY = avgY;
         const prominence = this.valleyY - this.peakY;
-        if (prominence >= PEAK_MIN_PROMINENCE) {
+        if (prominence >= peakMinProminence) {
           const timeSinceLast = t - this.lastStepTime;
-          if (timeSinceLast >= PEAK_MIN_INTERVAL_MS) {
-            if (this.lastStepTime > 0 && timeSinceLast > MISS_GAP_MS * 1.5 && timeSinceLast < 8000) {
+          if (timeSinceLast >= peakMinIntervalMs) {
+            if (this.lastStepTime > 0 && timeSinceLast > missGapMs * 1.5 && timeSinceLast < 8000) {
               this.misses++;
               this.lastMissTime = t;
             }
@@ -85,7 +99,7 @@ class StepDetector {
       if (avgY > this.valleyY) this.valleyY = avgY * 0.9 + this.valleyY * 0.1;
     }
 
-    if (this.lastStepTime > 0 && (t - this.lastStepTime) > MISS_GAP_MS * 2 && !this.inPeak) {
+    if (this.lastStepTime > 0 && (t - this.lastStepTime) > missGapMs * 2 && !this.inPeak) {
       if (this.lastMissTime < this.lastStepTime && this.steps > 3) {
         this.misses++;
         this.lastMissTime = t;
@@ -129,10 +143,8 @@ function loadScript(src) {
 const LEFT_ANKLE  = 27;
 const RIGHT_ANKLE = 28;
 
-// ─── Wait until video has real decoded dimensions ─────────────────────────────
 function waitForVideoReady(video, timeoutMs = 12000) {
   return new Promise((resolve, reject) => {
-    // Already ready?
     if (video.readyState >= 3 && video.videoWidth > 0 && video.videoHeight > 0) {
       resolve(); return;
     }
@@ -167,6 +179,342 @@ function MissFlash({ visible }) {
   );
 }
 
+// ─── Detection Tuning Panel ───────────────────────────────────────────────────
+// Shows sliders + a live signal graph of recent ankle Y positions.
+function DetectionTuningPanel({ config, onChange, signalHistory }) {
+  const [open, setOpen] = useState(false);
+  const canvasRef = useRef(null);
+
+  // Draw signal graph whenever signalHistory changes
+  useEffect(() => {
+    if (!open) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Background grid
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = (h / 4) * i;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+
+    if (!signalHistory || signalHistory.length < 2) return;
+
+    // Normalise Y values (0 = top of frame, 1 = bottom; we invert for display)
+    const vals = signalHistory.map(p => p.y);
+    const minY = Math.min(...vals), maxY = Math.max(...vals);
+    const range = maxY - minY || 0.01;
+
+    // Threshold line
+    const threshY = h - ((config.peakMinProminence / (range + config.peakMinProminence)) * h * 0.8 + h * 0.1);
+    ctx.strokeStyle = '#f59e0b44';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(0, threshY); ctx.lineTo(w, threshY); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Signal line
+    ctx.strokeStyle = '#00d4aa';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    signalHistory.forEach((p, i) => {
+      const x = (i / (signalHistory.length - 1)) * w;
+      const y = h - ((p.y - minY) / range) * h * 0.85 - h * 0.075;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }, [signalHistory, open, config.peakMinProminence]);
+
+  const sliders = [
+    {
+      key: 'peakMinProminence',
+      label: 'Pieksensitiviteit',
+      hint: 'Hoe groot de beweging moet zijn om als stap te tellen. Lager = gevoeliger.',
+      min: 0.003, max: 0.05, step: 0.001,
+      fmt: v => v.toFixed(3),
+    },
+    {
+      key: 'peakMinIntervalMs',
+      label: 'Min. interval (ms)',
+      hint: 'Minimum tijd tussen twee stappen. Verhoog bij dubbeltelling.',
+      min: 60, max: 400, step: 10,
+      fmt: v => `${v} ms`,
+    },
+    {
+      key: 'missGapMs',
+      label: 'Mist-drempel (ms)',
+      hint: 'Hoe lang geen stap voordat een mist wordt geregistreerd.',
+      min: 300, max: 1200, step: 50,
+      fmt: v => `${v} ms`,
+    },
+  ];
+
+  // Preset configs
+  const presets = [
+    { label: 'Snel (sprint)',  config: { peakMinProminence: 0.008, peakMinIntervalMs: 80,  missGapMs: 450 } },
+    { label: 'Normaal',        config: { peakMinProminence: 0.012, peakMinIntervalMs: 120, missGapMs: 600 } },
+    { label: 'Langzaam / DD',  config: { peakMinProminence: 0.018, peakMinIntervalMs: 180, missGapMs: 900 } },
+  ];
+
+  return (
+    <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', overflow: 'hidden', marginBottom: '4px' }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{ width: '100%', padding: '12px 14px', background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'inherit' }}
+      >
+        <SlidersHorizontal size={15} color="#60a5fa" />
+        <span style={{ flex: 1, textAlign: 'left', fontSize: '13px', fontWeight: '600', color: '#f1f5f9' }}>Detectie-instellingen</span>
+        <span style={{ fontSize: '10px', color: '#475569', marginRight: '6px' }}>Aanpassen voor betere nauwkeurigheid</span>
+        {open ? <ChevronUp size={14} color="#64748b" /> : <ChevronDown size={14} color="#64748b" />}
+      </button>
+
+      {open && (
+        <div style={{ padding: '0 14px 14px', borderTop: '1px solid #1e293b' }}>
+
+          {/* Presets */}
+          <div style={{ marginBottom: '14px', paddingTop: '12px' }}>
+            <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '7px' }}>Snelkeuze</div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {presets.map(p => (
+                <button key={p.label} onClick={() => onChange(p.config)}
+                  style={{ padding: '5px 11px', borderRadius: '14px', border: '1px solid #334155', background: 'transparent', color: '#94a3b8', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }}>
+                  {p.label}
+                </button>
+              ))}
+              <button onClick={() => onChange(DEFAULT_CONFIG)}
+                style={{ padding: '5px 11px', borderRadius: '14px', border: '1px solid #334155', background: 'transparent', color: '#64748b', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                Reset
+              </button>
+            </div>
+          </div>
+
+          {/* Sliders */}
+          {sliders.map(sl => (
+            <div key={sl.key} style={{ marginBottom: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '600', color: '#94a3b8' }}>{sl.label}</span>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: '#60a5fa', fontFamily: 'monospace' }}>{sl.fmt(config[sl.key])}</span>
+              </div>
+              <input type="range" min={sl.min} max={sl.max} step={sl.step} value={config[sl.key]}
+                onChange={e => onChange({ [sl.key]: Number(e.target.value) })}
+                style={{ width: '100%', accentColor: '#3b82f6' }}
+              />
+              <div style={{ fontSize: '10px', color: '#475569', marginTop: '3px' }}>{sl.hint}</div>
+            </div>
+          ))}
+
+          {/* Live signal graph */}
+          <div style={{ marginTop: '6px' }}>
+            <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
+              Live enkelsignaal <span style={{ color: '#f59e0b' }}>— gele lijn = prominentiedrempel</span>
+            </div>
+            <canvas ref={canvasRef} width={320} height={80}
+              style={{ width: '100%', height: '80px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b', display: 'block' }}
+            />
+            {(!signalHistory || signalHistory.length < 5) && (
+              <div style={{ fontSize: '10px', color: '#334155', textAlign: 'center', marginTop: '4px' }}>Start een sessie om het signaal te zien</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Skipper Picker ────────────────────────────────────────────────────────────
+// Reuses the same bootstrap pattern as counter.js to load clubs → groups → skippers.
+function SkipperPicker({ counterUser, onSelect, selectedSkipper }) {
+  const [memberClubs,    setMemberClubs]    = useState([]);
+  const [memberGroups,   setMemberGroups]   = useState([]);
+  const [skippers,       setSkippers]       = useState([]);
+  const [clubMembers,    setClubMembers]    = useState([]);
+  const [selectedClubId, setSelectedClubId] = useState('');
+  const [selectedGroupId,setSelectedGroupId]= useState('');
+  const [loading,        setLoading]        = useState(true);
+
+  // Bootstrap clubs
+  useEffect(() => {
+    if (!counterUser) { setLoading(false); return; }
+    const uid = counterUser.id;
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        if (counterUser.role === 'superadmin') {
+          ClubFactory.getAll(clubs => {
+            if (cancelled) return;
+            setMemberClubs(clubs);
+            if (clubs.length === 1) setSelectedClubId(clubs[0].id);
+            setLoading(false);
+          });
+          return;
+        }
+        const unsub = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
+          if (cancelled) return;
+          const clubIdSet = new Set(profiles.map(p => p.member.clubId));
+          const snaps = await Promise.all([...clubIdSet].map(id => ClubFactory.getById(id)));
+          const clubs = snaps.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() }));
+          setMemberClubs(clubs);
+          if (clubs.length === 1) setSelectedClubId(clubs[0].id);
+          setLoading(false);
+        });
+        return () => unsub();
+      } catch { setLoading(false); }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [counterUser]);
+
+  // Load groups when club selected
+  useEffect(() => {
+    if (!selectedClubId) return;
+    setSelectedGroupId('');
+    setSkippers([]);
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const allGroups = await GroupFactory.getGroupsByClubOnce(selectedClubId);
+        const memberCache = {};
+        await Promise.all(allGroups.map(async g => {
+          memberCache[g.id] = await GroupFactory.getMembersByGroupOnce(selectedClubId, g.id);
+        }));
+        if (cancelled) return;
+        const filtered = allGroups.filter(g => memberCache[g.id]?.some(m => m.isSkipper));
+        setMemberGroups(filtered);
+        if (filtered.length === 1) setSelectedGroupId(filtered[0].id);
+      } catch (e) { console.error(e); }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [selectedClubId]);
+
+  // Load skippers when group selected
+  useEffect(() => {
+    if (!selectedClubId || !selectedGroupId) return;
+    const u1 = GroupFactory.getSkippersByGroup(selectedClubId, selectedGroupId, setSkippers);
+    const u2 = ClubMemberFactory.getAll(selectedClubId, setClubMembers);
+    return () => { u1(); u2(); };
+  }, [selectedClubId, selectedGroupId]);
+
+  const resolveSkipper = async (groupMember) => {
+    const memberId  = groupMember.memberId || groupMember.id;
+    const profile   = clubMembers.find(m => m.id === memberId);
+    return {
+      memberId,
+      clubId: selectedClubId,
+      firstName: profile?.firstName || '?',
+      lastName:  profile?.lastName  || '',
+    };
+  };
+
+  if (!counterUser) return (
+    <p style={{ fontSize: '11px', color: '#475569', margin: '4px 0 0' }}>Log in om resultaten op te slaan.</p>
+  );
+
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#64748b' }}>
+      <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> Laden…
+    </div>
+  );
+
+  if (memberClubs.length === 0) return (
+    <p style={{ fontSize: '11px', color: '#475569', margin: '4px 0 0' }}>Geen clubs gevonden voor jouw account.</p>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      {/* Club selector (only when multiple) */}
+      {memberClubs.length > 1 && (
+        <div>
+          <div style={labelStyle}>Club</div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {memberClubs.map(c => (
+              <button key={c.id} onClick={() => setSelectedClubId(c.id)}
+                style={{ ...chipStyle, ...(selectedClubId === c.id ? chipActiveStyle : {}) }}>
+                {c.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Group selector */}
+      {selectedClubId && memberGroups.length > 1 && (
+        <div>
+          <div style={labelStyle}>Groep</div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {memberGroups.map(g => (
+              <button key={g.id} onClick={() => setSelectedGroupId(g.id)}
+                style={{ ...chipStyle, ...(selectedGroupId === g.id ? chipActiveStyle : {}) }}>
+                {g.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Skippers grid */}
+      {selectedClubId && selectedGroupId && (
+        <div>
+          <div style={labelStyle}>Skipper (optioneel)</div>
+          {skippers.length === 0
+            ? <p style={{ fontSize: '12px', color: '#475569' }}>Geen skippers in deze groep.</p>
+            : (
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {/* None option */}
+                <button
+                  onClick={() => onSelect(null)}
+                  style={{ ...skipperChipStyle, ...(selectedSkipper === null ? skipperChipActiveStyle : {}) }}
+                >
+                  <div style={{ ...avatarStyle, backgroundColor: selectedSkipper === null ? '#334155' : '#1e293b' }}>–</div>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>Geen</span>
+                </button>
+
+                {skippers.map(s => {
+                  const memberId = s.memberId || s.id;
+                  const profile  = clubMembers.find(m => m.id === memberId);
+                  const fn       = profile?.firstName || '?';
+                  const ln       = profile?.lastName  || '';
+                  const initials = `${fn[0] || '?'}${ln[0] || ''}`.toUpperCase();
+                  const chosen   = selectedSkipper?.memberId === memberId;
+                  return (
+                    <button key={memberId}
+                      onClick={async () => { const r = await resolveSkipper(s); onSelect(r); }}
+                      style={{ ...skipperChipStyle, ...(chosen ? skipperChipActiveStyle : {}) }}
+                    >
+                      <div style={{ ...avatarStyle, backgroundColor: chosen ? '#3b82f6' : '#334155' }}>{initials}</div>
+                      <span style={{ fontSize: '11px', fontWeight: chosen ? '700' : '400', color: chosen ? '#f1f5f9' : '#94a3b8' }}>
+                        {fn} {ln}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )
+          }
+        </div>
+      )}
+
+      {selectedSkipper && (
+        <div style={{ fontSize: '11px', color: '#22c55e', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <CheckCircle2 size={11} /> Sessie wordt opgeslagen bij {selectedSkipper.firstName} {selectedSkipper.lastName}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const labelStyle = { fontSize: '10px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' };
+const chipStyle  = { padding: '5px 12px', borderRadius: '14px', border: '1px solid #334155', background: 'transparent', color: '#64748b', fontSize: '12px', fontWeight: '500', cursor: 'pointer', fontFamily: 'inherit' };
+const chipActiveStyle = { borderColor: '#3b82f6', backgroundColor: '#3b82f622', color: '#60a5fa', fontWeight: '700' };
+const skipperChipStyle = { display: 'flex', alignItems: 'center', gap: '7px', padding: '6px 11px', borderRadius: '18px', border: '1px solid #334155', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.12s' };
+const skipperChipActiveStyle = { borderColor: '#3b82f6', backgroundColor: '#1e3a5f' };
+const avatarStyle = { width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: 'white', flexShrink: 0 };
+
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function AiCounterPage() {
   const [mpLoaded,  setMpLoaded]  = useState(false);
@@ -193,16 +541,20 @@ export default function AiCounterPage() {
   const [disciplineId,  setDisciplineId]  = useState('');
   const [sessionType,   setSessionType]   = useState('Training');
   const [trackedFoot,   setTrackedFoot]   = useState('left');
-  const [memberContext, setMemberContext] = useState(null);
   const [counterUser,   setCounterUser]   = useState(null);
+  const [selectedSkipper, setSelectedSkipper] = useState(null); // {memberId, clubId, firstName, lastName}
   const [saving,        setSaving]        = useState(false);
   const [savedOk,       setSavedOk]       = useState(false);
+
+  // Detection tuning
+  const [detectionConfig, setDetectionConfig] = useState({ ...DEFAULT_CONFIG });
+  const [signalHistory,   setSignalHistory]   = useState([]); // for the graph
 
   const videoRef        = useRef(null);
   const canvasRef       = useRef(null);
   const poseRef         = useRef(null);
   const cameraRef       = useRef(null);
-  const detectorRef     = useRef(new StepDetector());
+  const detectorRef     = useRef(new StepDetector(DEFAULT_CONFIG));
   const missTimerRef    = useRef(null);
   const elapsedTimerRef = useRef(null);
   const isRunningRef    = useRef(false);
@@ -215,17 +567,21 @@ export default function AiCounterPage() {
   useEffect(() => { trackedFootRef.current = trackedFoot; },  [trackedFoot]);
   useEffect(() => { showOverlayRef.current = showOverlay; }, [showOverlay]);
 
+  // Propagate config changes to the detector
+  useEffect(() => {
+    detectorRef.current.updateConfig(detectionConfig);
+  }, [detectionConfig]);
+
+  const handleConfigChange = useCallback((partial) => {
+    setDetectionConfig(prev => ({ ...prev, ...partial }));
+  }, []);
+
   const { disciplines, getDisc } = useDisciplines();
 
   useEffect(() => {
     const uid = getCookie();
     if (!uid) return;
     UserFactory.get(uid).then(s => { if (s.exists()) setCounterUser({ id: uid, ...s.data() }); });
-    const unsub = UserMemberLinkFactory.getForUser(uid, (profiles) => {
-      const self = profiles.find(p => p.link.relationship === 'self');
-      if (self) setMemberContext({ clubId: self.member.clubId, memberId: self.member.id });
-    });
-    return () => unsub();
   }, []);
 
   useEffect(() => {
@@ -249,8 +605,6 @@ export default function AiCounterPage() {
     }
   }, []);
 
-  // ── Create fresh Pose instance ──────────────────────────────────────────
-  // MediaPipe WASM aborts fatally on bad frames — must re-create to recover.
   const createPose = useCallback((onResultsCb) => {
     if (!window.Pose) return null;
     const pose = new window.Pose({
@@ -294,6 +648,11 @@ export default function AiCounterPage() {
 
       if (isRunningRef.current) {
         const event = detectorRef.current.push(ankle.y, Date.now());
+        // Update signal history for the tuning graph (keep last 90 points)
+        setSignalHistory(prev => {
+          const next = [...prev, { y: ankle.y, t: Date.now() }];
+          return next.length > 90 ? next.slice(-90) : next;
+        });
         if (event === 'step')  { setSteps(detectorRef.current.steps); }
         if (event === 'miss')  {
           setMisses(detectorRef.current.misses);
@@ -361,14 +720,16 @@ export default function AiCounterPage() {
   // ── Session controls ────────────────────────────────────────────────────
   const startSession = useCallback(() => {
     detectorRef.current.reset();
+    detectorRef.current.updateConfig(detectionConfig);
     setSteps(0); setMisses(0); setElapsed(0);
     setSessionDone(false); setSavedOk(false);
+    setSignalHistory([]);
     isRunningRef.current = true;
     setIsRunning(true);
     elapsedTimerRef.current = setInterval(() => {
       setElapsed(detectorRef.current.elapsedMs);
     }, 500);
-  }, []);
+  }, [detectionConfig]);
 
   const stopSession = useCallback(() => {
     isRunningRef.current = false;
@@ -406,7 +767,6 @@ export default function AiCounterPage() {
 
     setMpError(''); setCodecError(false); setUploadProgress(0);
 
-    // Step 1: ensure the video is decoded and has real dimensions
     video.load();
     try {
       await waitForVideoReady(video, 12000);
@@ -421,14 +781,14 @@ export default function AiCounterPage() {
     canvas.width  = vw;
     canvas.height = vh;
 
-    // Step 2: reset state
     detectorRef.current.reset();
+    detectorRef.current.updateConfig(detectionConfig);
     setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false);
+    setSignalHistory([]);
     isRunningRef.current = true;
     setIsRunning(true);
     setMode('running');
 
-    // Step 3: fresh Pose instance (prevents WASM state pollution from prev run)
     if (poseRef.current) { try { poseRef.current.close(); } catch (_) {} }
     const pose = createPose(onResults);
     poseRef.current = pose;
@@ -441,7 +801,6 @@ export default function AiCounterPage() {
       if (duration > 0) setUploadProgress(Math.round((video.currentTime / duration) * 100));
     }, 300);
 
-    // Step 4: frame-by-frame loop with dimension guard
     const processFrame = async () => {
       if (aborted) return;
 
@@ -452,7 +811,6 @@ export default function AiCounterPage() {
         !video.paused &&
         !video.ended
       ) {
-        // Keep canvas in sync with video intrinsics
         if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
           canvas.width  = video.videoWidth;
           canvas.height = video.videoHeight;
@@ -460,7 +818,6 @@ export default function AiCounterPage() {
         try {
           await pose.send({ image: video });
         } catch (e) {
-          // WASM abort — recover with a new Pose instance and skip this frame
           console.warn('[AI Counter] Pose.send threw, recovering:', e?.message);
           try {
             poseRef.current = createPose(onResults);
@@ -482,7 +839,6 @@ export default function AiCounterPage() {
       frameLoopRef.current = requestAnimationFrame(processFrame);
     };
 
-    // Seek to beginning then play
     video.currentTime = 0;
     await new Promise(r => { video.onseeked = r; });
 
@@ -497,28 +853,38 @@ export default function AiCounterPage() {
     }
 
     frameLoopRef.current = requestAnimationFrame(processFrame);
-  }, [mpLoaded, loadMediaPipe, onResults, createPose, stopSession]);
+  }, [mpLoaded, loadMediaPipe, onResults, createPose, stopSession, detectionConfig]);
 
   // ── Save session ────────────────────────────────────────────────────────
+  // NOTE: badge & record flow intentionally skipped while AI counting is in beta.
   const saveSession = useCallback(async () => {
-    if (!memberContext || !disciplineId) return;
+    if (!selectedSkipper || !disciplineId) return;
     setSaving(true);
-    const { clubId, memberId } = memberContext;
+    const { clubId, memberId } = selectedSkipper;
     const disc = getDisc(disciplineId);
     try {
       await ClubMemberFactory.saveSessionHistory(clubId, memberId, {
-        discipline: disciplineId, disciplineName: disc?.name || disciplineId,
-        ropeType: disc?.ropeType || 'SR', sessionType, score: finalSteps,
-        avgBpm: 0, maxBpm: 0, sessionStart: null, telemetry: [],
-        countedBy: counterUser?.id || null,
-        countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName} (AI)` : 'AI',
+        discipline:      disciplineId,
+        disciplineName:  disc?.name     || disciplineId,
+        ropeType:        disc?.ropeType || 'SR',
+        sessionType,
+        score:           finalSteps,
+        avgBpm: 0, maxBpm: 0,
+        sessionStart:    null,
+        telemetry:       [],
+        countedBy:       counterUser?.id   || null,
+        countedByName:   counterUser
+          ? `${counterUser.firstName} ${counterUser.lastName} (AI)`
+          : 'AI',
+        // ── New field: how this session was counted ──────────────────────
+        countingMethod:  'AI',
+        aiConfig: {
+          peakMinProminence:  detectionConfig.peakMinProminence,
+          peakMinIntervalMs: detectionConfig.peakMinIntervalMs,
+          missGapMs:         detectionConfig.missGapMs,
+          trackedFoot,
+        },
       });
-      const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, memberId);
-      await BadgeFactory.checkAndAward(clubId, memberId, {
-        score: finalSteps, discipline: disciplineId,
-        disciplineName: disc?.name || disciplineId,
-        ropeType: disc?.ropeType || 'SR', sessionType,
-      }, freshHistory);
       setSavedOk(true);
     } catch (e) {
       console.error('Save failed:', e);
@@ -526,7 +892,7 @@ export default function AiCounterPage() {
     } finally {
       setSaving(false);
     }
-  }, [memberContext, disciplineId, sessionType, finalSteps, counterUser, getDisc]);
+  }, [selectedSkipper, disciplineId, sessionType, finalSteps, counterUser, getDisc, detectionConfig, trackedFoot]);
 
   // ── Reset ───────────────────────────────────────────────────────────────
   const resetAll = useCallback(() => {
@@ -540,6 +906,7 @@ export default function AiCounterPage() {
     setUploadFile(null); setMode('idle'); setIsRunning(false);
     setSessionDone(false); setSteps(0); setMisses(0); setElapsed(0);
     setUploadProgress(0); setCodecError(false); setMpError(''); setSavedOk(false);
+    setSignalHistory([]);
     detectorRef.current.reset();
   }, [uploadUrl]);
 
@@ -614,6 +981,7 @@ export default function AiCounterPage() {
 
         {/* Video area */}
         <div style={s.videoWrap}>
+          {/* Hidden processing videos */}
           <video ref={videoRef} style={s.hiddenVideo} playsInline muted />
           {uploadUrl && (
             <video ref={uploadVideoRef} src={uploadUrl} style={s.hiddenVideo}
@@ -622,9 +990,20 @@ export default function AiCounterPage() {
             />
           )}
 
-          <canvas ref={canvasRef}
-            style={{ ...s.canvas, display: (mode === 'camera' || mode === 'running') ? 'block' : 'none' }}
-          />
+          {/*
+            Canvas: rendered inside a letterbox container so vertical/portrait
+            videos are fully visible with black bars on the sides rather than
+            being cropped. The canvas itself retains its native aspect ratio
+            via object-fit: contain.
+          */}
+          <div style={s.canvasLetterbox}>
+            <canvas ref={canvasRef}
+              style={{
+                ...s.canvas,
+                display: (mode === 'camera' || mode === 'running') ? 'block' : 'none',
+              }}
+            />
+          </div>
 
           <MissFlash visible={showMiss} />
 
@@ -749,6 +1128,23 @@ export default function AiCounterPage() {
           )}
         </div>
 
+        {/* Detection tuning panel — shown when not running */}
+        {(mode === 'idle' || mode === 'camera' || mode === 'upload') && !isRunning && (
+          <DetectionTuningPanel
+            config={detectionConfig}
+            onChange={handleConfigChange}
+            signalHistory={signalHistory}
+          />
+        )}
+        {/* Also show during live camera so you can tune while watching the signal */}
+        {mode === 'camera' && isRunning && (
+          <DetectionTuningPanel
+            config={detectionConfig}
+            onChange={handleConfigChange}
+            signalHistory={signalHistory}
+          />
+        )}
+
         {/* Results */}
         {sessionDone && (
           <div style={s.resultsPanel}>
@@ -770,10 +1166,27 @@ export default function AiCounterPage() {
                 <span style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Duur</span>
               </div>
             </div>
+
+            {/* ── Skipper picker ── */}
+            <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #1e293b', padding: '12px 14px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Users size={11} /> Sla op bij skipper
+              </div>
+              <SkipperPicker
+                counterUser={counterUser}
+                onSelect={setSelectedSkipper}
+                selectedSkipper={selectedSkipper}
+              />
+            </div>
+
             <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
               {!savedOk ? (
-                <button style={{ ...s.primaryBtn, flex: 1, justifyContent: 'center', opacity: saving || !memberContext ? 0.6 : 1 }}
-                  onClick={saveSession} disabled={saving || !memberContext}>
+                <button
+                  style={{ ...s.primaryBtn, flex: 1, justifyContent: 'center', opacity: saving || !selectedSkipper ? 0.5 : 1 }}
+                  onClick={saveSession}
+                  disabled={saving || !selectedSkipper}
+                  title={!selectedSkipper ? 'Kies eerst een skipper hierboven' : ''}
+                >
                   {saving
                     ? <><RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> Opslaan…</>
                     : <><Trophy size={14} /> Sla op als sessie</>}
@@ -791,14 +1204,16 @@ export default function AiCounterPage() {
                 <RefreshCw size={14} /> Opnieuw
               </button>
             </div>
+
+            {/* Badge note */}
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start', backgroundColor: '#f59e0b11', border: '1px solid #f59e0b33', borderRadius: '8px', padding: '8px 10px', fontSize: '11px', color: '#94a3b8', lineHeight: 1.5 }}>
+              <Info size={11} color="#f59e0b" style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>Badges en records worden nog <em>niet</em> automatisch toegekend via AI-tellen — dit gebeurt zodra de nauwkeurigheid voldoende is.</span>
+            </div>
+
             <button style={{ ...s.ghostBtn, width: '100%', justifyContent: 'center', marginTop: '4px' }} onClick={resetAll}>
               <ArrowLeft size={14} /> Terug naar start
             </button>
-            {!memberContext && (
-              <p style={{ fontSize: '11px', color: '#ef4444', textAlign: 'center', margin: '8px 0 0' }}>
-                Geen clubprofiel gevonden — sessie kan niet worden opgeslagen.
-              </p>
-            )}
           </div>
         )}
 
@@ -812,6 +1227,7 @@ export default function AiCounterPage() {
               <li>👟 Kies de meest zichtbare voet</li>
               <li>📏 Camera stabiel op ~2m afstand</li>
               <li>🎬 Upload als <strong>MP4</strong> — .MOV werkt alleen in Safari</li>
+              <li>📱 Staande video? Past nu volledig in beeld (geen uitsnede)</li>
             </ul>
           </div>
         )}
@@ -829,47 +1245,67 @@ const pageCSS = `
 `;
 
 const s = {
-  page: { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif', display: 'flex', flexDirection: 'column' },
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 100, gap: '8px' },
-  backBtn: { display: 'flex', alignItems: 'center', gap: '6px', color: '#64748b', textDecoration: 'none', fontSize: '13px', fontWeight: '600', minWidth: 60 },
+  page:         { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif', display: 'flex', flexDirection: 'column' },
+  header:       { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 100, gap: '8px' },
+  backBtn:      { display: 'flex', alignItems: 'center', gap: '6px', color: '#64748b', textDecoration: 'none', fontSize: '13px', fontWeight: '600', minWidth: 60 },
   headerCenter: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', flex: 1 },
-  betaChip: { display: 'inline-flex', alignItems: 'center', gap: '4px', backgroundColor: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: '10px', padding: '2px 8px', fontSize: '9px', fontWeight: '800', color: '#f59e0b', letterSpacing: '0.6px' },
-  headerTitle: { fontSize: '15px', fontWeight: '800', color: '#f1f5f9' },
-  overlayToggle: { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center', minWidth: 28 },
-  body: { flex: 1, display: 'flex', flexDirection: 'column', maxWidth: '640px', width: '100%', margin: '0 auto', padding: '12px 12px 32px', gap: '12px' },
-  configStrip: { display: 'flex', gap: '8px', flexWrap: 'wrap', backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '10px 12px' },
-  configGroup: { display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: '120px' },
-  configLabel: { fontSize: '9px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' },
+  betaChip:     { display: 'inline-flex', alignItems: 'center', gap: '4px', backgroundColor: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: '10px', padding: '2px 8px', fontSize: '9px', fontWeight: '800', color: '#f59e0b', letterSpacing: '0.6px' },
+  headerTitle:  { fontSize: '15px', fontWeight: '800', color: '#f1f5f9' },
+  overlayToggle:{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center', minWidth: 28 },
+  body:         { flex: 1, display: 'flex', flexDirection: 'column', maxWidth: '640px', width: '100%', margin: '0 auto', padding: '12px 12px 32px', gap: '12px' },
+  configStrip:  { display: 'flex', gap: '8px', flexWrap: 'wrap', backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '10px 12px' },
+  configGroup:  { display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: '120px' },
+  configLabel:  { fontSize: '9px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' },
   configSelect: { backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '7px', color: 'white', fontSize: '12px', padding: '6px 8px', fontFamily: 'inherit', width: '100%' },
   configToggle: { display: 'flex', gap: '4px' },
   configToggleBtn: { flex: 1, padding: '5px 6px', borderRadius: '6px', border: '1px solid #334155', fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s', whiteSpace: 'nowrap' },
-  videoWrap: { position: 'relative', width: '100%', aspectRatio: '4/3', backgroundColor: '#0a0f1a', borderRadius: '16px', border: '1px solid #1e293b', overflow: 'hidden' },
-  canvas: { width: '100%', height: '100%', objectFit: 'cover', display: 'block', borderRadius: '16px' },
-  hiddenVideo: { position: 'absolute', opacity: 0, pointerEvents: 'none', width: 1, height: 1 },
+
+  // ── Video area ──
+  // The outer wrapper keeps the 4:3 aspect ratio reservation for the page layout.
+  // The inner letterbox uses flexbox centering so the canvas never overflows,
+  // and the canvas itself uses object-fit: contain to show the full frame.
+  videoWrap:    { position: 'relative', width: '100%', aspectRatio: '4/3', backgroundColor: '#0a0f1a', borderRadius: '16px', border: '1px solid #1e293b', overflow: 'hidden' },
+  canvasLetterbox: {
+    position: 'absolute', inset: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#000',
+  },
+  canvas: {
+    // Let the canvas fill the container while keeping its own aspect ratio.
+    // `contain` adds black bars when the video is portrait or wider than 4:3.
+    maxWidth: '100%',
+    maxHeight: '100%',
+    width: 'auto',
+    height: 'auto',
+    objectFit: 'contain',
+    display: 'block',
+  },
+
+  hiddenVideo:  { position: 'absolute', opacity: 0, pointerEvents: 'none', width: 1, height: 1 },
   centeredOverlay: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', textAlign: 'center', gap: '10px' },
-  idleIcon: { width: '80px', height: '80px', borderRadius: '20px', backgroundColor: '#1e293b', border: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '4px' },
-  idleTitle: { fontSize: '18px', fontWeight: '800', color: '#f1f5f9', margin: 0 },
+  idleIcon:     { width: '80px', height: '80px', borderRadius: '20px', backgroundColor: '#1e293b', border: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '4px' },
+  idleTitle:    { fontSize: '18px', fontWeight: '800', color: '#f1f5f9', margin: 0 },
   idleSubtitle: { fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.5, maxWidth: '280px' },
-  idleBtns: { display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '4px' },
-  infoBox: { display: 'flex', gap: '6px', alignItems: 'flex-start', backgroundColor: '#1e293b', borderRadius: '8px', padding: '8px 10px', fontSize: '11px', color: '#64748b', lineHeight: 1.5, maxWidth: '320px', textAlign: 'left', marginTop: '4px' },
-  errorBanner: { display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#ef444422', border: '1px solid #ef444444', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#ef4444', maxWidth: '320px', textAlign: 'left' },
-  cameraHud: { position: 'absolute', top: '10px', right: '10px', display: 'flex', flexDirection: 'column', gap: '6px', zIndex: 10 },
-  hudBtn: { width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.15)', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  idleBtns:     { display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '4px' },
+  infoBox:      { display: 'flex', gap: '6px', alignItems: 'flex-start', backgroundColor: '#1e293b', borderRadius: '8px', padding: '8px 10px', fontSize: '11px', color: '#64748b', lineHeight: 1.5, maxWidth: '320px', textAlign: 'left', marginTop: '4px' },
+  errorBanner:  { display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#ef444422', border: '1px solid #ef444444', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#ef4444', maxWidth: '320px', textAlign: 'left' },
+  cameraHud:    { position: 'absolute', top: '10px', right: '10px', display: 'flex', flexDirection: 'column', gap: '6px', zIndex: 10 },
+  hudBtn:       { width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.15)', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   statsOverlay: { position: 'absolute', top: '10px', left: '10px', display: 'flex', flexDirection: 'column', gap: '6px', zIndex: 15 },
-  statPill: { backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', padding: '6px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '60px' },
-  progressBar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '4px', backgroundColor: 'rgba(0,0,0,0.4)' },
+  statPill:     { backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', padding: '6px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '60px' },
+  progressBar:  { position: 'absolute', bottom: 0, left: 0, right: 0, height: '4px', backgroundColor: 'rgba(0,0,0,0.4)' },
   progressFill: { height: '100%', transition: 'width 0.3s linear', borderRadius: '0 2px 2px 0' },
-  controls: { display: 'flex', gap: '10px', justifyContent: 'center', alignItems: 'center' },
+  controls:     { display: 'flex', gap: '10px', justifyContent: 'center', alignItems: 'center' },
   resultsPanel: { backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #22c55e33', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', animation: 'fadeUp 0.35s ease-out' },
-  resultsHeader: { display: 'flex', alignItems: 'center', gap: '8px' },
-  resultGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' },
-  resultCard: { backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #1e293b', padding: '12px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' },
-  tipsSection: { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '14px 16px' },
-  tipsTitle: { fontSize: '12px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 8px' },
-  tipsList: { margin: 0, padding: '0 0 0 4px', listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 },
-  primaryBtn: { display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '11px 18px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' },
+  resultsHeader:{ display: 'flex', alignItems: 'center', gap: '8px' },
+  resultGrid:   { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' },
+  resultCard:   { backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #1e293b', padding: '12px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' },
+  tipsSection:  { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '14px 16px' },
+  tipsTitle:    { fontSize: '12px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 8px' },
+  tipsList:     { margin: 0, padding: '0 0 0 4px', listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 },
+  primaryBtn:   { display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '11px 18px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' },
   secondaryBtn: { display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '11px 18px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '10px', color: '#94a3b8', fontWeight: '600', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' },
-  ghostBtn: { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '10px 14px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '10px', color: '#64748b', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
-  startBtn: { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '14px 28px', backgroundColor: '#22c55e', border: 'none', borderRadius: '12px', color: 'white', fontWeight: '800', fontSize: '15px', cursor: 'pointer', fontFamily: 'inherit' },
-  stopBtn: { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '14px 28px', backgroundColor: '#ef4444', border: 'none', borderRadius: '12px', color: 'white', fontWeight: '800', fontSize: '15px', cursor: 'pointer', fontFamily: 'inherit' },
+  ghostBtn:     { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '10px 14px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '10px', color: '#64748b', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
+  startBtn:     { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '14px 28px', backgroundColor: '#22c55e', border: 'none', borderRadius: '12px', color: 'white', fontWeight: '800', fontSize: '15px', cursor: 'pointer', fontFamily: 'inherit' },
+  stopBtn:      { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '14px 28px', backgroundColor: '#ef4444', border: 'none', borderRadius: '12px', color: 'white', fontWeight: '800', fontSize: '15px', cursor: 'pointer', fontFamily: 'inherit' },
 };
