@@ -1197,9 +1197,22 @@ export default function AiCounterPage() {
                 </div>
               )}
               <button style={{ ...s.ghostBtn, flexShrink: 0 }} onClick={() => {
-                setSessionDone(false); setSteps(0); setMisses(0);
-                setElapsed(0); setSavedOk(false); setUploadProgress(0);
-                detectorRef.current.reset(); isRunningRef.current = false;
+                // Stop any running frame loop / pose instance from the previous analysis
+                cancelAnimationFrame(frameLoopRef.current);
+                clearInterval(elapsedTimerRef.current);
+                if (poseRef.current) { try { poseRef.current.close(); } catch (_) {} poseRef.current = null; }
+                // Pause the upload video so it's ready to be re-played
+                if (uploadVideoRef.current) { try { uploadVideoRef.current.pause(); uploadVideoRef.current.currentTime = 0; } catch (_) {} }
+                // Reset all session state and go back to the upload-ready screen
+                isRunningRef.current = false;
+                setIsRunning(false);
+                setSessionDone(false);
+                setSteps(0); setMisses(0); setElapsed(0);
+                setSavedOk(false); setUploadProgress(0);
+                setSignalHistory([]);
+                detectorRef.current.reset();
+                // Return to 'upload' mode — the video file is still loaded, user can hit "Analyseer video" again
+                setMode('upload');
               }}>
                 <RefreshCw size={14} /> Opnieuw
               </button>
