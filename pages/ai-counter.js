@@ -333,9 +333,12 @@ function MissFlash({ visible }) {
 }
 
 // ─── Detection Tuning Panel ───────────────────────────────────────────────────
-function DetectionTuningPanel({ config, onChange, signalHistory }) {
+function DetectionTuningPanel({ config, onChange, signalHistory, isActive }) {
   const [open, setOpen] = useState(false);
   const gRef = useRef(null);
+
+  // Auto-open when a session becomes active so the signal graph is immediately visible
+  useEffect(() => { if (isActive) setOpen(true); }, [isActive]);
 
   useEffect(() => {
     if (!open) return;
@@ -1167,28 +1170,22 @@ export default function AiCounterPage() {
           {(mode === 'camera' || isVideoMode) && !isRunning && !sessionDone && <button style={s.ghostBtn} onClick={resetAll}><ArrowLeft size={14} /> Terug</button>}
         </div>
 
-        {/* Settings panels */}
-        {!isRunning && mode !== 'running' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <BackendSelector value={backendId} disabled={isRunning} loadingId={backendLoading}
-              onChange={async bid => {
-                if (isRunning) return;
-                stopCameraStream();
-                if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
-                setBackendId(bid); setBackendError('');
-                // Pre-load new backend
-                setBackendLoading(bid);
-                try { await loadBackend(bid); } catch (e) { setBackendError(`Model laden mislukt: ${e.message}`); }
-                setBackendLoading(null);
-                if (mode === 'camera') setTimeout(() => startCamera(), 100);
-              }}
-            />
-            <DetectionTuningPanel config={detCfg} onChange={p => setDetCfg(prev => ({ ...prev, ...p }))} signalHistory={signalHist} />
-          </div>
-        )}
-        {mode === 'camera' && isRunning && (
-          <DetectionTuningPanel config={detCfg} onChange={p => setDetCfg(prev => ({ ...prev, ...p }))} signalHistory={signalHist} />
-        )}
+        {/* Settings panels — always visible; backend switching locked while running */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <BackendSelector value={backendId} disabled={isRunning} loadingId={backendLoading}
+            onChange={async bid => {
+              if (isRunning) return;
+              stopCameraStream();
+              if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
+              setBackendId(bid); setBackendError('');
+              setBackendLoading(bid);
+              try { await loadBackend(bid); } catch (e) { setBackendError(`Model laden mislukt: ${e.message}`); }
+              setBackendLoading(null);
+              if (mode === 'camera') setTimeout(() => startCamera(), 100);
+            }}
+          />
+          <DetectionTuningPanel config={detCfg} onChange={p => setDetCfg(prev => ({ ...prev, ...p }))} signalHistory={signalHist} isActive={isRunning} />
+        </div>
 
         {/* Results */}
         {sessionDone && (
