@@ -751,14 +751,21 @@ class BeepDetector {
   start() {
     if (this._running) return;
     try {
+      // Ensure the video element is unmuted — createMediaElementSource routes
+      // audio through the AudioContext, but if the element itself is muted the
+      // signal reaching ctx.destination is silence.
+      this.video.muted = false;
+
       this._ctx      = new (window.AudioContext || window.webkitAudioContext)();
       this._analyser = this._ctx.createAnalyser();
-      this._analyser.fftSize             = this.opts.fftSize;
+      this._analyser.fftSize              = this.opts.fftSize;
       this._analyser.smoothingTimeConstant = this.opts.smoothing;
-      // Connect video audio → analyser (does not route to speakers, just reads data)
+      // Connect video audio → analyser AND → speakers.
+      // After createMediaElementSource the element's own output is bypassed;
+      // all routing goes through the Web Audio graph.
       this._source = this._ctx.createMediaElementSource(this.video);
       this._source.connect(this._analyser);
-      this._source.connect(this._ctx.destination); // keep audio playing through speakers
+      this._source.connect(this._ctx.destination); // keeps audio audible
       this._freqBuf = new Float32Array(this._analyser.frequencyBinCount);
       this._running = true;
       this._poll();
@@ -1491,7 +1498,11 @@ export default function AiCounterPage() {
     const video = uploadVideoRef.current, canvas = canvasRef.current;
     if (!video || !canvas) return;
     setBackendError(''); setCodecError(false); setUploadProgress(0);
-    video.muted = videoMuted;
+    // Beep mode needs audio to flow through — force unmute and update state to match.
+    // Normal mode respects the user's mute preference.
+    const effectiveMuted = beepModeRef.current ? false : videoMuted;
+    if (beepModeRef.current && videoMuted) setVideoMuted(false);
+    video.muted = effectiveMuted;
     video.load();
     try { await waitForVideoReady(video, 12000); } catch { setCodecError(true); return; }
     if (!video.videoWidth) { setCodecError(true); return; }
@@ -1635,6 +1646,8 @@ export default function AiCounterPage() {
       beepModeRef.current = next;
       if (!next) {
         stopBeepDetector();
+        // Restore the user's mute preference on the video element
+        if (uploadVideoRef.current) uploadVideoRef.current.muted = videoMuted;
       } else {
         // Reset beep state
         setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
@@ -1646,7 +1659,7 @@ export default function AiCounterPage() {
       }
       return next;
     });
-  }, [stopBeepDetector, startBeepDetector, uploadUrl]);
+  }, [stopBeepDetector, startBeepDetector, uploadUrl, videoMuted]);
 
   const cancelBeepMode = useCallback(() => {
     stopBeepDetector();
@@ -1815,19 +1828,21 @@ export default function AiCounterPage() {
           {/* Audio toggle button */}
           {showAudioToggle && (
             <button
-              onClick={toggleVideoAudio}
-              title={videoMuted ? 'Geluid aan' : 'Geluid uit'}
+              onClick={beepMode ? undefined : toggleVideoAudio}
+              title={beepMode ? 'Geluid vereist voor beep-detectie' : (videoMuted ? 'Geluid aan' : 'Geluid uit')}
               style={{
                 position: 'absolute', top: '10px', right: '10px', zIndex: 18,
                 width: '36px', height: '36px', borderRadius: '10px',
-                backgroundColor: videoMuted ? 'rgba(0,0,0,0.55)' : 'rgba(59,130,246,0.8)',
-                border: `1px solid ${videoMuted ? 'rgba(255,255,255,0.15)' : 'rgba(96,165,250,0.5)'}`,
-                color: 'white', cursor: 'pointer',
+                backgroundColor: beepMode
+                  ? 'rgba(245,158,11,0.7)'                          // amber = locked by beep mode
+                  : videoMuted ? 'rgba(0,0,0,0.55)' : 'rgba(59,130,246,0.8)',
+                border: `1px solid ${beepMode ? 'rgba(245,158,11,0.5)' : videoMuted ? 'rgba(255,255,255,0.15)' : 'rgba(96,165,250,0.5)'}`,
+                color: 'white', cursor: beepMode ? 'default' : 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 backdropFilter: 'blur(4px)', transition: 'background-color 0.15s',
               }}
             >
-              {videoMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+              {beepMode ? <span style={{ fontSize: '14px' }}>🔔</span> : videoMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
             </button>
           )}
 
