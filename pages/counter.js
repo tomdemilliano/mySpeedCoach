@@ -4,18 +4,18 @@ import {
   BadgeFactory, CounterBadgeFactory, ClubMemberFactory, UserMemberLinkFactory,
 } from '../constants/dbSchema';
 import { useDisciplines } from '../hooks/useDisciplines';
-import DisciplineSelector from '../components/DisciplineSelector';
 import {
   Hash, Timer, Square, History as HistoryIcon,
   Play, Clock, Users, Building2, Trophy, ArrowLeft,
   Award, Check, X, Zap, Medal, ChevronRight,
   SkipForward, AlertTriangle, GripVertical, RefreshCw,
+  ChevronDown,
 } from 'lucide-react';
 import { Sparkles } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const AUTO_STOP_IDLE_MS  = 15000;  // individual idle auto-stop
-const TRIPLE_UNDER_IDLE  = 15000;  // 15s countdown after "misser"
+const AUTO_STOP_IDLE_MS  = 15000;
+const TRIPLE_UNDER_IDLE  = 15000;
 
 const COOKIE_KEY = 'msc_uid';
 const getCookie = () => {
@@ -24,7 +24,6 @@ const getCookie = () => {
   return match ? match[1] : null;
 };
 
-// Inject global keyframe CSS once
 if (typeof document !== 'undefined') {
   const styleId = 'counter-keyframes';
   if (!document.getElementById(styleId)) {
@@ -137,84 +136,72 @@ const LiveTimer = memo(({ startTime, durationSeconds, isRecording, isFinished, o
   );
 });
 
-// ─── Discipline Chip Picker ───────────────────────────────────────────────────
-// Compact chip row grouped by ropeType.
-// The selected discipline shows a single detail line beneath.
-function DisciplineCardPicker({ value, onChange, disciplines }) {
+// ─── Discipline Dropdown ───────────────────────────────────────────────────────
+// Clean native-style dropdown with a custom wrapper for consistent dark styling.
+function DisciplineDropdown({ value, onChange, disciplines, disabled }) {
   if (!disciplines || disciplines.length === 0) {
     return (
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-        {[1, 2, 3].map(i => (
-          <div key={i} style={{ width: '80px', height: '32px', backgroundColor: '#1e293b', borderRadius: '16px', border: '1px solid #334155', opacity: 0.4 }} />
-        ))}
-      </div>
+      <div style={{ height: '40px', backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #334155', opacity: 0.4 }} />
     );
   }
 
-  const srDiscs = disciplines.filter(d => d.ropeType === 'SR');
-  const ddDiscs = disciplines.filter(d => d.ropeType === 'DD');
-  const hasDD   = ddDiscs.length > 0;
   const selected = disciplines.find(d => d.id === value) || null;
+  const srDiscs  = disciplines.filter(d => d.ropeType === 'SR');
+  const ddDiscs  = disciplines.filter(d => d.ropeType === 'DD');
 
   const formatDur = (d) => {
-    if (!d.durationSeconds) return '∞ onbeperkt';
+    if (!d.durationSeconds) return '∞';
     if (d.durationSeconds < 60) return `${d.durationSeconds}s`;
-    return `${d.durationSeconds / 60} min`;
+    return `${d.durationSeconds / 60}min`;
   };
 
   const detailLine = (d) => {
+    if (!d) return '';
     const parts = [formatDur(d)];
-    if (!d.isIndividual) parts.push(`👥 Team ${d.teamSize}`);
-    if (d.specialRule === 'triple_under') parts.push('⚡ 15s herstart');
-    if (d.specialRule === 'relay')        parts.push('🔄 beurtelings');
+    if (!d.isIndividual) parts.push(`Team ${d.teamSize}`);
+    if (d.specialRule === 'triple_under') parts.push('15s herstart');
+    if (d.specialRule === 'relay')        parts.push('beurtelings');
     return parts.join(' · ');
   };
 
-  const renderChip = (disc) => {
-    const sel    = value === disc.id;
-    const accent = disc.ropeType === 'DD' ? '#a78bfa' : '#3b82f6';
-    return (
-      <button
-        key={disc.id}
-        type="button"
-        onClick={() => onChange(disc.id)}
-        style={{
-          padding: '6px 12px', borderRadius: '16px', cursor: 'pointer',
-          fontFamily: 'inherit', fontSize: '13px', whiteSpace: 'nowrap',
-          fontWeight: sel ? '700' : '500',
-          border: `1.5px solid ${sel ? accent : '#334155'}`,
-          backgroundColor: sel ? `${accent}22` : 'transparent',
-          color: sel ? (disc.ropeType === 'DD' ? '#a78bfa' : '#60a5fa') : '#94a3b8',
-          transition: 'all 0.12s',
-        }}
-      >
-        {disc.name}
-      </button>
-    );
-  };
-
   return (
-    <div>
-      {/* SR chips */}
-      {srDiscs.length > 0 && (
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: hasDD ? '8px' : '0' }}>
-          {srDiscs.map(renderChip)}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {/* Custom select wrapper */}
+      <div style={{ position: 'relative' }}>
+        <select
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          disabled={disabled}
+          style={{
+            width: '100%',
+            appearance: 'none', WebkitAppearance: 'none',
+            backgroundColor: '#0f172a',
+            border: '1.5px solid #334155',
+            borderRadius: '10px',
+            color: '#f1f5f9',
+            fontSize: '14px',
+            fontWeight: '600',
+            padding: '10px 36px 10px 12px',
+            fontFamily: 'inherit',
+            cursor: disabled ? 'default' : 'pointer',
+            outline: 'none',
+            transition: 'border-color 0.15s',
+          }}
+          onFocus={e => { e.target.style.borderColor = '#3b82f6'; }}
+          onBlur={e  => { e.target.style.borderColor = '#334155'; }}
+        >
+          {srDiscs.length > 0 && ddDiscs.length > 0 && <optgroup label="─── Single Rope ───" style={{ color: '#475569' }}>{srDiscs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>}
+          {srDiscs.length > 0 && ddDiscs.length === 0 && srDiscs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          {ddDiscs.length > 0 && <optgroup label="─── Double Dutch ───" style={{ color: '#475569' }}>{ddDiscs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</optgroup>}
+        </select>
+        {/* Chevron icon */}
+        <div style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#64748b' }}>
+          <ChevronDown size={16} />
         </div>
-      )}
-      {/* DD chips with label */}
-      {hasDD && (
-        <div>
-          <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '6px 0 5px' }}>
-            🌀 Double Dutch
-          </div>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {ddDiscs.map(renderChip)}
-          </div>
-        </div>
-      )}
+      </div>
       {/* Detail line for selected discipline */}
       {selected && (
-        <div style={{ marginTop: '8px', fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <div style={{ fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', paddingLeft: '2px' }}>
           <span style={{ color: '#475569' }}>ℹ</span> {detailLine(selected)}
         </div>
       )}
@@ -223,17 +210,6 @@ function DisciplineCardPicker({ value, onChange, disciplines }) {
 }
 
 // ─── Relay Team Builder ───────────────────────────────────────────────────────
-// Two-phase UX:
-//   1. Tap skippers from the pool to add them (in tap order = running order)
-//      — capped at `required` selections
-//   2. Drag the order list to reorder, or tap ✕ to remove
-//
-// Props:
-//   skippers    : group member docs (from GroupFactory.getSkippersByGroup)
-//   clubMembers : ClubMember profile docs (for name resolution)
-//   value       : [{memberId, name}]  — current ordered selection
-//   onChange    : (newValue) => void
-//   required    : number — exact count needed (from discipline.skippersCount)
 function RelayTeamBuilder({ skippers, clubMembers, value, onChange, required = 2 }) {
   const [dragging, setDragging] = useState(null);
   const [dragOver, setDragOver] = useState(null);
@@ -246,10 +222,8 @@ function RelayTeamBuilder({ skippers, clubMembers, value, onChange, required = 2
 
   const handleToggle = (memberId) => {
     if (selectedIds.has(memberId)) {
-      // Always allow removal
       onChange(value.filter(v => v.memberId !== memberId));
     } else {
-      // Block when already at required count
       if (isFull) return;
       const profile = getProfile(memberId);
       onChange([...value, {
@@ -277,14 +251,9 @@ function RelayTeamBuilder({ skippers, clubMembers, value, onChange, required = 2
 
   return (
     <div>
-      {/* ── Instruction line ── */}
       <div style={{ fontSize: '11px', marginBottom: '8px', color: isDone ? '#22c55e' : '#64748b', display: 'flex', alignItems: 'center', gap: '5px' }}>
-        {isDone
-          ? `✓ ${required} skipper${required > 1 ? 's' : ''} geselecteerd`
-          : `Tik om te selecteren · ${required - value.length} nog nodig`}
+        {isDone ? `✓ ${required} skipper${required > 1 ? 's' : ''} geselecteerd` : `Tik om te selecteren · ${required - value.length} nog nodig`}
       </div>
-
-      {/* ── Pool: tap to select ── */}
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: value.length > 0 ? '14px' : '0' }}>
         {skippers.map(s => {
           const memberId  = s.memberId || s.id;
@@ -294,42 +263,19 @@ function RelayTeamBuilder({ skippers, clubMembers, value, onChange, required = 2
           const initials  = `${firstName[0] || '?'}${lastName[0] || ''}`.toUpperCase();
           const isIn      = selectedIds.has(memberId);
           const position  = isIn ? value.findIndex(v => v.memberId === memberId) + 1 : null;
-          // Dim non-selected when full (but still allow removal via isIn check)
           const dimmed    = !isIn && isFull;
-
           return (
-            <button
-              key={memberId}
-              type="button"
-              onClick={() => handleToggle(memberId)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '8px',
-                padding: '8px 12px', borderRadius: '20px', cursor: dimmed ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit', border: '1.5px solid',
-                borderColor:     isIn ? '#3b82f6' : '#334155',
-                backgroundColor: isIn ? '#1e3a5f' : 'transparent',
-                opacity:         dimmed ? 0.35 : 1,
-                transition: 'all 0.12s',
-              }}
-            >
-              <div style={{
-                width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0,
-                backgroundColor: isIn ? '#3b82f6' : '#334155',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '11px', fontWeight: '700', color: 'white',
-              }}>
+            <button key={memberId} type="button" onClick={() => handleToggle(memberId)}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '20px', cursor: dimmed ? 'not-allowed' : 'pointer', fontFamily: 'inherit', border: '1.5px solid', borderColor: isIn ? '#3b82f6' : '#334155', backgroundColor: isIn ? '#1e3a5f' : 'transparent', opacity: dimmed ? 0.35 : 1, transition: 'all 0.12s' }}>
+              <div style={{ width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0, backgroundColor: isIn ? '#3b82f6' : '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', color: 'white' }}>
                 {isIn ? position : initials}
               </div>
-              <span style={{ fontSize: '13px', fontWeight: isIn ? '700' : '400', color: isIn ? '#f1f5f9' : '#94a3b8' }}>
-                {firstName} {lastName}
-              </span>
+              <span style={{ fontSize: '13px', fontWeight: isIn ? '700' : '400', color: isIn ? '#f1f5f9' : '#94a3b8' }}>{firstName} {lastName}</span>
               {isIn && <span style={{ fontSize: '13px', color: '#60a5fa' }}>✓</span>}
             </button>
           );
         })}
       </div>
-
-      {/* ── Order list: drag to reorder ── */}
       {value.length > 0 && (
         <div>
           <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -337,44 +283,17 @@ function RelayTeamBuilder({ skippers, clubMembers, value, onChange, required = 2
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
             {value.map((item, idx) => {
-              const profile       = getProfile(item.memberId);
-              const initials      = `${profile?.firstName?.[0] || '?'}${profile?.lastName?.[0] || ''}`.toUpperCase();
+              const profile   = getProfile(item.memberId);
+              const initials  = `${profile?.firstName?.[0] || '?'}${profile?.lastName?.[0] || ''}`.toUpperCase();
               const isDraggedOver = dragOver === idx;
               return (
-                <div
-                  key={item.memberId}
-                  draggable
-                  onDragStart={() => handleDragStart(idx)}
-                  onDragOver={(e) => handleDragOver(e, idx)}
-                  onDrop={(e) => handleDrop(e, idx)}
-                  onDragEnd={() => { setDragging(null); setDragOver(null); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '10px',
-                    padding: '9px 12px', borderRadius: '10px',
-                    backgroundColor: isDraggedOver ? '#1e3a5f' : '#0f172a',
-                    border: `1px solid ${isDraggedOver ? '#3b82f6' : dragging === idx ? '#475569' : '#1e293b'}`,
-                    cursor: 'grab', userSelect: 'none',
-                    opacity: dragging === idx ? 0.5 : 1,
-                    transition: 'border-color 0.12s, background-color 0.12s',
-                  }}
-                >
+                <div key={item.memberId} draggable onDragStart={() => handleDragStart(idx)} onDragOver={(e) => handleDragOver(e, idx)} onDrop={(e) => handleDrop(e, idx)} onDragEnd={() => { setDragging(null); setDragOver(null); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderRadius: '10px', backgroundColor: isDraggedOver ? '#1e3a5f' : '#0f172a', border: `1px solid ${isDraggedOver ? '#3b82f6' : dragging === idx ? '#475569' : '#1e293b'}`, cursor: 'grab', userSelect: 'none', opacity: dragging === idx ? 0.5 : 1, transition: 'border-color 0.12s, background-color 0.12s' }}>
                   <span style={{ color: '#475569', flexShrink: 0, fontSize: '16px' }}>⠿</span>
-                  <div style={{ width: '26px', height: '26px', borderRadius: '50%', backgroundColor: '#3b82f622', border: '1px solid #3b82f644', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: '#60a5fa', flexShrink: 0 }}>
-                    {initials}
-                  </div>
-                  <div style={{ flex: 1, fontSize: '13px', fontWeight: '600', color: '#f1f5f9' }}>
-                    {profile ? `${profile.firstName} ${profile.lastName}` : item.memberId}
-                  </div>
-                  <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: isDone ? '#22c55e' : '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: 'white', flexShrink: 0 }}>
-                    {idx + 1}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onChange(value.filter((_, i) => i !== idx))}
-                    style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', flexShrink: 0 }}
-                  >
-                    <X size={14} />
-                  </button>
+                  <div style={{ width: '26px', height: '26px', borderRadius: '50%', backgroundColor: '#3b82f622', border: '1px solid #3b82f644', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: '#60a5fa', flexShrink: 0 }}>{initials}</div>
+                  <div style={{ flex: 1, fontSize: '13px', fontWeight: '600', color: '#f1f5f9' }}>{profile ? `${profile.firstName} ${profile.lastName}` : item.memberId}</div>
+                  <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: isDone ? '#22c55e' : '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: 'white', flexShrink: 0 }}>{idx + 1}</div>
+                  <button type="button" onClick={() => onChange(value.filter((_, i) => i !== idx))} style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', flexShrink: 0 }}><X size={14} /></button>
                 </div>
               );
             })}
@@ -385,46 +304,26 @@ function RelayTeamBuilder({ skippers, clubMembers, value, onChange, required = 2
   );
 }
 
-// ─── Relay scoreboard (shown during relay session) ────────────────────────────
+// ─── Relay scoreboard ────────────────────────────────────────────────────────
 function RelayScoreboard({ relayOrder, relayResults, currentSkipperIndex, discName }) {
   const total = relayResults.reduce((s, r) => s + (r.steps || 0), 0);
   return (
     <div style={{ width: '100%', maxWidth: '440px', backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #334155', padding: '14px', marginBottom: '14px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-        <div style={{ fontSize: '12px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-          {discName} · Teamtotaal
-        </div>
-        <div style={{ fontSize: '22px', fontWeight: '900', color: '#60a5fa' }}>
-          {total} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '400' }}>stappen</span>
-        </div>
+        <div style={{ fontSize: '12px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{discName} · Teamtotaal</div>
+        <div style={{ fontSize: '22px', fontWeight: '900', color: '#60a5fa' }}>{total} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '400' }}>stappen</span></div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
         {relayOrder.map((item, idx) => {
-          const result   = relayResults[idx] || { steps: 0 };
+          const result    = relayResults[idx] || { steps: 0 };
           const isCurrent = idx === currentSkipperIndex;
           const isDone    = idx < currentSkipperIndex;
           return (
-            <div key={item.memberId} style={{
-              display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '8px',
-              backgroundColor: isCurrent ? '#1e3a5f' : isDone ? '#0f172a' : '#0f172a44',
-              border: `1px solid ${isCurrent ? '#3b82f688' : isDone ? '#22c55e33' : '#1e293b'}`,
-              opacity: !isCurrent && !isDone ? 0.45 : 1,
-              transition: 'all 0.3s',
-            }}>
-              <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: isCurrent ? '#3b82f6' : isDone ? '#22c55e' : '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: 'white', flexShrink: 0 }}>
-                {isDone ? '✓' : idx + 1}
-              </div>
-              <div style={{ flex: 1, fontSize: '13px', fontWeight: isCurrent ? '700' : '400', color: isCurrent ? '#f1f5f9' : isDone ? '#94a3b8' : '#475569' }}>
-                {item.name}
-              </div>
-              <div style={{ fontSize: '16px', fontWeight: '800', color: isCurrent ? '#60a5fa' : isDone ? '#22c55e' : '#334155' }}>
-                {result.steps ?? '—'}
-              </div>
-              {isCurrent && (
-                <div style={{ fontSize: '9px', fontWeight: '700', color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  ACTIEF
-                </div>
-              )}
+            <div key={item.memberId} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '8px', backgroundColor: isCurrent ? '#1e3a5f' : '#0f172a', border: `1px solid ${isCurrent ? '#3b82f688' : isDone ? '#22c55e33' : '#1e293b'}`, opacity: !isCurrent && !isDone ? 0.45 : 1, transition: 'all 0.3s' }}>
+              <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: isCurrent ? '#3b82f6' : isDone ? '#22c55e' : '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: 'white', flexShrink: 0 }}>{isDone ? '✓' : idx + 1}</div>
+              <div style={{ flex: 1, fontSize: '13px', fontWeight: isCurrent ? '700' : '400', color: isCurrent ? '#f1f5f9' : isDone ? '#94a3b8' : '#475569' }}>{item.name}</div>
+              <div style={{ fontSize: '16px', fontWeight: '800', color: isCurrent ? '#60a5fa' : isDone ? '#22c55e' : '#334155' }}>{result.steps ?? '—'}</div>
+              {isCurrent && <div style={{ fontSize: '9px', fontWeight: '700', color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.5px' }}>ACTIEF</div>}
             </div>
           );
         })}
@@ -443,33 +342,24 @@ function RelayResultsSummary({ relayOrder, relayResults, discName, sessionType, 
         <div style={{ fontSize: '14px', fontWeight: '700', color: '#22c55e', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sessie voltooid!</div>
         <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{discName} · {sessionType}</div>
       </div>
-
-      {/* Total — prominent */}
       <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', padding: '14px', marginBottom: '14px', textAlign: 'center', border: '1px solid #22c55e33' }}>
         <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Teamtotaal</div>
         <div style={{ fontSize: '44px', fontWeight: '900', color: '#22c55e', lineHeight: 1 }}>{total}</div>
         <div style={{ fontSize: '12px', color: '#64748b' }}>stappen</div>
       </div>
-
-      {/* Individual results — informational */}
-      <div style={{ marginBottom: '8px', fontSize: '11px', color: '#475569', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        Individueel
-      </div>
+      <div style={{ marginBottom: '8px', fontSize: '11px', color: '#475569', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Individueel</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '16px' }}>
         {relayOrder.map((item, idx) => {
           const result = relayResults[idx] || { steps: 0 };
           return (
             <div key={item.memberId} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b' }}>
-              <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: '#94a3b8', flexShrink: 0 }}>
-                {idx + 1}
-              </div>
+              <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: '#94a3b8', flexShrink: 0 }}>{idx + 1}</div>
               <div style={{ flex: 1, fontSize: '13px', color: '#94a3b8' }}>{item.name}</div>
               <div style={{ fontSize: '16px', fontWeight: '700', color: '#60a5fa' }}>{result.steps ?? 0}</div>
             </div>
           );
         })}
       </div>
-
       <div style={{ display: 'flex', gap: '10px' }}>
         <button onClick={onNewSession} style={{ flex: 1, padding: '13px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
           <Play size={16} fill="white" /> Nieuwe sessie
@@ -487,7 +377,6 @@ function TripleUnderDisplay({ attempts, currentAttempt, missCountdown, onMisser 
   const best = Math.max(...attempts.map(a => a.steps), 0);
   return (
     <div style={{ width: '100%', maxWidth: '440px' }}>
-      {/* Attempts summary */}
       {attempts.length > 0 && (
         <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '12px 14px', marginBottom: '10px' }}>
           <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
@@ -502,26 +391,17 @@ function TripleUnderDisplay({ attempts, currentAttempt, missCountdown, onMisser 
           </div>
         </div>
       )}
-
-      {/* Miss countdown banner */}
       {missCountdown !== null && (
-        <div style={{ backgroundColor: '#ef444422', border: '1px solid #ef444444', borderRadius: '12px', padding: '12px 16px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '12px', animation: 'flashRed 1s ease-in-out infinite' }}>
-          <div style={{ fontSize: '28px', fontWeight: '900', color: '#ef4444', fontFamily: 'monospace', animation: 'countPulse 1s ease-in-out infinite', minWidth: '36px', textAlign: 'center' }}>
-            {missCountdown}
-          </div>
+        <div style={{ backgroundColor: '#ef444422', border: '1px solid #ef444444', borderRadius: '12px', padding: '12px 16px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ fontSize: '28px', fontWeight: '900', color: '#ef4444', fontFamily: 'monospace', animation: 'countPulse 1s ease-in-out infinite', minWidth: '36px', textAlign: 'center' }}>{missCountdown}</div>
           <div>
             <div style={{ fontWeight: '700', fontSize: '13px', color: '#ef4444' }}>Misser! Nog {missCountdown}s om verder te gaan</div>
             <div style={{ fontSize: '11px', color: '#ef444488', marginTop: '2px' }}>Begin opnieuw te tellen om poging {attempts.length + 2} te starten</div>
           </div>
         </div>
       )}
-
-      {/* Misser button */}
       {missCountdown === null && (
-        <button
-          onClick={onMisser}
-          style={{ width: '100%', padding: '12px', backgroundColor: '#ef444422', border: '2px solid #ef444466', borderRadius: '12px', color: '#ef4444', fontWeight: '700', fontSize: '15px', cursor: 'pointer', marginBottom: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-        >
+        <button onClick={onMisser} style={{ width: '100%', padding: '12px', backgroundColor: '#ef444422', border: '2px solid #ef444466', borderRadius: '12px', color: '#ef4444', fontWeight: '700', fontSize: '15px', cursor: 'pointer', marginBottom: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
           <AlertTriangle size={18} /> MISSER (start 15s countdown)
         </button>
       )}
@@ -529,66 +409,73 @@ function TripleUnderDisplay({ attempts, currentAttempt, missCountdown, onMisser 
   );
 }
 
-function AiBetaBanner() {
+// ─── Action buttons shown in setup — Manueel tellen + AI Stapteller ───────────
+// Both styled as wide cards, visually sibling to each other.
+function SessionActionButtons({ canStart, onManual, aiHref }) {
   return (
-    <a
-      href="/ai-counter"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: '11px 14px',
-        backgroundColor: '#1e293b',
-        border: '1px solid #f59e0b44',
-        borderRadius: '10px',
-        textDecoration: 'none',
-        marginBottom: '4px',
-        transition: 'border-color 0.15s',
-      }}
-    >
-      {/* Icon */}
-      <div style={{
-        width: '34px',
-        height: '34px',
-        borderRadius: '9px',
-        backgroundColor: '#f59e0b22',
-        border: '1px solid #f59e0b44',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-      }}>
-        {/* Use the Sparkles icon imported from lucide-react */}
-        <Sparkles size={16} color="#f59e0b" />
-      </div>
- 
-      {/* Text */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
-          <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>
-            AI Stapteller
-          </span>
-          <span style={{
-            fontSize: '9px',
-            fontWeight: '800',
-            color: '#f59e0b',
-            backgroundColor: '#f59e0b22',
-            border: '1px solid #f59e0b44',
-            borderRadius: '8px',
-            padding: '1px 6px',
-            letterSpacing: '0.5px',
-          }}>
-            BETA
-          </span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '16px 0 24px' }}>
+      {/* Manueel tellen — primary action */}
+      <button
+        onClick={onManual}
+        disabled={!canStart}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '12px',
+          padding: '14px 16px', width: '100%',
+          backgroundColor: canStart ? '#1e293b' : '#141e2d',
+          border: `1px solid ${canStart ? '#3b82f644' : '#1e293b'}`,
+          borderRadius: '10px', textDecoration: 'none',
+          cursor: canStart ? 'pointer' : 'not-allowed',
+          opacity: canStart ? 1 : 0.4,
+          transition: 'border-color 0.15s',
+          fontFamily: 'inherit',
+        }}
+      >
+        <div style={{
+          width: '34px', height: '34px', borderRadius: '9px',
+          backgroundColor: '#3b82f622', border: '1px solid #3b82f644',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          <Hash size={16} color="#60a5fa" />
         </div>
-        <div style={{ fontSize: '11px', color: '#64748b' }}>
-          Automatisch tellen via camera of video
+        <div style={{ flex: 1, textAlign: 'left' }}>
+          <div style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9', marginBottom: '2px' }}>Manueel tellen</div>
+          <div style={{ fontSize: '11px', color: '#64748b' }}>Teller met live hartslag & badges</div>
         </div>
-      </div>
- 
-      {/* Arrow */}
-      <ChevronRight size={15} color="#475569" style={{ flexShrink: 0 }} />
-    </a>
+        <ChevronRight size={15} color="#475569" style={{ flexShrink: 0 }} />
+      </button>
+
+      {/* AI Stapteller — secondary action */}
+      <a
+        href={canStart ? aiHref : undefined}
+        onClick={e => { if (!canStart) e.preventDefault(); }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '12px',
+          padding: '14px 16px',
+          backgroundColor: canStart ? '#1e293b' : '#141e2d',
+          border: `1px solid ${canStart ? '#f59e0b44' : '#1e293b'}`,
+          borderRadius: '10px', textDecoration: 'none',
+          opacity: canStart ? 1 : 0.4,
+          cursor: canStart ? 'pointer' : 'not-allowed',
+          transition: 'border-color 0.15s',
+        }}
+      >
+        <div style={{
+          width: '34px', height: '34px', borderRadius: '9px',
+          backgroundColor: '#f59e0b22', border: '1px solid #f59e0b44',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          <Sparkles size={16} color="#f59e0b" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+            <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>AI Stapteller</span>
+            <span style={{ fontSize: '9px', fontWeight: '800', color: '#f59e0b', backgroundColor: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: '8px', padding: '1px 6px', letterSpacing: '0.5px' }}>BETA</span>
+          </div>
+          <div style={{ fontSize: '11px', color: '#64748b' }}>Automatisch tellen via camera of video</div>
+        </div>
+        <ChevronRight size={15} color="#475569" style={{ flexShrink: 0 }} />
+      </a>
+    </div>
   );
 }
 
@@ -598,79 +485,66 @@ function AiBetaBanner() {
 export default function CounterPage() {
   const { disciplines, getDisc, getDuration, getLabel } = useDisciplines();
 
-  // ── Current user (counter) ───────────────────────────────────────────────
   const [counterUser,   setCounterUser]   = useState(null);
   const isSuperAdminRef = useRef(false);
   const isClubAdminRef  = useRef(false);
 
-  // ── Club/group data ──────────────────────────────────────────────────────
   const [memberClubs,   setMemberClubs]   = useState([]);
   const [memberGroups,  setMemberGroups]  = useState([]);
   const [bootstrapDone, setBootstrapDone] = useState(false);
   const [selectedClubId,  setSelectedClubId]  = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState('');
 
-  // ── Skipper data ──────────────────────────────────────────────────────────
   const [skippers,    setSkippers]    = useState([]);
   const [clubMembers, setClubMembers] = useState([]);
   const [selectedSkipper, setSelectedSkipper] = useState(null);
 
-  // ── Session config — unified setup page ──────────────────────────────────
-  const [setupDone,       setSetupDone]       = useState(false);
-  const [selectedTeamOrder, setSelectedTeamOrder] = useState([]); // for relay: [{memberId,name}]
-  const [sessionType,     setSessionType]     = useState('Training');
-  const [disciplineId,    setDisciplineId]    = useState('');
+  const [setupDone,         setSetupDone]         = useState(false);
+  const [selectedTeamOrder, setSelectedTeamOrder] = useState([]);
+  const [sessionType,       setSessionType]       = useState('Training');
+  const [disciplineId,      setDisciplineId]      = useState('');
 
-  // ── Derived discipline info ───────────────────────────────────────────────
   const currentDisc = getDisc(disciplineId);
   const sessionMode = !currentDisc ? 'individual'
     : currentDisc.specialRule === 'triple_under' ? 'triple_under'
     : currentDisc.specialRule === 'relay'        ? 'relay'
     : 'individual';
 
-  // ── Individual session state ──────────────────────────────────────────────
   const [currentData,    setCurrentData]    = useState(null);
   const [liveBpm,        setLiveBpm]        = useState(0);
   const [sessionHistory, setSessionHistory] = useState([]);
   const [bestRecord,     setBestRecord]     = useState(null);
 
-  // ── Post-session queue ────────────────────────────────────────────────────
   const [pendingQueue,      setPendingQueue]      = useState([]);
   const [isProcessingQueue, setIsProcessingQueue] = useState(false);
   const [newlyEarnedBadges, setNewlyEarnedBadges] = useState([]);
 
-  // ── Triple Under state ────────────────────────────────────────────────────
-  const [tuAttempts,      setTuAttempts]      = useState([]);   // [{steps}]
+  const [tuAttempts,      setTuAttempts]      = useState([]);
   const [tuCurrentSteps,  setTuCurrentSteps]  = useState(0);
-  const [tuMissCountdown, setTuMissCountdown] = useState(null); // null or seconds
+  const [tuMissCountdown, setTuMissCountdown] = useState(null);
   const [tuIsActive,      setTuIsActive]      = useState(false);
   const [tuIsFinished,    setTuIsFinished]    = useState(false);
   const tuMissTimerRef  = useRef(null);
   const tuCountdownRef  = useRef(null);
 
-  // ── Relay state ───────────────────────────────────────────────────────────
-  const [relayOrder,          setRelayOrder]          = useState([]); // [{memberId, name}]
-  const [relayResults,        setRelayResults]        = useState([]); // [{steps, memberId}]
+  const [relayOrder,          setRelayOrder]          = useState([]);
+  const [relayResults,        setRelayResults]        = useState([]);
   const [currentSkipperIndex, setCurrentSkipperIndex] = useState(0);
   const [relayIsActive,       setRelayIsActive]       = useState(false);
   const [relayIsFinished,     setRelayIsFinished]     = useState(false);
   const [relaySkipperStart,   setRelaySkipperStart]   = useState(null);
   const relayTimerRef = useRef(null);
   const relayCurrentStepsRef = useRef(0);
-  const relayLeadUidRef = useRef(null);  // uid of first skipper, used for RTDB relay sync
+  const relayLeadUidRef = useRef(null);
 
   const telemetryRef     = useRef([]);
   const sessionStartRef  = useRef(null);
   const autoStopTimerRef = useRef(null);
 
-  // ── Set default discipline when disciplines load ──────────────────────────
   useEffect(() => {
-    if (disciplines.length > 0 && !disciplineId) {
-      setDisciplineId(disciplines[0].id);
-    }
+    if (disciplines.length > 0 && !disciplineId) setDisciplineId(disciplines[0].id);
   }, [disciplines]);
 
-  // ── Bootstrap: load counter user + their club/group memberships ──────────
   useEffect(() => {
     const uid = getCookie();
     if (!uid) { setBootstrapDone(true); return; }
@@ -727,12 +601,8 @@ export default function CounterPage() {
 
   useEffect(() => {
     if (!selectedClubId) return;
-    setSelectedGroupId('');
-    setMemberGroups([]);
-    setSkippers([]);
-    setClubMembers([]);
-    const uid = getCookie();
-    if (!uid) return;
+    setSelectedGroupId(''); setMemberGroups([]); setSkippers([]); setClubMembers([]);
+    const uid = getCookie(); if (!uid) return;
     let cancelled = false;
 
     const load = async () => {
@@ -757,13 +627,9 @@ export default function CounterPage() {
         const myMemberIds = new Set(links.map(l => l.memberId).filter(Boolean));
         const memberGroupIds = new Set();
         allGroups.forEach(group => {
-          if (groupMembersCache[group.id]?.some(d => myMemberIds.has(d.memberId || d.id))) {
-            memberGroupIds.add(group.id);
-          }
+          if (groupMembersCache[group.id]?.some(d => myMemberIds.has(d.memberId || d.id))) memberGroupIds.add(group.id);
         });
-        const filtered = allGroups
-          .filter(g => memberGroupIds.has(g.id))
-          .filter(g => groupMembersCache[g.id]?.some(m => m.isSkipper === true));
+        const filtered = allGroups.filter(g => memberGroupIds.has(g.id)).filter(g => groupMembersCache[g.id]?.some(m => m.isSkipper === true));
         setMemberGroups(filtered);
         if (filtered.length === 1) setSelectedGroupId(filtered[0].id);
       } catch (e) { console.error('[Counter] Failed to load member groups:', e); }
@@ -779,7 +645,6 @@ export default function CounterPage() {
     return () => { u1(); u2(); };
   }, [selectedClubId, selectedGroupId]);
 
-  // ── Live session subscription (individual only) ───────────────────────────
   useEffect(() => {
     if (!selectedSkipper?.rtdbUid || sessionMode !== 'individual') return;
     const unsub = LiveSessionFactory.subscribeToLive(selectedSkipper.rtdbUid, data => {
@@ -804,7 +669,6 @@ export default function CounterPage() {
     return () => unsub();
   }, [selectedSkipper, disciplineId, sessionType, sessionMode]);
 
-  // ── Individual auto-stop on idle ─────────────────────────────────────────
   useEffect(() => {
     if (sessionMode !== 'individual') return;
     if (!currentData?.isActive) { clearTimeout(autoStopTimerRef.current); return; }
@@ -813,72 +677,47 @@ export default function CounterPage() {
     return () => clearTimeout(autoStopTimerRef.current);
   }, [currentData?.lastStepTime, currentData?.isActive, sessionMode]);
 
-  // ── Trigger post-session flow when individual session finishes ────────────
   useEffect(() => {
     if (sessionMode !== 'individual') return;
-    if (currentData?.isFinished && !isProcessingQueue && pendingQueue.length === 0) {
-      triggerPostSessionFlow();
-    }
+    if (currentData?.isFinished && !isProcessingQueue && pendingQueue.length === 0) triggerPostSessionFlow();
   }, [currentData?.isFinished]);
 
-  // ── Relay: timer tick ─────────────────────────────────────────────────────
   useEffect(() => {
     if (sessionMode !== 'relay' || !relayIsActive || relayIsFinished) return;
-    const disc = currentDisc;
-    if (!disc?.durationSeconds) return;
-
+    const disc = currentDisc; if (!disc?.durationSeconds) return;
     clearInterval(relayTimerRef.current);
     relayTimerRef.current = setInterval(() => {
       if (!relaySkipperStart) return;
       const elapsed   = (Date.now() - relaySkipperStart) / 1000;
       const remaining = disc.durationSeconds - elapsed;
-
-      if (remaining <= 0) {
-        clearInterval(relayTimerRef.current);
-        advanceRelaySkipper();
-      }
+      if (remaining <= 0) { clearInterval(relayTimerRef.current); advanceRelaySkipper(); }
     }, 200);
-
     return () => clearInterval(relayTimerRef.current);
   }, [relayIsActive, relayIsFinished, relaySkipperStart, currentSkipperIndex, sessionMode]);
 
-  // ── Relay: sync live state to RTDB so dashboard can read it ─────────────
   useEffect(() => {
     if (sessionMode !== 'relay') return;
     if (!relayIsActive && !relayIsFinished) return;
-    const rtdbUid = relayLeadUidRef.current;
-    if (!rtdbUid) return;
-
+    const rtdbUid = relayLeadUidRef.current; if (!rtdbUid) return;
     const currentItem = relayOrder[currentSkipperIndex];
     const total = relayResults.reduce((s, r) => s + (r.steps || 0), 0);
-
     import('../firebaseConfig').then(({ rtdb }) => {
       import('firebase/database').then(({ ref, update }) => {
         update(ref(rtdb, `live_sessions/${rtdbUid}/relaySession`), {
-          isActive:               relayIsActive,
-          isFinished:             relayIsFinished,
-          currentSkipperIndex,
-          currentSkipperName:     currentItem?.name || '',
-          currentSkipperMemberId: currentItem?.memberId || '',
-          totalSteps:             total,
-          skipperCount:           relayOrder.length,
-          results: relayResults.map((r, i) => ({
-            memberId: relayOrder[i]?.memberId || '',
-            name:     relayOrder[i]?.name     || '',
-            steps:    r.steps || 0,
-          })),
+          isActive: relayIsActive, isFinished: relayIsFinished, currentSkipperIndex,
+          currentSkipperName: currentItem?.name || '', currentSkipperMemberId: currentItem?.memberId || '',
+          totalSteps: total, skipperCount: relayOrder.length,
+          results: relayResults.map((r, i) => ({ memberId: relayOrder[i]?.memberId || '', name: relayOrder[i]?.name || '', steps: r.steps || 0 })),
           updatedAt: Date.now(),
         }).catch(() => {});
       });
     });
   }, [relayResults, currentSkipperIndex, relayIsActive, relayIsFinished, sessionMode]);
 
-  // Clear relay session from RTDB on unmount/reset
   useEffect(() => {
     if (sessionMode !== 'relay') return;
     return () => {
-      const rtdbUid = relayLeadUidRef.current;
-      if (!rtdbUid) return;
+      const rtdbUid = relayLeadUidRef.current; if (!rtdbUid) return;
       import('../firebaseConfig').then(({ rtdb }) => {
         import('firebase/database').then(({ ref, remove }) => {
           remove(ref(rtdb, `live_sessions/${rtdbUid}/relaySession`)).catch(() => {});
@@ -886,26 +725,17 @@ export default function CounterPage() {
       });
     };
   }, [sessionMode]);
+
   useEffect(() => {
     if (tuMissCountdown === null) return;
-    if (tuMissCountdown <= 0) {
-      // Session over — save best attempt
-      clearInterval(tuCountdownRef.current);
-      finishTripleUnder();
-      return;
-    }
+    if (tuMissCountdown <= 0) { clearInterval(tuCountdownRef.current); finishTripleUnder(); return; }
     clearInterval(tuCountdownRef.current);
     tuCountdownRef.current = setInterval(() => {
-      setTuMissCountdown(prev => {
-        if (prev === null || prev <= 1) { clearInterval(tuCountdownRef.current); return 0; }
-        return prev - 1;
-      });
+      setTuMissCountdown(prev => { if (prev === null || prev <= 1) { clearInterval(tuCountdownRef.current); return 0; } return prev - 1; });
     }, 1000);
     return () => clearInterval(tuCountdownRef.current);
   }, [tuMissCountdown]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // HELPER: resolve skipper profile
   // ─────────────────────────────────────────────────────────────────────────
   const resolveSkipperProfile = async (groupMember) => {
     const memberId  = groupMember.memberId || groupMember.id;
@@ -917,20 +747,13 @@ export default function CounterPage() {
   };
 
   // ─────────────────────────────────────────────────────────────────────────
-  // INDIVIDUAL SESSION HANDLERS
+  // SESSION HANDLERS
   // ─────────────────────────────────────────────────────────────────────────
   const handleStartSession = async () => {
-    telemetryRef.current    = [];
-    sessionStartRef.current = null;
+    telemetryRef.current = []; sessionStartRef.current = null;
 
     if (sessionMode === 'triple_under') {
-      setTuAttempts([]);
-      setTuCurrentSteps(0);
-      setTuMissCountdown(null);
-      setTuIsActive(true);
-      setTuIsFinished(false);
-      setSetupDone(true);
-      return;
+      setTuAttempts([]); setTuCurrentSteps(0); setTuMissCountdown(null); setTuIsActive(true); setTuIsFinished(false); setSetupDone(true); return;
     }
 
     if (sessionMode === 'relay') {
@@ -939,21 +762,13 @@ export default function CounterPage() {
         const profile  = clubMembers.find(m => m.id === memberId);
         return { memberId, name: profile ? `${profile.firstName} ${profile.lastName}` : memberId };
       });
-      setRelayOrder(order);
-      setRelayResults(new Array(order.length).fill({ steps: 0 }));
-      setCurrentSkipperIndex(0);
-      setRelayIsActive(false);
-      setRelayIsFinished(false);
-      setRelaySkipperStart(null);
+      setRelayOrder(order); setRelayResults(new Array(order.length).fill({ steps: 0 }));
+      setCurrentSkipperIndex(0); setRelayIsActive(false); setRelayIsFinished(false); setRelaySkipperStart(null);
       relayCurrentStepsRef.current = 0;
-      // Resolve the lead skipper's uid for RTDB sync (use first in order)
       if (order.length > 0) {
-        UserMemberLinkFactory.getUidForMember(selectedClubId, order[0].memberId)
-          .then(uid => { relayLeadUidRef.current = uid || null; })
-          .catch(() => { relayLeadUidRef.current = null; });
+        UserMemberLinkFactory.getUidForMember(selectedClubId, order[0].memberId).then(uid => { relayLeadUidRef.current = uid || null; }).catch(() => { relayLeadUidRef.current = null; });
       }
-      setSetupDone(true);
-      return;
+      setSetupDone(true); return;
     }
 
     await LiveSessionFactory.startCounter(selectedSkipper.rtdbUid, disciplineId, sessionType);
@@ -961,15 +776,8 @@ export default function CounterPage() {
   };
 
   const handleCountStep = () => {
-    if (sessionMode === 'triple_under') {
-      handleTuStep();
-      return;
-    }
-    if (sessionMode === 'relay') {
-      handleRelayStep();
-      return;
-    }
-    // Individual
+    if (sessionMode === 'triple_under') { handleTuStep(); return; }
+    if (sessionMode === 'relay') { handleRelayStep(); return; }
     if (!currentData || currentData?.isFinished) return;
     if (!sessionStartRef.current) sessionStartRef.current = Date.now();
     LiveSessionFactory.incrementSteps(selectedSkipper.rtdbUid, liveBpm, sessionStartRef.current);
@@ -977,197 +785,101 @@ export default function CounterPage() {
   };
 
   const handleStopSession = useCallback(async () => {
-    if (sessionMode === 'triple_under') {
-      handleTuMisser(); // treat manual stop as a misser
-      return;
-    }
+    if (sessionMode === 'triple_under') { handleTuMisser(); return; }
     if (!selectedSkipper || !currentData?.isActive) return;
     clearTimeout(autoStopTimerRef.current);
     await LiveSessionFactory.stopCounter(selectedSkipper.rtdbUid);
   }, [selectedSkipper, currentData, sessionMode]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // TRIPLE UNDER HANDLERS
-  // ─────────────────────────────────────────────────────────────────────────
   const handleTuStep = () => {
     if (tuIsFinished) return;
-
-    // If miss countdown is running → this tap starts a new attempt
     if (tuMissCountdown !== null) {
-      // Save completed attempt
       setTuAttempts(prev => [...prev, { steps: tuCurrentSteps }]);
-      setTuCurrentSteps(1); // first step of new attempt
-      setTuMissCountdown(null);
-      clearInterval(tuCountdownRef.current);
-      return;
+      setTuCurrentSteps(1); setTuMissCountdown(null); clearInterval(tuCountdownRef.current); return;
     }
-
-    setTuCurrentSteps(prev => prev + 1);
-    setTuIsActive(true);
+    setTuCurrentSteps(prev => prev + 1); setTuIsActive(true);
   };
 
   const handleTuMisser = () => {
     if (tuIsFinished || tuMissCountdown !== null) return;
-    // Save current attempt inline before countdown starts
-    if (tuCurrentSteps > 0) {
-      setTuAttempts(prev => [...prev, { steps: tuCurrentSteps }]);
-      setTuCurrentSteps(0);
-    }
+    if (tuCurrentSteps > 0) { setTuAttempts(prev => [...prev, { steps: tuCurrentSteps }]); setTuCurrentSteps(0); }
     setTuMissCountdown(Math.ceil(TRIPLE_UNDER_IDLE / 1000));
   };
 
-  const finishTripleUnder = () => {
-    setTuIsActive(false);
-    setTuIsFinished(true);
-    setTuMissCountdown(null);
-    clearInterval(tuCountdownRef.current);
-    // Post-session flow for TU
-    triggerTuPostSession();
-  };
+  const finishTripleUnder = () => { setTuIsActive(false); setTuIsFinished(true); setTuMissCountdown(null); clearInterval(tuCountdownRef.current); };
 
-  const triggerTuPostSession = async () => {
-    if (!selectedSkipper) return;
-    const { clubId, memberId } = selectedSkipper;
-    // Get attempts stored so far (need to read from state via closure — use ref pattern)
-    // We rely on the useEffect below to react to tuIsFinished
-  };
-
-  // Watch tuIsFinished to trigger save
   useEffect(() => {
     if (!tuIsFinished || !selectedSkipper) return;
     const saveSession = async () => {
       const { clubId, memberId } = selectedSkipper;
       const allAttempts = tuAttempts.length > 0 ? tuAttempts : [{ steps: tuCurrentSteps }];
       const bestScore = Math.max(...allAttempts.map(a => a.steps), 0);
-
       try {
         const _tuDisc = getDisc(disciplineId);
         await ClubMemberFactory.saveSessionHistory(clubId, memberId, {
-          discipline:     disciplineId,
-          disciplineName: _tuDisc?.name     || disciplineId,
-          ropeType:       _tuDisc?.ropeType || 'SR',
-          sessionType, score: bestScore,
-          avgBpm: 0, maxBpm: 0, sessionStart: null, telemetry: [],
-          countedBy:     counterUser?.id || null,
-          countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
+          discipline: disciplineId, disciplineName: _tuDisc?.name || disciplineId, ropeType: _tuDisc?.ropeType || 'SR',
+          sessionType, score: bestScore, avgBpm: 0, maxBpm: 0, sessionStart: null, telemetry: [],
+          countedBy: counterUser?.id || null, countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
         });
       } catch (e) { console.error('Failed to save TU session:', e); }
-
       const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, memberId);
       try {
         const _tuDiscBadge = getDisc(disciplineId);
-        const newBadges = await BadgeFactory.checkAndAward(clubId, memberId, {
-          score: bestScore,
-          discipline:     disciplineId,
-          disciplineName: _tuDiscBadge?.name     || disciplineId,
-          ropeType:       _tuDiscBadge?.ropeType || 'SR',
-          sessionType,
-        }, freshHistory);
+        const newBadges = await BadgeFactory.checkAndAward(clubId, memberId, { score: bestScore, discipline: disciplineId, disciplineName: _tuDiscBadge?.name || disciplineId, ropeType: _tuDiscBadge?.ropeType || 'SR', sessionType }, freshHistory);
         if (newBadges.length > 0) setNewlyEarnedBadges(newBadges);
       } catch (e) { console.error('Badge check failed:', e); }
-
       const prevBest = bestRecord?.score || 0;
-      if (bestScore > prevBest) {
-        setPendingQueue([{ type: 'record', data: { score: bestScore, discipline: disciplineId, sessionType, previousBest: prevBest, telemetry: [] } }]);
-        setIsProcessingQueue(true);
-      }
+      if (bestScore > prevBest) { setPendingQueue([{ type: 'record', data: { score: bestScore, discipline: disciplineId, sessionType, previousBest: prevBest, telemetry: [] } }]); setIsProcessingQueue(true); }
     };
     saveSession();
   }, [tuIsFinished]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // RELAY HANDLERS
-  // ─────────────────────────────────────────────────────────────────────────
   const handleRelayStep = () => {
     if (relayIsFinished) return;
-
-    if (!relayIsActive) {
-      // First tap starts the relay
-      setRelayIsActive(true);
-      setRelaySkipperStart(Date.now());
-      relayCurrentStepsRef.current = 0;
-    }
-
-    // Clear miss countdown if it was running (not applicable for relay, but safe)
+    if (!relayIsActive) { setRelayIsActive(true); setRelaySkipperStart(Date.now()); relayCurrentStepsRef.current = 0; }
     relayCurrentStepsRef.current += 1;
-
     setRelayResults(prev => {
       const next = [...prev];
-      next[currentSkipperIndex] = {
-        ...(next[currentSkipperIndex] || {}),
-        memberId: relayOrder[currentSkipperIndex]?.memberId,
-        steps: relayCurrentStepsRef.current,
-      };
+      next[currentSkipperIndex] = { ...(next[currentSkipperIndex] || {}), memberId: relayOrder[currentSkipperIndex]?.memberId, steps: relayCurrentStepsRef.current };
       return next;
     });
   };
 
   const advanceRelaySkipper = () => {
     clearInterval(relayTimerRef.current);
-
     const nextIdx = currentSkipperIndex + 1;
-    if (nextIdx >= relayOrder.length) {
-      setRelayIsActive(false);
-      setRelayIsFinished(true);
-      return;
-    }
-
-    setCurrentSkipperIndex(nextIdx);
-    setRelaySkipperStart(Date.now());
-    relayCurrentStepsRef.current = 0;
-    // Vibrate to signal handoff
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      navigator.vibrate([200, 100, 200]);
-    }
+    if (nextIdx >= relayOrder.length) { setRelayIsActive(false); setRelayIsFinished(true); return; }
+    setCurrentSkipperIndex(nextIdx); setRelaySkipperStart(Date.now()); relayCurrentStepsRef.current = 0;
+    if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([200, 100, 200]);
   };
 
-  const handleManualAdvance = () => {
-    if (!relayIsActive || relayIsFinished) return;
-    advanceRelaySkipper();
-  };
+  const handleManualAdvance = () => { if (!relayIsActive || relayIsFinished) return; advanceRelaySkipper(); };
 
-  // Watch relayIsFinished to save session
   useEffect(() => {
     if (!relayIsFinished || relayOrder.length === 0) return;
     const saveRelaySession = async () => {
       const total = relayResults.reduce((s, r) => s + (r.steps || 0), 0);
-      // Save under the first skipper in the relay order (team lead)
       const leadMemberId = relayOrder[0].memberId;
-      const clubId       = selectedClubId;
-
+      const clubId = selectedClubId;
       try {
         const _relayDisc = getDisc(disciplineId);
         await ClubMemberFactory.saveSessionHistory(clubId, leadMemberId, {
-          discipline:     disciplineId,
-          disciplineName: _relayDisc?.name     || disciplineId,
-          ropeType:       _relayDisc?.ropeType || 'SR',
-          sessionType, score: total,
-          avgBpm: 0, maxBpm: 0, sessionStart: null, telemetry: [],
+          discipline: disciplineId, disciplineName: _relayDisc?.name || disciplineId, ropeType: _relayDisc?.ropeType || 'SR',
+          sessionType, score: total, avgBpm: 0, maxBpm: 0, sessionStart: null, telemetry: [],
           teamResults: relayResults.map((r, i) => ({ ...r, name: relayOrder[i]?.name || '' })),
-          countedBy:     counterUser?.id || null,
-          countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
+          countedBy: counterUser?.id || null, countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
         });
       } catch (e) { console.error('Failed to save relay session:', e); }
-
       const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, leadMemberId);
       try {
         const _relayDiscBadge = getDisc(disciplineId);
-        const newBadges = await BadgeFactory.checkAndAward(clubId, leadMemberId, {
-          score: total,
-          discipline:     disciplineId,
-          disciplineName: _relayDiscBadge?.name     || disciplineId,
-          ropeType:       _relayDiscBadge?.ropeType || 'SR',
-          sessionType,
-        }, freshHistory);
+        const newBadges = await BadgeFactory.checkAndAward(clubId, leadMemberId, { score: total, discipline: disciplineId, disciplineName: _relayDiscBadge?.name || disciplineId, ropeType: _relayDiscBadge?.ropeType || 'SR', sessionType }, freshHistory);
         if (newBadges.length > 0) setNewlyEarnedBadges(newBadges);
       } catch (e) { console.error('Badge check failed:', e); }
     };
     saveRelaySession();
   }, [relayIsFinished]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // INDIVIDUAL POST-SESSION FLOW
-  // ─────────────────────────────────────────────────────────────────────────
   const triggerPostSessionFlow = async () => {
     if (!selectedSkipper || !currentData) return;
     const { clubId, memberId } = selectedSkipper;
@@ -1176,48 +888,30 @@ export default function CounterPage() {
     const bpmValues = telemetry.map(t => t.heartRate).filter(b => b > 0);
     const avgBpm    = bpmValues.length ? Math.round(bpmValues.reduce((a, b) => a + b, 0) / bpmValues.length) : liveBpm;
     const maxBpm    = bpmValues.length ? Math.max(...bpmValues) : liveBpm;
-
     try {
       const _disc = getDisc(disciplineId);
       await ClubMemberFactory.saveSessionHistory(clubId, memberId, {
-        discipline:     disciplineId,
-        disciplineName: _disc?.name     || disciplineId,
-        ropeType:       _disc?.ropeType || 'SR',
-        sessionType, score, avgBpm, maxBpm,
-        sessionStart: currentData.startTime || sessionStartRef.current, telemetry,
-        countedBy:     counterUser?.id || null,
-        countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
+        discipline: disciplineId, disciplineName: _disc?.name || disciplineId, ropeType: _disc?.ropeType || 'SR',
+        sessionType, score, avgBpm, maxBpm, sessionStart: currentData.startTime || sessionStartRef.current, telemetry,
+        countedBy: counterUser?.id || null, countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName}` : null,
       });
     } catch (e) { console.error('Failed to save session history:', e); }
-
     const freshHistory = await ClubMemberFactory.getSessionHistoryOnce(clubId, memberId);
     try {
       const _discForBadge = getDisc(disciplineId);
-      const newBadges = await BadgeFactory.checkAndAward(clubId, memberId, {
-        score,
-        discipline:     disciplineId,
-        disciplineName: _discForBadge?.name     || disciplineId,
-        ropeType:       _discForBadge?.ropeType || 'SR',
-        sessionType,
-      }, freshHistory);
+      const newBadges = await BadgeFactory.checkAndAward(clubId, memberId, { score, discipline: disciplineId, disciplineName: _discForBadge?.name || disciplineId, ropeType: _discForBadge?.ropeType || 'SR', sessionType }, freshHistory);
       if (newBadges.length > 0) setNewlyEarnedBadges(newBadges);
     } catch (e) { console.error('Badge check failed:', e); }
-
     if (counterUser) {
       try { await CounterBadgeFactory.checkAndAward(counterUser.id, { discipline: disciplineId, sessionType, score }); }
       catch (e) { console.error('Counter badge check failed:', e); }
     }
-
     const previousBest = bestRecord?.score || 0;
-    if (score > previousBest) {
-      setPendingQueue([{ type: 'record', data: { score, discipline: disciplineId, sessionType, previousBest, telemetry } }]);
-      setIsProcessingQueue(true);
-    }
+    if (score > previousBest) { setPendingQueue([{ type: 'record', data: { score, discipline: disciplineId, sessionType, previousBest, telemetry } }]); setIsProcessingQueue(true); }
   };
 
   const handleQueueAccept = async () => {
-    const current = pendingQueue[0];
-    if (!current) return;
+    const current = pendingQueue[0]; if (!current) return;
     if (current.type === 'record') {
       const { clubId, memberId } = selectedSkipper;
       try { await ClubMemberFactory.addRecord(clubId, memberId, current.data); }
@@ -1227,46 +921,26 @@ export default function CounterPage() {
   };
 
   const advanceQueue = () => {
-    setPendingQueue(prev => {
-      const next = prev.slice(1);
-      if (next.length === 0) setIsProcessingQueue(false);
-      return next;
-    });
+    setPendingQueue(prev => { const next = prev.slice(1); if (next.length === 0) setIsProcessingQueue(false); return next; });
   };
 
   const handleReset = async () => {
-    clearTimeout(autoStopTimerRef.current);
-    clearInterval(relayTimerRef.current);
-    clearInterval(tuCountdownRef.current);
+    clearTimeout(autoStopTimerRef.current); clearInterval(relayTimerRef.current); clearInterval(tuCountdownRef.current);
     telemetryRef.current = [];
     if (selectedSkipper?.rtdbUid) await LiveSessionFactory.resetSession(selectedSkipper.rtdbUid);
-    setSelectedSkipper(null);
-    setSetupDone(false);
-    setSelectedTeamOrder([]);
-    setIsProcessingQueue(false);
-    setPendingQueue([]);
-    setNewlyEarnedBadges([]);
+    setSelectedSkipper(null); setSetupDone(false); setSelectedTeamOrder([]); setIsProcessingQueue(false); setPendingQueue([]); setNewlyEarnedBadges([]);
     setTuAttempts([]); setTuCurrentSteps(0); setTuMissCountdown(null); setTuIsActive(false); setTuIsFinished(false);
     setRelayOrder([]); setRelayResults([]); setCurrentSkipperIndex(0); setRelayIsActive(false); setRelayIsFinished(false); setRelaySkipperStart(null);
     relayLeadUidRef.current = null;
   };
 
   const handleNewSession = async () => {
-    clearTimeout(autoStopTimerRef.current);
-    clearInterval(relayTimerRef.current);
-    clearInterval(tuCountdownRef.current);
+    clearTimeout(autoStopTimerRef.current); clearInterval(relayTimerRef.current); clearInterval(tuCountdownRef.current);
     telemetryRef.current = [];
     if (selectedSkipper?.rtdbUid) await LiveSessionFactory.resetSession(selectedSkipper.rtdbUid);
-    setIsProcessingQueue(false);
-    setPendingQueue([]);
-    setNewlyEarnedBadges([]);
-    setSetupDone(false);
-    setSelectedTeamOrder([]);
+    setIsProcessingQueue(false); setPendingQueue([]); setNewlyEarnedBadges([]); setSetupDone(false); setSelectedTeamOrder([]);
     setTuAttempts([]); setTuCurrentSteps(0); setTuMissCountdown(null); setTuIsActive(false); setTuIsFinished(false);
     setRelayOrder([]); setRelayResults([]); setCurrentSkipperIndex(0); setRelayIsActive(false); setRelayIsFinished(false); setRelaySkipperStart(null);
-    setTuAttempts([]); setTuCurrentSteps(0); setTuMissCountdown(null); setTuIsActive(false); setTuIsFinished(false);
-    setRelayOrder([]); setRelayResults([]); setCurrentSkipperIndex(0); setRelayIsActive(false); setRelayIsFinished(false); setRelaySkipperStart(null);
-    // Stay on same skipper but go back to setup (don't reset selectedSkipper)
   };
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -1277,39 +951,48 @@ export default function CounterPage() {
   const showGroupPicker = memberGroups.length > 1;
   const relayDurationSec = currentDisc?.durationSeconds || 30;
 
-  // ── Loading ───────────────────────────────────────────────────────────────
+  // ── Build the AI counter URL with all selection params ───────────────────
+  const buildAiUrl = () => {
+    if (!disciplineId) return '/ai-counter';
+    const params = new URLSearchParams({
+      disciplineId,
+      sessionType,
+      clubId:    selectedClubId,
+      groupId:   selectedGroupId,
+      memberId:  selectedSkipper?.memberId || '',
+      firstName: selectedSkipper?.firstName || '',
+      lastName:  selectedSkipper?.lastName  || '',
+      rtdbUid:   selectedSkipper?.rtdbUid   || '',
+    });
+    return `/ai-counter?${params.toString()}`;
+  };
+
+  // ── Determine whether enough is selected to start ─────────────────────────
+  const requiredSkippers = currentDisc?.skippersCount ?? 1;
+  const isRelayDisc  = sessionMode === 'relay';
+  const isTuDisc     = sessionMode === 'triple_under';
+  const groupReady   = !!(selectedClubId && selectedGroupId);
+  const disciplineReady = !!disciplineId;
+  const canStart = disciplineReady && groupReady && (
+    isRelayDisc ? selectedTeamOrder.length === requiredSkippers :
+    isTuDisc    ? !!selectedSkipper :
+    !!selectedSkipper
+  );
+
   if (!bootstrapDone) return (
-    <div style={{ ...st.container, alignItems: 'center', justifyContent: 'center' }}>
-      <div style={st.spinner} />
-    </div>
+    <div style={{ ...st.container, alignItems: 'center', justifyContent: 'center' }}><div style={st.spinner} /></div>
   );
 
   if (bootstrapDone && memberClubs.length === 0) return (
     <div style={{ ...st.container, alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
       <Users size={40} color="#334155" />
-      <p style={{ color: '#64748b', fontSize: '14px', textAlign: 'center', maxWidth: '280px' }}>
-        Je bent nog geen lid van een club. Vraag toegang aan via je profiel.
-      </p>
+      <p style={{ color: '#64748b', fontSize: '14px', textAlign: 'center', maxWidth: '280px' }}>Je bent nog geen lid van een club. Vraag toegang aan via je profiel.</p>
       <a href="/" style={{ padding: '10px 20px', backgroundColor: '#3b82f6', color: 'white', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '14px' }}>Naar profiel</a>
     </div>
   );
 
-  // ── Setup screen (unified: discipline + skipper + relay order) ───────────
+  // ── Setup screen ──────────────────────────────────────────────────────────
   if (!setupDone) {
-    const isRelayDisc     = sessionMode === 'relay';
-    const isTuDisc        = sessionMode === 'triple_under';
-    const isIndividual    = sessionMode === 'individual';
-    const groupReady      = selectedClubId && selectedGroupId;
-    const disciplineReady = !!disciplineId;
-
-    // Can we start?
-    const requiredSkippers = currentDisc?.skippersCount ?? 1;
-    const canStart = disciplineReady && groupReady && (
-      isRelayDisc  ? selectedTeamOrder.length === requiredSkippers :
-      isTuDisc     ? !!selectedSkipper :
-      /* individual */ !!selectedSkipper
-    );
-
     return (
       <div style={st.container}>
         <div style={st.header}>
@@ -1320,19 +1003,14 @@ export default function CounterPage() {
 
         <div style={{ width: '100%', maxWidth: '500px', display: 'flex', flexDirection: 'column', gap: '0' }}>
 
-          {/* ── Step 1: Club (only when multi-club) ── */}
+          {/* Club picker */}
           {showClubPicker && (
             <div style={st.setupSection}>
               <div style={st.setupStepLabel}>Club</div>
               <div style={st.clubGrid}>
                 {memberClubs.map(club => (
-                  <button key={club.id}
-                    style={{ ...st.clubCard, ...(selectedClubId === club.id ? st.clubCardActive : {}) }}
-                    onClick={() => setSelectedClubId(club.id)}
-                  >
-                    {club.logoUrl
-                      ? <img src={club.logoUrl} style={{ width: '32px', height: '32px', borderRadius: '6px', objectFit: 'cover', marginBottom: '6px' }} alt={club.name} />
-                      : <Building2 size={24} color={selectedClubId === club.id ? '#3b82f6' : '#475569'} style={{ marginBottom: '6px' }} />}
+                  <button key={club.id} style={{ ...st.clubCard, ...(selectedClubId === club.id ? st.clubCardActive : {}) }} onClick={() => setSelectedClubId(club.id)}>
+                    {club.logoUrl ? <img src={club.logoUrl} style={{ width: '32px', height: '32px', borderRadius: '6px', objectFit: 'cover', marginBottom: '6px' }} alt={club.name} /> : <Building2 size={24} color={selectedClubId === club.id ? '#3b82f6' : '#475569'} style={{ marginBottom: '6px' }} />}
                     <div style={{ fontSize: '12px', fontWeight: '600', textAlign: 'center' }}>{club.name}</div>
                   </button>
                 ))}
@@ -1340,16 +1018,13 @@ export default function CounterPage() {
             </div>
           )}
 
-          {/* ── Step 2: Group (only when multi-group) ── */}
+          {/* Group picker */}
           {selectedClubId && showGroupPicker && (
             <div style={st.setupSection}>
               <div style={st.setupStepLabel}>Groep</div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 {memberGroups.map(group => (
-                  <button key={group.id}
-                    style={{ ...st.groupPill, ...(selectedGroupId === group.id ? st.groupPillActive : {}) }}
-                    onClick={() => setSelectedGroupId(group.id)}
-                  >
+                  <button key={group.id} style={{ ...st.groupPill, ...(selectedGroupId === group.id ? st.groupPillActive : {}) }} onClick={() => setSelectedGroupId(group.id)}>
                     {group.name}
                   </button>
                 ))}
@@ -1357,25 +1032,20 @@ export default function CounterPage() {
             </div>
           )}
 
-          {/* ── Step 3: Discipline ── */}
+          {/* Discipline dropdown */}
           {(!showClubPicker || selectedClubId) && (!showGroupPicker || selectedGroupId) && (
             <div style={st.setupSection}>
               <div style={st.setupStepLabel}>Onderdeel</div>
-              {/* Discipline cards — richer than plain buttons */}
-              <DisciplineCardPicker
+              <DisciplineDropdown
                 value={disciplineId}
-                onChange={(id) => {
-                  setDisciplineId(id);
-                  // Reset skipper when discipline changes (team vs individual mismatch)
-                  setSelectedSkipper(null);
-                  setSelectedTeamOrder([]);
-                }}
+                onChange={(id) => { setDisciplineId(id); setSelectedSkipper(null); setSelectedTeamOrder([]); }}
                 disciplines={disciplines}
+                disabled={false}
               />
             </div>
           )}
 
-          {/* ── Step 3b: Session type ── */}
+          {/* Session type */}
           {disciplineReady && (
             <div style={st.setupSection}>
               <div style={st.setupStepLabel}>Type sessie</div>
@@ -1386,8 +1056,7 @@ export default function CounterPage() {
                     border: `1.5px solid ${sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : '#334155'}`,
                     backgroundColor: sessionType === t ? (t === 'Wedstrijd' ? '#ef444422' : '#3b82f622') : 'transparent',
                     color: sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#60a5fa') : '#64748b',
-                    fontWeight: sessionType === t ? '700' : '500',
-                    fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit',
+                    fontWeight: sessionType === t ? '700' : '500', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit',
                   }}>
                     {t === 'Training' ? '🏋️ Training' : '🏆 Wedstrijd'}
                   </button>
@@ -1396,29 +1065,20 @@ export default function CounterPage() {
             </div>
           )}
 
-          {/* ── Step 4a: Relay — select and order team ── */}
+          {/* Relay team builder */}
           {disciplineReady && isRelayDisc && groupReady && (
             <div style={st.setupSection}>
               <div style={st.setupStepLabel}>
                 Team samenstellen
-                <span style={{
-                  marginLeft: '8px', fontSize: '10px', fontWeight: '600',
-                  color: selectedTeamOrder.length === requiredSkippers ? '#22c55e' : '#f59e0b',
-                }}>
+                <span style={{ marginLeft: '8px', fontSize: '10px', fontWeight: '600', color: selectedTeamOrder.length === requiredSkippers ? '#22c55e' : '#f59e0b' }}>
                   {selectedTeamOrder.length} / {requiredSkippers}
                 </span>
               </div>
-              <RelayTeamBuilder
-                skippers={skippers}
-                clubMembers={clubMembers}
-                value={selectedTeamOrder}
-                onChange={setSelectedTeamOrder}
-                required={requiredSkippers}
-              />
+              <RelayTeamBuilder skippers={skippers} clubMembers={clubMembers} value={selectedTeamOrder} onChange={setSelectedTeamOrder} required={requiredSkippers} />
             </div>
           )}
 
-          {/* ── Step 4b: Individual / Triple Under — pick skipper ── */}
+          {/* Individual skipper picker */}
           {disciplineReady && !isRelayDisc && groupReady && (
             <div style={st.setupSection}>
               <div style={st.setupStepLabel}>Skipper</div>
@@ -1434,20 +1094,11 @@ export default function CounterPage() {
                     return (
                       <button key={memberId}
                         style={{ ...st.card, borderColor: isChosen ? '#3b82f6' : '#334155', backgroundColor: isChosen ? '#1e3a5f' : '#1e293b' }}
-                        onClick={async () => {
-                          const resolved = await resolveSkipperProfile(s);
-                          setSelectedSkipper(resolved);
-                        }}
+                        onClick={async () => { const resolved = await resolveSkipperProfile(s); setSelectedSkipper(resolved); }}
                       >
-                        <div style={{ ...st.avatar, backgroundColor: isChosen ? '#3b82f6' : '#334155', width: '44px', height: '44px', fontSize: '15px' }}>
-                          {initials}
-                        </div>
-                        <div style={{ marginTop: '8px', fontSize: '13px', fontWeight: isChosen ? '700' : '500', color: isChosen ? '#f1f5f9' : '#94a3b8', textAlign: 'center' }}>
-                          {firstName} {lastName}
-                        </div>
-                        {isChosen && (
-                          <div style={{ marginTop: '4px', fontSize: '10px', color: '#3b82f6', fontWeight: '700' }}>✓ Geselecteerd</div>
-                        )}
+                        <div style={{ ...st.avatar, backgroundColor: isChosen ? '#3b82f6' : '#334155', width: '44px', height: '44px', fontSize: '15px' }}>{initials}</div>
+                        <div style={{ marginTop: '8px', fontSize: '13px', fontWeight: isChosen ? '700' : '500', color: isChosen ? '#f1f5f9' : '#94a3b8', textAlign: 'center' }}>{firstName} {lastName}</div>
+                        {isChosen && <div style={{ marginTop: '4px', fontSize: '10px', color: '#3b82f6', fontWeight: '700' }}>✓ Geselecteerd</div>}
                       </button>
                     );
                   })}
@@ -1458,8 +1109,8 @@ export default function CounterPage() {
             </div>
           )}
 
-          {/* ── Best record hint ── */}
-          {selectedSkipper && isIndividual && bestRecord && (
+          {/* Best record hint */}
+          {selectedSkipper && sessionMode === 'individual' && bestRecord && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #facc1533', marginTop: '4px', marginBottom: '4px' }}>
               <Trophy size={14} color="#facc15" />
               <span style={{ fontSize: '12px', color: '#94a3b8' }}>
@@ -1468,30 +1119,19 @@ export default function CounterPage() {
             </div>
           )}
 
-          {/* ── AI beta entry ── */}
-          {disciplineReady && !isRelayDisc && (
-             <div style={{ padding: '0 0 4px' }}>
-               <AiBetaBanner />
-             </div>
-          )}
-
-          {/* ── START button ── */}
-          <div style={{ padding: '16px 0 24px' }}>
-            <button
-              onClick={handleStartSession}
-              disabled={!canStart}
-              style={{ ...st.mainStartBtn, opacity: canStart ? 1 : 0.35 }}
-            >
-              <Play size={20} fill="white" /> SESSIE STARTEN
-            </button>
-          </div>
+          {/* Manueel tellen + AI Stapteller action buttons */}
+          <SessionActionButtons
+            canStart={canStart}
+            onManual={handleStartSession}
+            aiHref={buildAiUrl()}
+          />
 
         </div>
       </div>
     );
   }
 
-  // ── Screen 3a: RELAY counter ──────────────────────────────────────────────
+  // ── Screen: RELAY counter ─────────────────────────────────────────────────
   if (sessionMode === 'relay') {
     const currentItem    = relayOrder[currentSkipperIndex];
     const currentProfile = currentItem ? clubMembers.find(m => m.id === currentItem.memberId) : null;
@@ -1503,107 +1143,57 @@ export default function CounterPage() {
     if (relayIsFinished) {
       return (
         <div style={st.container}>
-          {isProcessingQueue && pendingQueue.length > 0 && (
-            <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />
-          )}
-          <RelayResultsSummary
-            relayOrder={relayOrder}
-            relayResults={relayResults}
-            discName={discName}
-            sessionType={sessionType}
-            onNewSession={handleNewSession}
-            onReset={handleReset}
-          />
+          {isProcessingQueue && pendingQueue.length > 0 && <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />}
+          <RelayResultsSummary relayOrder={relayOrder} relayResults={relayResults} discName={discName} sessionType={sessionType} onNewSession={handleNewSession} onReset={handleReset} />
         </div>
       );
     }
 
     return (
       <div style={st.container}>
-        {isProcessingQueue && pendingQueue.length > 0 && (
-          <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />
-        )}
-
+        {isProcessingQueue && pendingQueue.length > 0 && <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />}
         <div style={st.activeHeader}>
           <button style={st.backBtn} onClick={handleReset}><ArrowLeft size={18} /> Stoppen</button>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <div style={{ ...st.avatar, width: '44px', height: '44px', fontSize: '15px' }}>
-              {currentInitials}
-            </div>
+            <div style={{ ...st.avatar, width: '44px', height: '44px', fontSize: '15px' }}>{currentInitials}</div>
             <div>
               <div style={{ fontWeight: 'bold', fontSize: '18px' }}>{currentName}</div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>
-                {discName} · Skipper {currentSkipperIndex + 1} van {relayOrder.length}
-              </div>
+              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>{discName} · Skipper {currentSkipperIndex + 1} van {relayOrder.length}</div>
             </div>
             <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
               <div style={{ fontSize: '13px', fontWeight: '700', color: '#60a5fa', fontFamily: 'monospace' }}>
-                {relayIsActive
-                  ? `${Math.max(0, Math.ceil(relayDurationSec - (Date.now() - relaySkipperStart) / 1000))}s`
-                  : `${relayDurationSec}s`}
+                {relayIsActive ? `${Math.max(0, Math.ceil(relayDurationSec - (Date.now() - relaySkipperStart) / 1000))}s` : `${relayDurationSec}s`}
               </div>
-              <div style={{ fontSize: '9px', color: '#475569', fontWeight: '700', textTransform: 'uppercase' }}>
-                {relayIsActive ? 'RESTERENDE TIJD' : 'WACHT OP TELLER'}
-              </div>
+              <div style={{ fontSize: '9px', color: '#475569', fontWeight: '700', textTransform: 'uppercase' }}>{relayIsActive ? 'RESTERENDE TIJD' : 'WACHT OP TELLER'}</div>
             </div>
           </div>
         </div>
-
-        <RelayScoreboard
-          relayOrder={relayOrder}
-          relayResults={relayResults}
-          currentSkipperIndex={currentSkipperIndex}
-          discName={discName}
-        />
-
-        {/* Main counter button */}
-        <button
-          style={{
-            ...st.counterButton,
-            backgroundColor: '#1e293b',
-            border: `3px solid ${relayIsActive ? '#3b82f6' : '#334155'}`,
-            boxShadow: relayIsActive ? '0 0 60px rgba(59,130,246,0.25)' : 'none',
-          }}
+        <RelayScoreboard relayOrder={relayOrder} relayResults={relayResults} currentSkipperIndex={currentSkipperIndex} discName={discName} />
+        <button style={{ ...st.counterButton, backgroundColor: '#1e293b', border: `3px solid ${relayIsActive ? '#3b82f6' : '#334155'}`, boxShadow: relayIsActive ? '0 0 60px rgba(59,130,246,0.25)' : 'none' }}
           onPointerDown={e => { e.currentTarget.style.transform = 'scale(0.96)'; handleCountStep(); }}
-          onPointerUp={e   => { e.currentTarget.style.transform = 'scale(1)'; }}
-          onPointerLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
-        >
+          onPointerUp={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+          onPointerLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}>
           <span style={st.stepLabel}>STAPPEN</span>
-          <span style={{ fontSize: '100px', lineHeight: 1, fontWeight: '900' }}>
-            {relayResults[currentSkipperIndex]?.steps ?? 0}
-          </span>
+          <span style={{ fontSize: '100px', lineHeight: 1, fontWeight: '900' }}>{relayResults[currentSkipperIndex]?.steps ?? 0}</span>
           {!relayIsActive && <span style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>Tik om te starten</span>}
         </button>
-
-        {/* Controls */}
         <div style={st.controls}>
-          {relayIsActive && (
-            <button
-              onClick={handleManualAdvance}
-              style={{ ...st.stopButton, backgroundColor: '#f59e0b', marginBottom: '10px' }}
-            >
-              <SkipForward size={18} /> VOLGENDE SKIPPER
-            </button>
-          )}
-          <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            Teamtotaal: <strong style={{ color: '#60a5fa' }}>{totalSteps}</strong> stappen
-          </div>
+          {relayIsActive && <button onClick={handleManualAdvance} style={{ ...st.stopButton, backgroundColor: '#f59e0b', marginBottom: '10px' }}><SkipForward size={18} /> VOLGENDE SKIPPER</button>}
+          <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>Teamtotaal: <strong style={{ color: '#60a5fa' }}>{totalSteps}</strong> stappen</div>
         </div>
       </div>
     );
   }
 
-  // ── Screen 3b: TRIPLE UNDER counter ──────────────────────────────────────
+  // ── Screen: TRIPLE UNDER counter ──────────────────────────────────────────
   if (sessionMode === 'triple_under') {
-    const discName   = currentDisc?.name || disciplineId;
-    const bestSoFar  = Math.max(...tuAttempts.map(a => a.steps), tuCurrentSteps, 0);
+    const discName  = currentDisc?.name || disciplineId;
+    const bestSoFar = Math.max(...tuAttempts.map(a => a.steps), tuCurrentSteps, 0);
 
     if (tuIsFinished) {
       return (
         <div style={st.container}>
-          {isProcessingQueue && pendingQueue.length > 0 && (
-            <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />
-          )}
+          {isProcessingQueue && pendingQueue.length > 0 && <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />}
           <div style={{ width: '100%', maxWidth: '440px', backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #22c55e44', padding: '20px', animation: 'fadeInUp 0.4s ease-out' }}>
             <div style={{ textAlign: 'center', marginBottom: '20px' }}>
               <div style={{ fontSize: '36px', marginBottom: '6px' }}>⚡</div>
@@ -1628,9 +1218,7 @@ export default function CounterPage() {
               <button onClick={handleNewSession} style={{ flex: 1, padding: '13px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
                 <Play size={16} fill="white" /> Nieuwe sessie
               </button>
-              <button onClick={handleReset} style={{ padding: '13px 16px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '10px', color: '#94a3b8', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
-                Andere skipper
-              </button>
+              <button onClick={handleReset} style={{ padding: '13px 16px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '10px', color: '#94a3b8', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>Andere skipper</button>
             </div>
           </div>
         </div>
@@ -1639,76 +1227,43 @@ export default function CounterPage() {
 
     return (
       <div style={st.container}>
-        {isProcessingQueue && pendingQueue.length > 0 && (
-          <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />
-        )}
-
+        {isProcessingQueue && pendingQueue.length > 0 && <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />}
         <div style={st.activeHeader}>
           <button style={st.backBtn} onClick={handleReset}><ArrowLeft size={18} /> Andere skipper</button>
           <div style={st.userInfo}>
-            <div style={{ ...st.avatar, width: '44px', height: '44px', fontSize: '15px' }}>
-              {selectedSkipper.firstName[0]}{selectedSkipper.lastName[0]}
-            </div>
+            <div style={{ ...st.avatar, width: '44px', height: '44px', fontSize: '15px' }}>{selectedSkipper.firstName[0]}{selectedSkipper.lastName[0]}</div>
             <div>
               <div style={{ fontWeight: 'bold', fontSize: '18px' }}>{selectedSkipper.firstName} {selectedSkipper.lastName}</div>
               <div style={{ fontSize: '12px', color: '#94a3b8' }}>{discName} · {sessionType}</div>
             </div>
-            {bestSoFar > 0 && (
-              <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-                <div style={{ fontSize: '18px', fontWeight: '900', color: '#facc15' }}>{bestSoFar}</div>
-                <div style={{ fontSize: '9px', color: '#475569' }}>BESTE</div>
-              </div>
-            )}
+            {bestSoFar > 0 && <div style={{ marginLeft: 'auto', textAlign: 'right' }}><div style={{ fontSize: '18px', fontWeight: '900', color: '#facc15' }}>{bestSoFar}</div><div style={{ fontSize: '9px', color: '#475569' }}>BESTE</div></div>}
           </div>
         </div>
-
-        <TripleUnderDisplay
-          attempts={tuAttempts}
-          currentAttempt={tuCurrentSteps}
-          missCountdown={tuMissCountdown}
-          onMisser={handleTuMisser}
-        />
-
-        {/* Main counter */}
-        <button
-          style={{
-            ...st.counterButton,
-            backgroundColor: tuMissCountdown !== null ? '#1a0a0a' : '#1e293b',
-            border: `3px solid ${tuMissCountdown !== null ? '#ef444466' : tuIsActive ? '#3b82f6' : '#334155'}`,
-            boxShadow: tuIsActive && tuMissCountdown === null ? '0 0 60px rgba(59,130,246,0.25)' : 'none',
-          }}
+        <TripleUnderDisplay attempts={tuAttempts} currentAttempt={tuCurrentSteps} missCountdown={tuMissCountdown} onMisser={handleTuMisser} />
+        <button style={{ ...st.counterButton, backgroundColor: tuMissCountdown !== null ? '#1a0a0a' : '#1e293b', border: `3px solid ${tuMissCountdown !== null ? '#ef444466' : tuIsActive ? '#3b82f6' : '#334155'}`, boxShadow: tuIsActive && tuMissCountdown === null ? '0 0 60px rgba(59,130,246,0.25)' : 'none' }}
           onPointerDown={e => { e.currentTarget.style.transform = 'scale(0.96)'; handleCountStep(); }}
-          onPointerUp={e   => { e.currentTarget.style.transform = 'scale(1)'; }}
-          onPointerLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
-        >
+          onPointerUp={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+          onPointerLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}>
           <span style={st.stepLabel}>{tuMissCountdown !== null ? 'POGING KLAAR' : 'STAPPEN'}</span>
           <span style={{ fontSize: '100px', lineHeight: 1, fontWeight: '900' }}>{tuCurrentSteps}</span>
           {!tuIsActive && <span style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>Tik om te starten</span>}
           {tuMissCountdown !== null && <span style={{ fontSize: '14px', color: '#ef4444', marginTop: '8px' }}>Tik om nieuwe poging te starten</span>}
         </button>
-
         <div style={st.controls}>
-          <button onClick={handleReset} style={{ ...st.stopButton, backgroundColor: '#475569' }}>
-            <Square size={18} fill="white" /> STOPPEN
-          </button>
+          <button onClick={handleReset} style={{ ...st.stopButton, backgroundColor: '#475569' }}><Square size={18} fill="white" /> STOPPEN</button>
         </div>
       </div>
     );
   }
 
-  // ── Screen 3c: INDIVIDUAL counter ─────────────────────────────────────────
+  // ── Screen: INDIVIDUAL counter ─────────────────────────────────────────────
   return (
     <div style={st.container}>
-      {isProcessingQueue && pendingQueue.length > 0 && (
-        <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />
-      )}
-
+      {isProcessingQueue && pendingQueue.length > 0 && <CelebrationOverlay type={pendingQueue[0].type} data={pendingQueue[0].data} onAccept={handleQueueAccept} onDecline={advanceQueue} />}
       <div style={st.activeHeader}>
         <button style={st.backBtn} onClick={handleReset}><ArrowLeft size={18} /> Andere skipper</button>
         <div style={st.userInfo}>
-          <div style={{ ...st.avatar, width: '44px', height: '44px', fontSize: '15px' }}>
-            {selectedSkipper.firstName[0]}{selectedSkipper.lastName[0]}
-          </div>
+          <div style={{ ...st.avatar, width: '44px', height: '44px', fontSize: '15px' }}>{selectedSkipper.firstName[0]}{selectedSkipper.lastName[0]}</div>
           <div>
             <div style={{ fontWeight: 'bold', fontSize: '18px' }}>{selectedSkipper.firstName} {selectedSkipper.lastName}</div>
             <div style={{ fontSize: '12px', display: 'flex', gap: '8px', marginTop: '2px' }}>
@@ -1722,19 +1277,9 @@ export default function CounterPage() {
           </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
-          <LiveTimer
-            startTime={currentData?.startTime}
-            durationSeconds={currentDisc?.durationSeconds || null}
-            isRecording={isRecording}
-            isFinished={isFinished}
-          />
+          <LiveTimer startTime={currentData?.startTime} durationSeconds={currentDisc?.durationSeconds || null} isRecording={isRecording} isFinished={isFinished} />
           <div style={{ fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {isRecording
-              ? <><span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'pulse 1s ease-in-out infinite', display: 'inline-block' }} /><span style={{ color: '#ef4444' }}>OPNAME</span></>
-              : isFinished   ? <span style={{ color: '#22c55e' }}>KLAAR</span>
-              : isStartklaar ? <span style={{ color: '#facc15' }}>STARTKLAAR</span>
-              :                <span style={{ color: '#64748b' }}>WACHT</span>
-            }
+            {isRecording ? <><span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'pulse 1s ease-in-out infinite', display: 'inline-block' }} /><span style={{ color: '#ef4444' }}>OPNAME</span></> : isFinished ? <span style={{ color: '#22c55e' }}>KLAAR</span> : isStartklaar ? <span style={{ color: '#facc15' }}>STARTKLAAR</span> : <span style={{ color: '#64748b' }}>WACHT</span>}
           </div>
         </div>
       </div>
@@ -1760,19 +1305,11 @@ export default function CounterPage() {
         </div>
       )}
 
-      <button
-        style={{
-          ...st.counterButton,
-          backgroundColor: isFinished ? '#1e293b' : isRecording ? '#1e3a5f' : '#1e293b',
-          border:      isRecording ? '3px solid #3b82f6' : isFinished ? '3px solid #22c55e' : '3px solid #334155',
-          boxShadow:   isRecording ? '0 0 60px rgba(59,130,246,0.25)' : 'none',
-          cursor:      isFinished ? 'default' : 'pointer',
-        }}
+      <button style={{ ...st.counterButton, backgroundColor: isFinished ? '#1e293b' : isRecording ? '#1e3a5f' : '#1e293b', border: isRecording ? '3px solid #3b82f6' : isFinished ? '3px solid #22c55e' : '3px solid #334155', boxShadow: isRecording ? '0 0 60px rgba(59,130,246,0.25)' : 'none', cursor: isFinished ? 'default' : 'pointer' }}
         disabled={isFinished || !selectedSkipper}
         onPointerDown={e => { if (!isFinished) { e.currentTarget.style.transform = 'scale(0.96)'; handleCountStep(); } }}
-        onPointerUp={e   => { e.currentTarget.style.transform = 'scale(1)'; }}
-        onPointerLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
-      >
+        onPointerUp={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+        onPointerLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}>
         <span style={st.stepLabel}>STEPS</span>
         <span style={{ fontSize: '100px', lineHeight: 1, fontWeight: '900' }}>{currentData?.steps ?? 0}</span>
         {!isRecording && !isFinished && <span style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>Tik om te starten</span>}
@@ -1817,29 +1354,20 @@ export default function CounterPage() {
 const st = {
   container:      { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'sans-serif', padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
   header:         { width: '100%', maxWidth: '500px', padding: '14px 0 16px', borderBottom: '1px solid #1e293b', marginBottom: '20px' },
-  selectionPanel: { width: '100%', maxWidth: '500px' },
   spinner:        { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
-  // Setup page sections
   setupSection:   { borderBottom: '1px solid #1e293b', paddingBottom: '18px', marginBottom: '18px', width: '100%' },
   setupStepLabel: { fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' },
   groupPill:      { padding: '8px 16px', borderRadius: '20px', border: '1px solid #334155', backgroundColor: 'transparent', color: '#64748b', fontWeight: '500', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
   groupPillActive:{ border: '1px solid #22c55e', backgroundColor: '#22c55e22', color: '#22c55e', fontWeight: '700' },
-  field:          { marginBottom: '24px' },
-  label:          { display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '10px', fontWeight: '600' },
   clubGrid:       { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' },
   clubCard:       { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px 12px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.15s' },
   clubCardActive: { borderColor: '#3b82f6', backgroundColor: '#1e3a5f' },
-  groupGrid:      { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' },
-  groupCard:      { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px 12px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.15s' },
-  groupCardActive:{ borderColor: '#22c55e', backgroundColor: '#052e16' },
   grid:           { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' },
   card:           { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px', color: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'border-color 0.2s' },
   avatar:         { width: '50px', height: '50px', backgroundColor: '#3b82f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' },
   infoText:       { textAlign: 'center', color: '#64748b', fontSize: '14px', marginTop: '20px' },
   modalOverlay:   { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.92)', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', zIndex: 100 },
   modalContent:   { backgroundColor: '#1e293b', padding: '30px', borderRadius: '20px', width: '100%', maxWidth: '440px', border: '1px solid #334155' },
-  toggleGroup:    { display: 'flex', gap: '10px', marginBottom: '20px' },
-  toggleBtn:      { flex: 1, padding: '12px', border: '1px solid #334155', borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'sans-serif' },
   mainStartBtn:   { width: '100%', padding: '15px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: 'bold', marginTop: '10px', display: 'flex', justifyContent: 'center', gap: '10px', alignItems: 'center', cursor: 'pointer', fontSize: '16px', fontFamily: 'sans-serif' },
   activeHeader:   { backgroundColor: '#1e293b', padding: '16px', borderRadius: '14px', marginBottom: '16px', width: '100%', maxWidth: '440px', border: '1px solid #334155', transition: 'border-color 0.3s' },
   backBtn:        { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', marginBottom: '12px', padding: 0 },
