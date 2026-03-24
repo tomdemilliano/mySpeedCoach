@@ -1053,6 +1053,8 @@ export default function AiCounterPage() {
   const [stepTimestamps, setStepTimestamps] = useState([]);
   // ── NEW: session start wall-clock time (for video seek mapping) ───────────
   const sessionStartTimeRef = useRef(null);
+  // Write buffer for signal history — avoids React batching dropping early frames
+  const signalBufRef        = useRef([]);
   // ── Audio toggle for uploaded videos ──────────────────────────────────────
   const [videoMuted,     setVideoMuted]     = useState(true);
 
@@ -1117,15 +1119,21 @@ export default function AiCounterPage() {
       const now = Date.now();
       const ev = detectorRef.current.push(filteredY, now);
 
-      // Accumulate signal history with timestamps + detector internal state for explanation
-      setSignalHist(prev => {
-        const dbg = detectorRef.current.debugState;
-        const n = [...prev, { y: filteredY, raw: ankleY, t: now,
-          valleyY: dbg.valleyY, peakY: dbg.peakY, inPeak: dbg.inPeak,
-          lastStepTime: dbg.lastStepTime,
-        }];
-        return n.length > 1800 ? n.slice(-1800) : n;
+      // Accumulate into ref first (avoids React batching dropping early frames).
+      // Keep up to 120 seconds of signal regardless of frame rate.
+      const MAX_SIGNAL_MS = 120_000;
+      const dbg = detectorRef.current.debugState;
+      signalBufRef.current.push({ y: filteredY, raw: ankleY, t: now,
+        valleyY: dbg.valleyY, peakY: dbg.peakY, inPeak: dbg.inPeak,
+        lastStepTime: dbg.lastStepTime,
       });
+      // Trim old samples beyond the time window
+      const cutoff = now - MAX_SIGNAL_MS;
+      while (signalBufRef.current.length > 1 && signalBufRef.current[0].t < cutoff) {
+        signalBufRef.current.shift();
+      }
+      // Flush ref → state at most once per animation frame (React sees one update)
+      setSignalHist([...signalBufRef.current]);
 
       if (ev === 'step') {
         setSteps(detectorRef.current.steps);
@@ -1276,8 +1284,8 @@ export default function AiCounterPage() {
     detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
     kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
     setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false); setSavedOk(false);
-    setSignalHist([]); setStepTimestamps([]);              // ← reset both
-    sessionStartTimeRef.current = Date.now();              // ← record wall-clock start
+    setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];  // ← reset all three
+    sessionStartTimeRef.current = Date.now();
     isRunRef.current = true; setIsRunning(true);
     elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
   }, [detCfg]);
@@ -1313,8 +1321,8 @@ export default function AiCounterPage() {
     detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
     kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
     setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false);
-    setSignalHist([]); setStepTimestamps([]);              // ← reset both
-    sessionStartTimeRef.current = Date.now();              // ← record wall-clock start
+    setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];  // ← reset all three
+    sessionStartTimeRef.current = Date.now();
     isRunRef.current = true; setIsRunning(true); setMode('running');
 
     const dur = video.duration || 0; let aborted = false;
@@ -1397,7 +1405,7 @@ export default function AiCounterPage() {
     setUploadFile(null); setMode('idle'); setIsRunning(false);
     setSessionDone(false); setSteps(0); setMisses(0); setElapsed(0);
     setUploadProgress(0); setCodecError(false); setBackendError(''); setSavedOk(false);
-    setSignalHist([]); setStepTimestamps([]);
+    setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
     setVideoMuted(true);
     detectorRef.current.reset(); kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
     sessionStartTimeRef.current = null;
@@ -1744,7 +1752,7 @@ export default function AiCounterPage() {
                 if (uploadVideoRef.current) { try { uploadVideoRef.current.pause(); uploadVideoRef.current.currentTime = 0; } catch (_) {} }
                 isRunRef.current = false; setIsRunning(false); setSessionDone(false);
                 setSteps(0); setMisses(0); setElapsed(0); setSavedOk(false); setUploadProgress(0);
-                setSignalHist([]); setStepTimestamps([]);
+                setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
                 detectorRef.current.reset(); setMode('upload');
               }}>
                 <RefreshCw size={14} /> Opnieuw
