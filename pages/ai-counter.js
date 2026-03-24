@@ -731,12 +731,12 @@ class BeepDetector {
     this.opts = {
       fftSize:            2048,
       smoothing:          0.15,
-      minFreq:            1000,
+      minFreq:            500,
       maxFreq:            5000,
       tonalityThreshold:  22,
       absThreshold:       -48,
       minDurationMs:      60,
-      maxDurationMs:      400,
+      maxDurationMs:      600,
       cooldownMs:         1200,
       ...opts,
     };
@@ -1531,15 +1531,16 @@ export default function AiCounterPage() {
         if (state === 'waiting_start') {
           beepStateRef.current = 'counting';
           setBeepState('counting');
-          setTimeout(() => {
-            detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
-            kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
-            setSteps(0); setMisses(0); setElapsed(0);
-            setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
-            sessionStartTimeRef.current = Date.now();
-            isRunRef.current = true; setIsRunning(true);
-            elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
-          }, 50);
+          // Reset detector and start counting immediately (no setTimeout delay).
+          // Clear the video-progress interval first to avoid two competing setElapsed calls.
+          clearInterval(elapsedRef.current);
+          detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
+          kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
+          setSteps(0); setMisses(0); setElapsed(0);
+          setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
+          sessionStartTimeRef.current = Date.now();
+          isRunRef.current = true; setIsRunning(true);
+          elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
         } else if (state === 'counting') {
           beepStateRef.current = 'done';
           setBeepState('done');
@@ -1637,8 +1638,10 @@ export default function AiCounterPage() {
     setMode('running');
 
     const dur = video.duration || 0; let aborted = false;
+    // In beep mode: only track video progress (for the progress bar), not elapsed time.
+    // The beep callback starts its own elapsed interval when counting begins.
     elapsedRef.current = setInterval(() => {
-      setElapsed(video.currentTime * 1000);
+      if (!usingBeepMode) setElapsed(video.currentTime * 1000);
       if (dur > 0) setUploadProgress(Math.round((video.currentTime / dur) * 100));
     }, 300);
 
