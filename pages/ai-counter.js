@@ -731,12 +731,12 @@ class BeepDetector {
     this.opts = {
       fftSize:            2048,
       smoothing:          0.15,
-      minFreq:            500,
+      minFreq:            1000,
       maxFreq:            5000,
       tonalityThreshold:  22,
       absThreshold:       -48,
       minDurationMs:      60,
-      maxDurationMs:      600,
+      maxDurationMs:      400,
       cooldownMs:         1200,
       ...opts,
     };
