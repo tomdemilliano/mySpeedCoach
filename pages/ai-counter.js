@@ -751,16 +751,12 @@ class BeepDetector {
   start() {
     if (this._running) return;
     try {
-      // Ensure the video element is unmuted — createMediaElementSource routes
-      // audio through the AudioContext, but if the element itself is muted the
-      // signal reaching ctx.destination is silence.
-      this.video.muted = false;
-
       this._ctx      = new (window.AudioContext || window.webkitAudioContext)();
       this._analyser = this._ctx.createAnalyser();
       this._analyser.fftSize              = this.opts.fftSize;
       this._analyser.smoothingTimeConstant = this.opts.smoothing;
       // Connect video audio → analyser AND → speakers.
+      // processVideo already set video.muted = false before play(), so audio is live.
       // After createMediaElementSource the element's own output is bypassed;
       // all routing goes through the Web Audio graph.
       this._source = this._ctx.createMediaElementSource(this.video);
@@ -1267,9 +1263,9 @@ export default function AiCounterPage() {
   useEffect(() => { backendRef.current  = backendId;   }, [backendId]);
   useEffect(() => { detectorRef.current.updateConfig(detCfg); }, [detCfg]);
 
-  // Sync muted prop whenever it changes
+  // Sync muted prop whenever it changes — skip if beep mode is active (it needs audio)
   useEffect(() => {
-    if (uploadVideoRef.current) uploadVideoRef.current.muted = videoMuted;
+    if (uploadVideoRef.current && !beepModeRef.current) uploadVideoRef.current.muted = videoMuted;
   }, [videoMuted]);
 
   const { disciplines, getDisc } = useDisciplines();
@@ -1498,11 +1494,9 @@ export default function AiCounterPage() {
     const video = uploadVideoRef.current, canvas = canvasRef.current;
     if (!video || !canvas) return;
     setBackendError(''); setCodecError(false); setUploadProgress(0);
-    // Beep mode needs audio to flow through — force unmute and update state to match.
-    // Normal mode respects the user's mute preference.
-    const effectiveMuted = beepModeRef.current ? false : videoMuted;
-    if (beepModeRef.current && videoMuted) setVideoMuted(false);
-    video.muted = effectiveMuted;
+    // Apply mute: beep mode requires audio, otherwise respect user preference.
+    // Set directly on the element — don't touch videoMuted state here.
+    video.muted = beepModeRef.current ? false : videoMuted;
     video.load();
     try { await waitForVideoReady(video, 12000); } catch { setCodecError(true); return; }
     if (!video.videoWidth) { setCodecError(true); return; }
@@ -1514,14 +1508,14 @@ export default function AiCounterPage() {
     setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false);
     setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];  // ← reset all three
 
-    // In beep-mode: wait for first beep before setting isRunning
-    // In normal mode: start immediately as before
+    // In beep-mode: wait for first beep before setting isRunning.
+    // In normal mode: start immediately as before.
+    // NOTE: startBeepDetector is called AFTER video.play() below — not here —
+    // because createMediaElementSource requires the element to be in playing state.
     const usingBeepMode = beepModeRef.current;
     if (usingBeepMode) {
       setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
       setBeepsDetected(0);
-      // (Re)start detector on the now-loaded video element
-      startBeepDetector(video);
       sessionStartTimeRef.current = null; // will be set on first beep
       isRunRef.current = false; setIsRunning(false);
     } else {
@@ -1568,6 +1562,8 @@ export default function AiCounterPage() {
       };
       video.currentTime = 0; await new Promise(r => { video.onseeked = r; });
       try { await video.play(); } catch (e) { setBackendError('Video afspelen mislukt: ' + e.message); clearInterval(elapsedRef.current); isRunRef.current = false; setIsRunning(false); return; }
+      // Start beep detector AFTER play() — createMediaElementSource needs a live element
+      if (usingBeepMode) startBeepDetector(video);
       frameRef.current = requestAnimationFrame(loop);
     } else {
       const loop = async () => {
@@ -1578,6 +1574,8 @@ export default function AiCounterPage() {
       };
       video.currentTime = 0; await new Promise(r => { video.onseeked = r; });
       try { await video.play(); } catch (e) { setBackendError('Video afspelen mislukt: ' + e.message); clearInterval(elapsedRef.current); isRunRef.current = false; setIsRunning(false); return; }
+      // Start beep detector AFTER play() — createMediaElementSource needs a live element
+      if (usingBeepMode) startBeepDetector(video);
       frameRef.current = requestAnimationFrame(loop);
     }
   }, [backendId, detCfg, initBackend, processTfjsFrame, onMpResults, stopSession, videoMuted]);
