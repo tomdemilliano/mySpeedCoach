@@ -108,12 +108,11 @@ async function loadBackend(backendId) {
 
 // ─── Default detection config ─────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
-  peakMinProminence:  0.010,
+  peakMinProminence:  0.012,
   peakMinIntervalMs: 120,
   missGapMs:         600,
   kalmanEnabled:     true,
   kalmanProcessNoise: 0.01,
-  exitFactor:        1.0,
 };
 
 // ─── Ankle Kalman Filter ──────────────────────────────────────────────────────
@@ -177,14 +176,14 @@ class StepDetector {
     };
   }
   _detect(y, t) {
-    const { peakMinProminence: P, peakMinIntervalMs: I, missGapMs: M, exitFactor: EF = 1.0 } = this.config;
+    const { peakMinProminence: P, peakMinIntervalMs: I, missGapMs: M } = this.config;
     if (this.signal.length < 5) return null;
     const avgY = this.signal.slice(-5).reduce((s, p) => s + p.y, 0) / 5;
     if (this.valleyY === null) { this.valleyY = avgY; return null; }
     if (!this.inPeak && (this.valleyY - avgY) > P) { this.inPeak = true; this.peakY = avgY; }
     if (this.inPeak) {
       if (avgY < this.peakY) this.peakY = avgY;
-      if (avgY > this.peakY + P * EF) {
+      if (avgY > this.peakY + P * 0.8) {
         this.inPeak = false; this.valleyY = avgY;
         if ((this.valleyY - this.peakY) >= P) {
           const dt = t - this.lastStepTime;
@@ -709,6 +708,180 @@ const metricCard  = { backgroundColor: '#0f172a', borderRadius: '8px', border: '
 const metricVal   = { fontSize: '15px', fontWeight: '800', color: '#94a3b8', lineHeight: 1 };
 const metricLabel = { fontSize: '9px', color: '#334155', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.4px' };
 
+// ─── Beep Detector ────────────────────────────────────────────────────────────
+// Connects to a video element's audio via Web Audio API and detects short tonal
+// bursts (competition start/stop beeps) using a dominant-frequency + duration gate.
+//
+// The AudioContext reads audio data even when the video speaker is muted — so
+// the user can keep the video muted and beep detection still works.
+//
+// Usage:
+//   const bd = new BeepDetector(videoElement, onBeep, options)
+//   bd.start()   → begins polling
+//   bd.stop()    → tears down AudioContext
+//   bd.calibrate() → snapshots current noise floor (call before first beep)
+
+class BeepDetector {
+  constructor(videoEl, onBeep, opts = {}) {
+    this.video   = videoEl;
+    this.onBeep  = onBeep;  // called with { freq, db, videoTime }
+    this.opts = {
+      fftSize:            2048,
+      smoothing:          0.15,   // low = fast response
+      minFreq:            500,    // Hz — lower bound of search band
+      maxFreq:            5000,   // Hz — upper bound
+      tonalityThreshold:  22,     // dB above band mean → "tonal frame"
+      absThreshold:       -48,    // dBFS — ignore very quiet signals
+      minDurationMs:      60,     // minimum beep length
+      maxDurationMs:      600,    // longer = voice/music → ignore
+      cooldownMs:         1200,   // silence after a detected beep
+      ...opts,
+    };
+    this._ctx        = null;
+    this._analyser   = null;
+    this._source     = null;
+    this._rafId      = null;
+    this._freqBuf    = null;
+    this._noiseFloor = -60;       // dBFS, updated by calibrate()
+    this._beepStart  = null;      // timestamp when tonal burst began
+    this._lastBeep   = 0;         // timestamp of last confirmed beep
+    this._running    = false;
+  }
+
+  start() {
+    if (this._running) return;
+    try {
+      this._ctx      = new (window.AudioContext || window.webkitAudioContext)();
+      this._analyser = this._ctx.createAnalyser();
+      this._analyser.fftSize             = this.opts.fftSize;
+      this._analyser.smoothingTimeConstant = this.opts.smoothing;
+      // Connect video audio → analyser (does not route to speakers, just reads data)
+      this._source = this._ctx.createMediaElementSource(this.video);
+      this._source.connect(this._analyser);
+      this._source.connect(this._ctx.destination); // keep audio playing through speakers
+      this._freqBuf = new Float32Array(this._analyser.frequencyBinCount);
+      this._running = true;
+      this._poll();
+    } catch (e) {
+      console.warn('[BeepDetector] setup failed:', e?.message);
+    }
+  }
+
+  stop() {
+    this._running = false;
+    cancelAnimationFrame(this._rafId);
+    try { this._source?.disconnect(); } catch (_) {}
+    try { this._ctx?.close(); } catch (_) {}
+    this._ctx = this._analyser = this._source = null;
+  }
+
+  // Call once during the silent portion before the first beep to snapshot noise floor
+  calibrate() {
+    if (!this._analyser || !this._freqBuf) return;
+    this._analyser.getFloatFrequencyData(this._freqBuf);
+    const { minBin, maxBin } = this._bands();
+    let sum = 0, count = 0;
+    for (let i = minBin; i <= maxBin; i++) {
+      if (isFinite(this._freqBuf[i])) { sum += this._freqBuf[i]; count++; }
+    }
+    if (count > 0) this._noiseFloor = sum / count;
+  }
+
+  _bands() {
+    const binHz = this._ctx.sampleRate / this.opts.fftSize;
+    return {
+      minBin: Math.floor(this.opts.minFreq / binHz),
+      maxBin: Math.min(Math.ceil(this.opts.maxFreq / binHz), this._freqBuf.length - 1),
+      binHz,
+    };
+  }
+
+  _poll() {
+    if (!this._running) return;
+    this._rafId = requestAnimationFrame(() => this._poll());
+    if (!this._analyser || !this._freqBuf) return;
+
+    this._analyser.getFloatFrequencyData(this._freqBuf);
+    const { minBin, maxBin, binHz } = this._bands();
+
+    // Find peak bin and compute mean in band
+    let peakDb = -Infinity, peakBin = minBin;
+    let sum = 0, count = 0;
+    for (let i = minBin; i <= maxBin; i++) {
+      const v = this._freqBuf[i];
+      if (!isFinite(v)) continue;
+      if (v > peakDb) { peakDb = v; peakBin = i; }
+      sum += v; count++;
+    }
+    const meanDb   = count > 0 ? sum / count : -100;
+    const tonality = peakDb - meanDb;  // dB above mean → high = pure tone
+
+    const now      = performance.now();
+    const isTonal  = tonality > this.opts.tonalityThreshold
+                  && peakDb   > this.opts.absThreshold
+                  && peakDb   > this._noiseFloor + 12;
+
+    if (isTonal) {
+      if (this._beepStart === null) this._beepStart = now;
+      const dur = now - this._beepStart;
+      if (dur >= this.opts.minDurationMs
+       && dur <= this.opts.maxDurationMs
+       && now - this._lastBeep > this.opts.cooldownMs) {
+        this._lastBeep = now;
+        const freq = peakBin * binHz;
+        this.onBeep({ freq: Math.round(freq), db: Math.round(peakDb), videoTime: this.video.currentTime });
+      }
+    } else {
+      // Reset candidate if silence/noise returns
+      if (this._beepStart !== null && performance.now() - this._beepStart > 80) {
+        this._beepStart = null;
+      }
+    }
+  }
+}
+
+// ─── Beep Status Badge ────────────────────────────────────────────────────────
+// Shown overlay over the video while in beep-waiting state
+function BeepStatusBadge({ beepMode, beepState, beepsDetected, onCancel }) {
+  if (!beepMode) return null;
+
+  const states = {
+    waiting_start: { color: '#f59e0b', icon: '🔔', text: 'Wacht op startbeep…' },
+    counting:      { color: '#22c55e', icon: '▶',  text: 'Tellen (wacht op stopbeep)' },
+    waiting_stop:  { color: '#60a5fa', icon: '⏹',  text: 'Wacht op stopbeep…' },
+    done:          { color: '#a78bfa', icon: '✓',  text: 'Beep-sessie voltooid' },
+  };
+  const st = states[beepState] || states.waiting_start;
+
+  return (
+    <div style={{
+      position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)',
+      zIndex: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '5px',
+    }}>
+      <div style={{
+        backgroundColor: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(6px)',
+        border: `1.5px solid ${st.color}55`, borderRadius: '10px',
+        padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '7px',
+      }}>
+        <span style={{ fontSize: '13px' }}>{st.icon}</span>
+        <span style={{ fontSize: '12px', fontWeight: '700', color: st.color }}>{st.text}</span>
+        {beepsDetected > 0 && (
+          <span style={{ fontSize: '10px', color: '#64748b', marginLeft: '2px' }}>
+            ({beepsDetected} beep{beepsDetected !== 1 ? 's' : ''})
+          </span>
+        )}
+      </div>
+      {beepState !== 'counting' && (
+        <button onClick={onCancel} style={{
+          fontSize: '10px', color: '#475569', background: 'rgba(0,0,0,0.5)',
+          border: '1px solid #334155', borderRadius: '6px', padding: '3px 8px',
+          cursor: 'pointer', fontFamily: 'inherit',
+        }}>annuleer beep-modus</button>
+      )}
+    </div>
+  );
+}
+
 // ─── CSV Export ───────────────────────────────────────────────────────────────
 function exportCsv(signalHistory, stepTimestamps, detCfg, backendId, disciplineId, sessionType, trackedFoot, sessionStartTime) {
   const tMin = sessionStartTime || (signalHistory[0]?.t ?? 0);
@@ -1057,6 +1230,13 @@ export default function AiCounterPage() {
   const signalBufRef        = useRef([]);
   // ── Audio toggle for uploaded videos ──────────────────────────────────────
   const [videoMuted,     setVideoMuted]     = useState(true);
+  // ── Beep detection ────────────────────────────────────────────────────────
+  const [beepMode,       setBeepMode]       = useState(false);   // toggle on/off
+  const [beepState,      setBeepState]      = useState('waiting_start'); // waiting_start | counting | done
+  const [beepsDetected,  setBeepsDetected]  = useState(0);
+  const beepDetectorRef  = useRef(null);
+  const beepModeRef      = useRef(false);   // sync with beepMode for callbacks
+  const beepStateRef     = useRef('waiting_start');
 
   const videoRef       = useRef(null);
   const canvasRef      = useRef(null);
@@ -1322,8 +1502,22 @@ export default function AiCounterPage() {
     kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
     setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false);
     setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];  // ← reset all three
-    sessionStartTimeRef.current = Date.now();
-    isRunRef.current = true; setIsRunning(true); setMode('running');
+
+    // In beep-mode: wait for first beep before setting isRunning
+    // In normal mode: start immediately as before
+    const usingBeepMode = beepModeRef.current;
+    if (usingBeepMode) {
+      setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
+      setBeepsDetected(0);
+      // (Re)start detector on the now-loaded video element
+      startBeepDetector(video);
+      sessionStartTimeRef.current = null; // will be set on first beep
+      isRunRef.current = false; setIsRunning(false);
+    } else {
+      sessionStartTimeRef.current = Date.now();
+      isRunRef.current = true; setIsRunning(true);
+    }
+    setMode('running');
 
     const dur = video.duration || 0; let aborted = false;
     elapsedRef.current = setInterval(() => {
@@ -1331,7 +1525,15 @@ export default function AiCounterPage() {
       if (dur > 0) setUploadProgress(Math.round((video.currentTime / dur) * 100));
     }, 300);
 
-    const finish = () => { clearInterval(elapsedRef.current); setUploadProgress(100); aborted = true; stopSession(); };
+    const finish = () => {
+      clearInterval(elapsedRef.current); setUploadProgress(100); aborted = true;
+      stopBeepDetector();
+      // In beep-mode: if we never got 2nd beep, just stop counting with what we have
+      if (beepModeRef.current && beepStateRef.current === 'counting') {
+        beepStateRef.current = 'done'; setBeepState('done');
+      }
+      stopSession();
+    };
 
     if (backendId === 'mediapipe') {
       const pose = mpPoseRef.current;
@@ -1378,6 +1580,86 @@ export default function AiCounterPage() {
     });
   }, []);
 
+  // ── Beep detection ─────────────────────────────────────────────────────────
+  // Keep refs in sync so callbacks inside BeepDetector see current values
+  useEffect(() => { beepModeRef.current  = beepMode;  }, [beepMode]);
+  useEffect(() => { beepStateRef.current = beepState; }, [beepState]);
+
+  const stopBeepDetector = useCallback(() => {
+    if (beepDetectorRef.current) { beepDetectorRef.current.stop(); beepDetectorRef.current = null; }
+  }, []);
+
+  const startBeepDetector = useCallback((videoEl) => {
+    stopBeepDetector();
+    const bd = new BeepDetector(videoEl, ({ freq, db, videoTime }) => {
+      if (!beepModeRef.current) return;
+      const state = beepStateRef.current;
+      console.log(`[Beep] detected @ ${videoTime.toFixed(2)}s  freq=${freq}Hz  db=${db}dB  state=${state}`);
+
+      setBeepsDetected(n => n + 1);
+
+      if (state === 'waiting_start') {
+        // First beep → start counting
+        beepStateRef.current = 'counting';
+        setBeepState('counting');
+        // Small delay (50ms) so the beep itself isn't in the counted signal
+        setTimeout(() => {
+          detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
+          kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
+          setSteps(0); setMisses(0); setElapsed(0);
+          setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
+          sessionStartTimeRef.current = Date.now();
+          isRunRef.current = true; setIsRunning(true);
+          elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
+        }, 50);
+      } else if (state === 'counting') {
+        // Second beep → stop counting
+        beepStateRef.current = 'done';
+        setBeepState('done');
+        isRunRef.current = false; setIsRunning(false);
+        clearInterval(elapsedRef.current);
+        setFinalSteps(detectorRef.current.steps);
+        setFinalMisses(detectorRef.current.misses);
+        setSessionDone(true);
+      }
+    });
+    // Calibrate noise floor immediately (video not playing yet so this is silence)
+    bd.start();
+    setTimeout(() => bd.calibrate(), 200); // short delay for AudioContext to warm up
+    beepDetectorRef.current = bd;
+  }, [stopBeepDetector, detCfg]);
+
+  const toggleBeepMode = useCallback(() => {
+    setBeepMode(prev => {
+      const next = !prev;
+      beepModeRef.current = next;
+      if (!next) {
+        stopBeepDetector();
+      } else {
+        // Reset beep state
+        setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
+        setBeepsDetected(0);
+        // If video is already loaded, attach detector immediately
+        if (uploadVideoRef.current && uploadUrl) {
+          startBeepDetector(uploadVideoRef.current);
+        }
+      }
+      return next;
+    });
+  }, [stopBeepDetector, startBeepDetector, uploadUrl]);
+
+  const cancelBeepMode = useCallback(() => {
+    stopBeepDetector();
+    setBeepMode(false); beepModeRef.current = false;
+    setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
+    setBeepsDetected(0);
+    // If currently counting, stop
+    if (isRunRef.current) {
+      isRunRef.current = false; setIsRunning(false);
+      clearInterval(elapsedRef.current);
+    }
+  }, [stopBeepDetector]);
+
   // ── Save ───────────────────────────────────────────────────────────────────
   const saveSession = useCallback(async () => {
     if (!selSkipper || !disciplineId) return;
@@ -1400,20 +1682,23 @@ export default function AiCounterPage() {
   // ── Reset all ──────────────────────────────────────────────────────────────
   const resetAll = useCallback(() => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
-    isRunRef.current = false; stopCameraStream();
+    isRunRef.current = false; stopCameraStream(); stopBeepDetector();
     if (uploadUrl) { URL.revokeObjectURL(uploadUrl); setUploadUrl(''); }
     setUploadFile(null); setMode('idle'); setIsRunning(false);
     setSessionDone(false); setSteps(0); setMisses(0); setElapsed(0);
     setUploadProgress(0); setCodecError(false); setBackendError(''); setSavedOk(false);
     setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
     setVideoMuted(true);
+    setBeepMode(false); beepModeRef.current = false;
+    setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
+    setBeepsDetected(0);
     detectorRef.current.reset(); kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
     sessionStartTimeRef.current = null;
   }, [uploadUrl, stopCameraStream]);
 
   useEffect(() => () => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
-    stopCameraStream(); if (uploadUrl) URL.revokeObjectURL(uploadUrl);
+    stopCameraStream(); stopBeepDetector(); if (uploadUrl) URL.revokeObjectURL(uploadUrl);
   }, []); // eslint-disable-line
 
   const currentDisc = getDisc(disciplineId);
@@ -1509,6 +1794,14 @@ export default function AiCounterPage() {
           </div>
           <MissFlash visible={showMiss} />
 
+          {/* Beep detection status overlay */}
+          <BeepStatusBadge
+            beepMode={beepMode && (mode === 'running')}
+            beepState={beepState}
+            beepsDetected={beepsDetected}
+            onCancel={cancelBeepMode}
+          />
+
           {/* Active backend badge */}
           {(mode === 'camera' || mode === 'running') && (
             <div style={{ position: 'absolute', bottom: '10px', right: '10px', zIndex: 15,
@@ -1581,14 +1874,47 @@ export default function AiCounterPage() {
                   <Video size={32} color="#60a5fa" style={{ marginBottom: 10 }} />
                   <p style={{ color: '#f1f5f9', fontWeight: '700', marginBottom: 4 }}>{uploadFile?.name}</p>
                   <p style={{ color: '#64748b', fontSize: '12px', marginBottom: 4 }}>Klaar om te analyseren</p>
-                  <p style={{ color: activeBdef.color, fontSize: '11px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <p style={{ color: activeBdef.color, fontSize: '11px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Cpu size={11} /> {activeBdef.label}
                   </p>
+
+                  {/* Beep-mode toggle */}
+                  <button
+                    onClick={toggleBeepMode}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '7px',
+                      padding: '7px 14px', marginBottom: '12px',
+                      borderRadius: '8px', fontFamily: 'inherit', cursor: 'pointer',
+                      fontSize: '12px', fontWeight: '700',
+                      backgroundColor: beepMode ? '#f59e0b22' : 'transparent',
+                      border: `1.5px solid ${beepMode ? '#f59e0b' : '#334155'}`,
+                      color: beepMode ? '#f59e0b' : '#64748b',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <span style={{ fontSize: '14px' }}>🔔</span>
+                    {beepMode ? 'Beep-detectie: AAN' : 'Beep-detectie: UIT'}
+                    <span style={{
+                      fontSize: '9px', fontWeight: '700', marginLeft: '2px',
+                      backgroundColor: beepMode ? '#f59e0b33' : '#1e293b',
+                      color: beepMode ? '#f59e0b' : '#475569',
+                      borderRadius: '4px', padding: '1px 5px',
+                    }}>
+                      {beepMode ? 'start/stop via beep' : 'handmatig'}
+                    </span>
+                  </button>
+
+                  {beepMode && (
+                    <p style={{ fontSize: '11px', color: '#64748b', marginBottom: 12, maxWidth: '280px', textAlign: 'center', lineHeight: 1.5 }}>
+                      Detecteert automatisch de start- en stopbeep in de video. Tellen begint bij de eerste beep en stopt bij de tweede.
+                    </p>
+                  )}
+
                   {backendError && <div style={{ ...s.errorBanner, marginBottom: 12 }}><AlertTriangle size={14} />{backendError}</div>}
                   <button style={s.primaryBtn} disabled={!!backendLoading} onClick={processVideo}>
                     {backendLoading
                       ? <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Model laden…</>
-                      : <><Play size={16} fill="white" /> Analyseer video</>}
+                      : <><Play size={16} fill="white" /> {beepMode ? 'Start video (wacht op beep)' : 'Analyseer video'}</>}
                   </button>
                 </>
               )}
@@ -1664,6 +1990,11 @@ export default function AiCounterPage() {
             {detCfg.kalmanEnabled && (
               <span style={{ fontSize: '10px', color: '#3b82f6', backgroundColor: '#3b82f618', borderRadius: '5px', padding: '1px 7px' }}>
                 kalman ✓
+              </span>
+            )}
+            {beepMode && (
+              <span style={{ fontSize: '10px', color: '#f59e0b', backgroundColor: '#f59e0b18', borderRadius: '5px', padding: '1px 7px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                🔔 beep-modus
               </span>
             )}
           </div>
