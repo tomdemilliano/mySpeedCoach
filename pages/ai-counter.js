@@ -113,6 +113,7 @@ const DEFAULT_CONFIG = {
   missGapMs:         600,
   kalmanEnabled:     true,
   kalmanProcessNoise: 0.01,
+  peakMinAmplitude:  0.015, // min actual ankle rise from peak-entry to peak-minimum
   exitFactor:        1.0,
 };
 
@@ -158,7 +159,9 @@ class StepDetector {
   reset() {
     this.signal = []; this.steps = 0; this.misses = 0;
     this.lastStepTime = 0; this.lastMissTime = 0;
-    this.inPeak = false; this.peakY = null; this.valleyY = null; this.sessionStart = null;
+    this.inPeak = false; this.peakY = null; this.valleyY = null;
+    this.peakEntryY = null; // avgY at the moment the peak phase began
+    this.sessionStart = null;
   }
   push(y, t) {
     if (!this.sessionStart) this.sessionStart = t;
@@ -172,21 +175,28 @@ class StepDetector {
     return {
       valleyY:  this.valleyY,
       peakY:    this.peakY,
+      peakEntryY: this.peakEntryY,
       inPeak:   this.inPeak,
       lastStepTime: this.lastStepTime,
     };
   }
   _detect(y, t) {
-    const { peakMinProminence: P, peakMinIntervalMs: I, missGapMs: M, exitFactor: EF = 1.0 } = this.config;
+    const { peakMinProminence: P, peakMinIntervalMs: I, missGapMs: M, peakMinAmplitude: A = 0.015, exitFactor: EF = 1.0 } = this.config;
     if (this.signal.length < 5) return null;
     const avgY = this.signal.slice(-5).reduce((s, p) => s + p.y, 0) / 5;
     if (this.valleyY === null) { this.valleyY = avgY; return null; }
-    if (!this.inPeak && (this.valleyY - avgY) > P) { this.inPeak = true; this.peakY = avgY; }
+    if (!this.inPeak && (this.valleyY - avgY) > P) {
+      this.inPeak = true; this.peakY = avgY;
+      this.peakEntryY = avgY; // record avgY at the moment we enter peak phase
+    }
     if (this.inPeak) {
       if (avgY < this.peakY) this.peakY = avgY;
       if (avgY > this.peakY + P * EF) {
         this.inPeak = false; this.valleyY = avgY;
-        if ((this.valleyY - this.peakY) >= P) {
+        // Gate 1: prominence (valley baseline vs peak minimum)
+        // Gate 2: amplitude (actual rise from entry point to peak minimum)
+        const amplitude = (this.peakEntryY ?? avgY) - this.peakY;
+        if ((this.valleyY - this.peakY) >= P && amplitude >= A) {
           const dt = t - this.lastStepTime;
           if (dt >= I) {
             if (this.lastStepTime > 0 && dt > M * 1.5 && dt < 8000) { this.misses++; this.lastMissTime = t; }
@@ -653,7 +663,7 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
                 </div>
                 <div style={{ display: 'flex', gap: '7px' }}>
                   <span style={{ color: '#22c55e', flexShrink: 0 }}>③</span>
-                  <span><strong style={{ color: '#22c55e' }}>Stap tellen</strong> — wanneer de enkel vanuit de piek weer <strong>genoeg terugzakt</strong> (≥ drempel), wordt een stap geteld — maar alleen als er minimaal <strong style={{ color: '#f59e0b' }}>{config.peakMinIntervalMs} ms</strong> verstreken is sinds de vorige stap.</span>
+                  <span><strong style={{ color: '#22c55e' }}>Stap tellen</strong> — wanneer de enkel vanuit de piek weer <strong>genoeg terugzakt</strong> (≥ drempel), wordt een stap geteld — maar alleen als (a) de werkelijke sprong-hoogte ≥ <strong style={{ color: '#a78bfa' }}>min. sprong-hoogte ({config.peakMinAmplitude?.toFixed(3) ?? '0.015'})</strong> en (b) er minimaal <strong style={{ color: '#f59e0b' }}>{config.peakMinIntervalMs} ms</strong> verstreken is.</span>
                 </div>
                 <div style={{ display: 'flex', gap: '7px' }}>
                   <span style={{ color: '#ef4444', flexShrink: 0 }}>④</span>
@@ -732,12 +742,12 @@ class BeepDetector {
     this.opts = {
       fftSize:            2048,
       smoothing:          0.15,
-      minFreq:            1200,
+      minFreq:            500,
       maxFreq:            5000,
       tonalityThreshold:  22,
       absThreshold:       -48,
       minDurationMs:      60,
-      maxDurationMs:      400,
+      maxDurationMs:      600,
       cooldownMs:         1200,
       ...opts,
     };
@@ -1025,9 +1035,10 @@ function DetectionTuningPanel({ config, onChange }) {
   const [open, setOpen] = useState(false);
 
   const sliders = [
-    { key: 'peakMinProminence', label: 'Pieksensitiviteit',  hint: 'Hoe groot de beweging. Lager = gevoeliger.',         min: 0.003, max: 0.05,  step: 0.001, fmt: v => v.toFixed(3) },
-    { key: 'peakMinIntervalMs', label: 'Min. interval (ms)', hint: 'Min. tijd tussen stappen. Verhoog bij dubbeltelling.', min: 60,    max: 400,   step: 10,    fmt: v => `${v} ms` },
-    { key: 'missGapMs',         label: 'Mist-drempel (ms)',  hint: 'Hoe lang geen stap voor een mist.',                  min: 300,   max: 1200,  step: 50,    fmt: v => `${v} ms` },
+    { key: 'peakMinProminence', label: 'Pieksensitiviteit',  hint: 'Hoe groot de beweging t.o.v. de dalreferentie. Lager = gevoeliger.',      min: 0.003, max: 0.05,  step: 0.001, fmt: v => v.toFixed(3) },
+    { key: 'peakMinAmplitude',  label: 'Min. sprong-hoogte', hint: 'Min. echte enkelhoogte t.o.v. het beginpunt van de piek. Blokkeert sluip-bewegingen en grondruis.', min: 0.005, max: 0.08,  step: 0.005, fmt: v => v.toFixed(3) },
+    { key: 'peakMinIntervalMs', label: 'Min. interval (ms)', hint: 'Min. tijd tussen stappen. Verhoog bij dubbeltelling.',                       min: 60,    max: 400,   step: 10,    fmt: v => `${v} ms` },
+    { key: 'missGapMs',         label: 'Mist-drempel (ms)',  hint: 'Hoe lang geen stap voor een mist.',                                         min: 300,   max: 1200,  step: 50,    fmt: v => `${v} ms` },
   ];
   const presets = [
     { label: 'Snel (sprint)', config: { peakMinProminence: 0.008, peakMinIntervalMs: 80,  missGapMs: 450 } },
@@ -2026,6 +2037,9 @@ export default function AiCounterPage() {
             </span>
             <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>
               sensitiviteit {detCfg.peakMinProminence.toFixed(3)}
+            </span>
+            <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>
+              amplitude {detCfg.peakMinAmplitude?.toFixed(3) ?? '0.015'}
             </span>
             <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>
               interval {detCfg.peakMinIntervalMs} ms
