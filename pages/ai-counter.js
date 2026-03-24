@@ -1507,6 +1507,85 @@ export default function AiCounterPage() {
     setFinalSteps(detectorRef.current.steps); setFinalMisses(detectorRef.current.misses); setSessionDone(true);
   }, []);
 
+  // ── Beep detection ─────────────────────────────────────────────────────────
+  // Keep refs in sync so callbacks inside BeepDetector see current values.
+  // Declared BEFORE handleFileSelect and processVideo which depend on these.
+  useEffect(() => { beepModeRef.current  = beepMode;  }, [beepMode]);
+  useEffect(() => { beepStateRef.current = beepState; }, [beepState]);
+
+  // stopBeepDetector: pause polling only — NEVER destroy the AudioContext/source
+  // (createMediaElementSource can only run once per element; destroying recreates it → crash)
+  const stopBeepDetector = useCallback(() => {
+    if (beepDetectorRef.current) beepDetectorRef.current.stopPolling();
+  }, []);
+
+  // attachBeepDetector: called once per video.play(). Creates the BeepDetector instance
+  // on first call; subsequent calls (Opnieuw) reuse the same instance and just restart polling.
+  const attachBeepDetector = useCallback((videoEl) => {
+    if (!beepDetectorRef.current) {
+      beepDetectorRef.current = new BeepDetector(({ freq, db }) => {
+        if (!beepModeRef.current) return;
+        const state = beepStateRef.current;
+        console.log(`[Beep] freq=${freq}Hz  db=${db}dB  state=${state}`);
+        setBeepsDetected(n => n + 1);
+        if (state === 'waiting_start') {
+          beepStateRef.current = 'counting';
+          setBeepState('counting');
+          setTimeout(() => {
+            detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
+            kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
+            setSteps(0); setMisses(0); setElapsed(0);
+            setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
+            sessionStartTimeRef.current = Date.now();
+            isRunRef.current = true; setIsRunning(true);
+            elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
+          }, 50);
+        } else if (state === 'counting') {
+          beepStateRef.current = 'done';
+          setBeepState('done');
+          isRunRef.current = false; setIsRunning(false);
+          clearInterval(elapsedRef.current);
+          setFinalSteps(detectorRef.current.steps);
+          setFinalMisses(detectorRef.current.misses);
+          setSessionDone(true);
+        }
+      });
+    }
+    beepDetectorRef.current.attachVideo(videoEl);
+    beepDetectorRef.current.startPolling();
+  }, [detCfg]);
+
+  // destroyBeepDetector: full teardown, only when a new video FILE is selected
+  const destroyBeepDetector = useCallback(() => {
+    if (beepDetectorRef.current) { beepDetectorRef.current.destroy(); beepDetectorRef.current = null; }
+  }, []);
+
+  const toggleBeepMode = useCallback(() => {
+    setBeepMode(prev => {
+      const next = !prev;
+      beepModeRef.current = next;
+      if (!next) {
+        stopBeepDetector();
+        if (uploadVideoRef.current) uploadVideoRef.current.muted = videoMuted;
+      } else {
+        setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
+        setBeepsDetected(0);
+      }
+      return next;
+    });
+  }, [stopBeepDetector, videoMuted]);
+
+  const cancelBeepMode = useCallback(() => {
+    stopBeepDetector();
+    setBeepMode(false); beepModeRef.current = false;
+    setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
+    setBeepsDetected(0);
+    if (isRunRef.current) {
+      isRunRef.current = false; setIsRunning(false);
+      clearInterval(elapsedRef.current);
+    }
+  }, [stopBeepDetector]);
+
   // ── File select ────────────────────────────────────────────────────────────
   const handleFileSelect = useCallback((e) => {
     const file = e.target.files?.[0]; if (!file || !file.type.startsWith('video/')) return;
@@ -1620,86 +1699,6 @@ export default function AiCounterPage() {
       return next;
     });
   }, []);
-
-  // ── Beep detection ─────────────────────────────────────────────────────────
-  // Keep refs in sync so callbacks inside BeepDetector see current values
-  useEffect(() => { beepModeRef.current  = beepMode;  }, [beepMode]);
-  useEffect(() => { beepStateRef.current = beepState; }, [beepState]);
-
-  // stopBeepDetector: pause polling only — NEVER destroy the AudioContext/source
-  // (createMediaElementSource can only run once per element; destroying recreates it → crash)
-  const stopBeepDetector = useCallback(() => {
-    if (beepDetectorRef.current) beepDetectorRef.current.stopPolling();
-  }, []);
-
-  // attachBeepDetector: called once per video.play(). Creates the BeepDetector instance
-  // on first call; subsequent calls (Opnieuw) reuse the same instance and just restart polling.
-  const attachBeepDetector = useCallback((videoEl) => {
-    // Build the instance once, with the callback baked in
-    if (!beepDetectorRef.current) {
-      beepDetectorRef.current = new BeepDetector(({ freq, db }) => {
-        if (!beepModeRef.current) return;
-        const state = beepStateRef.current;
-        console.log(`[Beep] freq=${freq}Hz  db=${db}dB  state=${state}`);
-        setBeepsDetected(n => n + 1);
-        if (state === 'waiting_start') {
-          beepStateRef.current = 'counting';
-          setBeepState('counting');
-          setTimeout(() => {
-            detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
-            kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
-            setSteps(0); setMisses(0); setElapsed(0);
-            setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
-            sessionStartTimeRef.current = Date.now();
-            isRunRef.current = true; setIsRunning(true);
-            elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
-          }, 50);
-        } else if (state === 'counting') {
-          beepStateRef.current = 'done';
-          setBeepState('done');
-          isRunRef.current = false; setIsRunning(false);
-          clearInterval(elapsedRef.current);
-          setFinalSteps(detectorRef.current.steps);
-          setFinalMisses(detectorRef.current.misses);
-          setSessionDone(true);
-        }
-      });
-    }
-    // Wire the audio graph (no-op if already attached to this element)
-    beepDetectorRef.current.attachVideo(videoEl);
-    beepDetectorRef.current.startPolling();
-  }, [detCfg]);
-
-  // destroyBeepDetector: full teardown, only called when a new video FILE is selected
-  const destroyBeepDetector = useCallback(() => {
-    if (beepDetectorRef.current) { beepDetectorRef.current.destroy(); beepDetectorRef.current = null; }
-  }, []);
-
-  const toggleBeepMode = useCallback(() => {
-    setBeepMode(prev => {
-      const next = !prev;
-      beepModeRef.current = next;
-      if (!next) {
-        stopBeepDetector();
-        if (uploadVideoRef.current) uploadVideoRef.current.muted = videoMuted;
-      } else {
-        setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
-        setBeepsDetected(0);
-      }
-      return next;
-    });
-  }, [stopBeepDetector, videoMuted]);
-
-  const cancelBeepMode = useCallback(() => {
-    stopBeepDetector();
-    setBeepMode(false); beepModeRef.current = false;
-    setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
-    setBeepsDetected(0);
-    if (isRunRef.current) {
-      isRunRef.current = false; setIsRunning(false);
-      clearInterval(elapsedRef.current);
-    }
-  }, [stopBeepDetector]);
 
   // ── Save ───────────────────────────────────────────────────────────────────
   const saveSession = useCallback(async () => {
