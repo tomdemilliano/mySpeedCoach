@@ -14,6 +14,10 @@
  * Not included (not browser-native without a server):
  *   • YOLO variants  – PyTorch/ONNX, no stable CDN-loadable browser package
  *   • OpenPose       – GPU C++, no browser port
+ *
+ * CHANGES:
+ *   • Step markers (yellow triangles) rendered on the live signal graph
+ *   • Post-session scrollable review timeline with video scrubbing
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -208,65 +212,113 @@ function waitForVideoReady(video, ms = 12000) {
   });
 }
 
+// ─── Helper: draw signal + step markers onto a canvas context ─────────────────
+// Used by both the live overlay and the review timeline so rendering is consistent.
+function drawSignalToCanvas(ctx, w, h, signalHistory, stepTimestamps, config, playheadT = null) {
+  ctx.clearRect(0, 0, w, h);
+
+  // Background
+  ctx.fillStyle = 'rgba(15,23,42,0.82)';
+  if (ctx.roundRect) { ctx.roundRect(0, 0, w, h, 6); } else { ctx.rect(0, 0, w, h); }
+  ctx.fill();
+
+  // Grid
+  ctx.strokeStyle = 'rgba(51,65,85,0.5)'; ctx.lineWidth = 1;
+  for (let i = 1; i <= 3; i++) {
+    ctx.beginPath(); ctx.moveTo(0, (h / 4) * i); ctx.lineTo(w, (h / 4) * i); ctx.stroke();
+  }
+
+  if (!signalHistory || signalHistory.length < 2) {
+    ctx.fillStyle = 'rgba(100,116,139,0.7)';
+    ctx.font = '9px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText('wacht op signaal…', w / 2, h / 2 + 3);
+    return;
+  }
+
+  const vals = signalHistory.map(p => p.y);
+  const mn = Math.min(...vals), mx = Math.max(...vals), rng = mx - mn || 0.01;
+  const tMin = signalHistory[0].t;
+  const tMax = signalHistory[signalHistory.length - 1].t;
+  const tRange = tMax - tMin || 1;
+
+  const toY = v => h - ((v - mn) / rng) * h * 0.82 - h * 0.09;
+  const toX = t => ((t - tMin) / tRange) * w;
+
+  // Threshold line
+  const ty = h - ((config.peakMinProminence / (rng + config.peakMinProminence)) * h * 0.75 + h * 0.09);
+  ctx.strokeStyle = 'rgba(245,158,11,0.45)'; ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(w, ty); ctx.stroke(); ctx.setLineDash([]);
+
+  // Raw signal (when Kalman on)
+  const hasRaw = config.kalmanEnabled && signalHistory.some(p => p.raw !== undefined && Math.abs(p.raw - p.y) > 0.001);
+  if (hasRaw) {
+    ctx.strokeStyle = 'rgba(71,85,105,0.7)'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    signalHistory.forEach((p, i) => {
+      const x = toX(p.t);
+      i === 0 ? ctx.moveTo(x, toY(p.raw ?? p.y)) : ctx.lineTo(x, toY(p.raw ?? p.y));
+    });
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // Filtered signal
+  ctx.strokeStyle = config.kalmanEnabled ? '#00d4aa' : '#60a5fa'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  signalHistory.forEach((p, i) => {
+    const x = toX(p.t);
+    i === 0 ? ctx.moveTo(x, toY(p.y)) : ctx.lineTo(x, toY(p.y));
+  });
+  ctx.stroke();
+
+  // Step markers — yellow triangles above the signal line
+  if (stepTimestamps && stepTimestamps.length > 0) {
+    stepTimestamps.forEach(st => {
+      if (st < tMin - 50 || st > tMax + 50) return;
+      const x = toX(st);
+
+      // Vertical line
+      ctx.strokeStyle = 'rgba(250,204,21,0.55)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+
+      // Triangle pointing down at top of chart
+      const tx = x, ty2 = 3, ts = 5;
+      ctx.fillStyle = '#facc15';
+      ctx.beginPath();
+      ctx.moveTo(tx, ty2 + ts * 1.5);   // bottom point
+      ctx.lineTo(tx - ts, ty2);          // top-left
+      ctx.lineTo(tx + ts, ty2);          // top-right
+      ctx.closePath();
+      ctx.fill();
+    });
+  }
+
+  // Playhead line (for review mode)
+  if (playheadT !== null) {
+    const px = toX(playheadT);
+    ctx.strokeStyle = '#f472b6';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, h); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Small circle on playhead
+    ctx.beginPath(); ctx.arc(px, h / 2, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#f472b6'; ctx.fill();
+  }
+}
+
 // ─── Live Signal Graph Overlay ────────────────────────────────────────────────
-// Shown as a floating panel at the bottom of the video during active analysis.
-function LiveSignalOverlay({ signalHistory, config, visible }) {
+// Shown as a floating panel below the video during active analysis.
+function LiveSignalOverlay({ signalHistory, stepTimestamps, config, visible }) {
   const gRef = useRef(null);
 
   useEffect(() => {
     if (!visible) return;
     const canvas = gRef.current; if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    // Background
-    ctx.fillStyle = 'rgba(15,23,42,0.82)';
-    ctx.roundRect(0, 0, w, h, 6); ctx.fill();
-
-    // Grid
-    ctx.strokeStyle = 'rgba(51,65,85,0.5)'; ctx.lineWidth = 1;
-    for (let i = 1; i <= 3; i++) {
-      ctx.beginPath(); ctx.moveTo(0, (h / 4) * i); ctx.lineTo(w, (h / 4) * i); ctx.stroke();
-    }
-
-    if (!signalHistory || signalHistory.length < 2) {
-      ctx.fillStyle = 'rgba(100,116,139,0.7)';
-      ctx.font = '9px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText('wacht op signaal…', w / 2, h / 2 + 3);
-      return;
-    }
-
-    const vals = signalHistory.map(p => p.y);
-    const mn = Math.min(...vals), mx = Math.max(...vals), rng = mx - mn || 0.01;
-    const toY = v => h - ((v - mn) / rng) * h * 0.82 - h * 0.09;
-
-    // Threshold line
-    const ty = h - ((config.peakMinProminence / (rng + config.peakMinProminence)) * h * 0.75 + h * 0.09);
-    ctx.strokeStyle = 'rgba(245,158,11,0.45)'; ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(w, ty); ctx.stroke(); ctx.setLineDash([]);
-
-    // Raw signal when Kalman on
-    const hasRaw = config.kalmanEnabled && signalHistory.some(p => p.raw !== undefined && Math.abs(p.raw - p.y) > 0.001);
-    if (hasRaw) {
-      ctx.strokeStyle = 'rgba(71,85,105,0.7)'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
-      ctx.beginPath();
-      signalHistory.forEach((p, i) => {
-        const x = (i / (signalHistory.length - 1)) * w;
-        i === 0 ? ctx.moveTo(x, toY(p.raw ?? p.y)) : ctx.lineTo(x, toY(p.raw ?? p.y));
-      });
-      ctx.stroke(); ctx.setLineDash([]);
-    }
-
-    // Filtered signal
-    ctx.strokeStyle = config.kalmanEnabled ? '#00d4aa' : '#60a5fa'; ctx.lineWidth = 2;
-    ctx.beginPath();
-    signalHistory.forEach((p, i) => {
-      const x = (i / (signalHistory.length - 1)) * w;
-      i === 0 ? ctx.moveTo(x, toY(p.y)) : ctx.lineTo(x, toY(p.y));
-    });
-    ctx.stroke();
-  }, [signalHistory, visible, config.peakMinProminence, config.kalmanEnabled]);
+    drawSignalToCanvas(ctx, canvas.width, canvas.height, signalHistory, stepTimestamps, config, null);
+  }, [signalHistory, stepTimestamps, visible, config.peakMinProminence, config.kalmanEnabled]);
 
   if (!visible) return null;
 
@@ -274,7 +326,7 @@ function LiveSignalOverlay({ signalHistory, config, visible }) {
     <div style={{ backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #334155', padding: '8px 10px' }}>
       <canvas ref={gRef} width={300} height={54}
         style={{ width: '100%', height: '54px', borderRadius: '6px', display: 'block', border: '1px solid rgba(51,65,85,0.5)' }} />
-      <div style={{ display: 'flex', gap: '12px', marginTop: '3px', paddingLeft: '2px' }}>
+      <div style={{ display: 'flex', gap: '12px', marginTop: '3px', paddingLeft: '2px', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '9px', color: '#00d4aa', display: 'flex', alignItems: 'center', gap: '3px' }}>
           <span style={{ width: '10px', height: '2px', backgroundColor: '#00d4aa', display: 'inline-block' }} />
           enkel
@@ -283,6 +335,153 @@ function LiveSignalOverlay({ signalHistory, config, visible }) {
           <span style={{ width: '10px', height: '0px', borderTop: '1px dashed rgba(245,158,11,0.7)', display: 'inline-block' }} />
           drempel
         </span>
+        <span style={{ fontSize: '9px', color: '#facc15', display: 'flex', alignItems: 'center', gap: '3px' }}>
+          <span style={{ width: '0', height: '0', borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '6px solid #facc15', display: 'inline-block' }} />
+          stap
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Post-Session Review Timeline ─────────────────────────────────────────────
+// Full-width scrollable graph. Clicking/dragging seeks the video to that point.
+// Works for both uploaded video and live camera (camera has no seekable video,
+// so seeking is skipped gracefully).
+function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTime, videoRef, uploadVideoRef, isVideoMode }) {
+  const scrollRef  = useRef(null);
+  const canvasRef  = useRef(null);
+  const [playheadT, setPlayheadT] = useState(null);
+
+  // How wide to render: 2px per signal sample, minimum 600px
+  const PX_PER_SAMPLE = 2.5;
+  const canvasW = Math.max(600, (signalHistory?.length || 0) * PX_PER_SAMPLE);
+  const canvasH = 90;
+
+  // Redraw whenever data changes
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    drawSignalToCanvas(ctx, canvasW, canvasH, signalHistory, stepTimestamps, config, playheadT);
+  }, [signalHistory, stepTimestamps, config, playheadT, canvasW]);
+
+  const seekToX = useCallback((clientX) => {
+    const canvas = canvasRef.current; if (!canvas || !signalHistory?.length) return;
+    const rect = canvas.getBoundingClientRect();
+    // getBoundingClientRect gives CSS width; canvas may be scaled
+    const cssRatio = canvasW / rect.width;
+    const canvasX = (clientX - rect.left) * cssRatio;
+    const ratio = Math.max(0, Math.min(1, canvasX / canvasW));
+
+    const tMin = signalHistory[0].t;
+    const tMax = signalHistory[signalHistory.length - 1].t;
+    const targetT = tMin + ratio * (tMax - tMin);
+    setPlayheadT(targetT);
+
+    // Seek video
+    if (isVideoMode && uploadVideoRef?.current) {
+      const videoSec = (targetT - sessionStartTime) / 1000;
+      try { uploadVideoRef.current.currentTime = Math.max(0, videoSec); } catch (_) {}
+    }
+    // For live camera there's no seekable video, so we just show the playhead
+  }, [signalHistory, canvasW, isVideoMode, uploadVideoRef, sessionStartTime]);
+
+  const isDragging = useRef(false);
+
+  const onPointerDown = useCallback((e) => {
+    isDragging.current = true;
+    canvasRef.current?.setPointerCapture?.(e.pointerId);
+    seekToX(e.clientX);
+  }, [seekToX]);
+
+  const onPointerMove = useCallback((e) => {
+    if (!isDragging.current) return;
+    seekToX(e.clientX);
+  }, [seekToX]);
+
+  const onPointerUp = useCallback(() => { isDragging.current = false; }, []);
+
+  if (!signalHistory || signalHistory.length < 5) return null;
+
+  const stepCount = stepTimestamps?.length || 0;
+
+  return (
+    <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span>📊</span> Signaalreview
+        </div>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <span style={{ fontSize: '10px', color: '#facc15', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ width: '0', height: '0', borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '6px solid #facc15', display: 'inline-block' }} />
+            {stepCount} stappen gemarkeerd
+          </span>
+          {isVideoMode && (
+            <span style={{ fontSize: '10px', color: '#f472b6', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ width: '12px', height: '2px', backgroundColor: '#f472b6', display: 'inline-block' }} />
+              klik om te scrubben
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Scrollable canvas wrapper */}
+      <div
+        ref={scrollRef}
+        style={{
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          borderRadius: '8px',
+          border: '1px solid #0f172a',
+          cursor: 'crosshair',
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
+        <canvas
+          ref={canvasRef}
+          width={canvasW}
+          height={canvasH}
+          style={{ display: 'block', height: `${canvasH}px`, width: `${canvasW}px`, userSelect: 'none' }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerLeave={onPointerUp}
+        />
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '9px', color: '#00d4aa', display: 'flex', alignItems: 'center', gap: '3px' }}>
+          <span style={{ width: '12px', height: '2px', backgroundColor: '#00d4aa', display: 'inline-block' }} />
+          gefilterd enkel
+        </span>
+        <span style={{ fontSize: '9px', color: 'rgba(245,158,11,0.8)', display: 'flex', alignItems: 'center', gap: '3px' }}>
+          <span style={{ width: '10px', height: '0px', borderTop: '1px dashed rgba(245,158,11,0.7)', display: 'inline-block' }} />
+          drempel
+        </span>
+        <span style={{ fontSize: '9px', color: '#475569', display: 'flex', alignItems: 'center', gap: '3px' }}>
+          <span style={{ width: '10px', height: '1px', borderTop: '1px dashed #475569', display: 'inline-block' }} />
+          ruw
+        </span>
+        <span style={{ fontSize: '9px', color: '#facc15', display: 'flex', alignItems: 'center', gap: '3px' }}>
+          <span style={{ width: '0', height: '0', borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '6px solid #facc15', display: 'inline-block' }} />
+          getelde stap
+        </span>
+        {isVideoMode && (
+          <span style={{ fontSize: '9px', color: '#f472b6', display: 'flex', alignItems: 'center', gap: '3px' }}>
+            <span style={{ width: '12px', height: '2px', backgroundColor: '#f472b6', display: 'inline-block' }} />
+            afspeelpositie
+          </span>
+        )}
+      </div>
+
+      {/* Instruction */}
+      <div style={{ fontSize: '10px', color: '#334155', lineHeight: 1.5 }}>
+        {isVideoMode
+          ? 'Klik of sleep op de tijdlijn om de video te scrubben en stap voor stap te controleren.'
+          : 'Scroll de tijdlijn om het volledige enkelsignaal te bekijken.'
+        }
       </div>
     </div>
   );
@@ -337,7 +536,7 @@ function MissFlash({ visible }) {
 }
 
 // ─── Detection Tuning Panel ───────────────────────────────────────────────────
-function DetectionTuningPanel({ config, onChange, signalHistory }) {
+function DetectionTuningPanel({ config, onChange, signalHistory, stepTimestamps }) {
   const [open, setOpen] = useState(false);
   const gRef = useRef(null);
 
@@ -345,29 +544,8 @@ function DetectionTuningPanel({ config, onChange, signalHistory }) {
     if (!open) return;
     const canvas = gRef.current; if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) { ctx.beginPath(); ctx.moveTo(0, (h / 4) * i); ctx.lineTo(w, (h / 4) * i); ctx.stroke(); }
-    if (!signalHistory || signalHistory.length < 2) return;
-    const vals = signalHistory.map(p => p.y);
-    const mn = Math.min(...vals), mx = Math.max(...vals), rng = mx - mn || 0.01;
-    const toY = v => h - ((v - mn) / rng) * h * 0.85 - h * 0.075;
-    const ty = h - ((config.peakMinProminence / (rng + config.peakMinProminence)) * h * 0.8 + h * 0.1);
-    ctx.strokeStyle = '#f59e0b55'; ctx.setLineDash([4, 4]);
-    ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(w, ty); ctx.stroke(); ctx.setLineDash([]);
-    const hasRaw = config.kalmanEnabled && signalHistory.some(p => p.raw !== undefined && Math.abs(p.raw - p.y) > 0.001);
-    if (hasRaw) {
-      ctx.strokeStyle = '#475569'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
-      ctx.beginPath();
-      signalHistory.forEach((p, i) => { const x = (i / (signalHistory.length - 1)) * w; i === 0 ? ctx.moveTo(x, toY(p.raw ?? p.y)) : ctx.lineTo(x, toY(p.raw ?? p.y)); });
-      ctx.stroke(); ctx.setLineDash([]);
-    }
-    ctx.strokeStyle = config.kalmanEnabled ? '#00d4aa' : '#60a5fa'; ctx.lineWidth = 2;
-    ctx.beginPath();
-    signalHistory.forEach((p, i) => { const x = (i / (signalHistory.length - 1)) * w; i === 0 ? ctx.moveTo(x, toY(p.y)) : ctx.lineTo(x, toY(p.y)); });
-    ctx.stroke();
-  }, [signalHistory, open, config.peakMinProminence, config.kalmanEnabled]);
+    drawSignalToCanvas(ctx, canvas.width, canvas.height, signalHistory, stepTimestamps, config, null);
+  }, [signalHistory, stepTimestamps, open, config.peakMinProminence, config.kalmanEnabled]);
 
   const sliders = [
     { key: 'peakMinProminence', label: 'Pieksensitiviteit',  hint: 'Hoe groot de beweging. Lager = gevoeliger.',         min: 0.003, max: 0.05,  step: 0.001, fmt: v => v.toFixed(3) },
@@ -439,7 +617,7 @@ function DetectionTuningPanel({ config, onChange, signalHistory }) {
               <div style={{ fontSize: '10px', color: '#475569', marginTop: '3px' }}>{sl.hint}</div>
             </div>
           ))}
-          {/* Signal graph */}
+          {/* Signal graph — now with step markers */}
           <div style={{ marginTop: '6px' }}>
             <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span>Enkelsignaal</span>
@@ -452,6 +630,10 @@ function DetectionTuningPanel({ config, onChange, signalHistory }) {
                   <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
                     <span style={{ width: '12px', height: '1px', backgroundColor: '#475569', display: 'inline-block', borderTop: '1px dashed #475569' }} />
                     <span>ruw</span>
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                    <span style={{ width: '0', height: '0', borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '6px solid #facc15', display: 'inline-block' }} />
+                    <span style={{ color: '#facc15' }}>stap</span>
                   </span>
                 </span>
               )}
@@ -619,6 +801,10 @@ export default function AiCounterPage() {
   const [savedOk,        setSavedOk]        = useState(false);
   const [detCfg,         setDetCfg]         = useState({ ...DEFAULT_CONFIG });
   const [signalHist,     setSignalHist]     = useState([]);
+  // ── NEW: step timestamps for graph markers ────────────────────────────────
+  const [stepTimestamps, setStepTimestamps] = useState([]);
+  // ── NEW: session start wall-clock time (for video seek mapping) ───────────
+  const sessionStartTimeRef = useRef(null);
   // ── Audio toggle for uploaded videos ──────────────────────────────────────
   const [videoMuted,     setVideoMuted]     = useState(true);
 
@@ -644,7 +830,7 @@ export default function AiCounterPage() {
   useEffect(() => { backendRef.current  = backendId;   }, [backendId]);
   useEffect(() => { detectorRef.current.updateConfig(detCfg); }, [detCfg]);
 
-  // Sync muted prop whenever it changes (also handles on-the-fly toggle during playback)
+  // Sync muted prop whenever it changes
   useEffect(() => {
     if (uploadVideoRef.current) uploadVideoRef.current.muted = videoMuted;
   }, [videoMuted]);
@@ -680,12 +866,20 @@ export default function AiCounterPage() {
     }
 
     if (isRunRef.current) {
-      const ev = detectorRef.current.push(filteredY, Date.now());
+      const now = Date.now();
+      const ev = detectorRef.current.push(filteredY, now);
+
+      // Accumulate signal history with timestamps
       setSignalHist(prev => {
-        const n = [...prev, { y: filteredY, raw: ankleY, t: Date.now() }];
-        return n.length > 90 ? n.slice(-90) : n;
+        const n = [...prev, { y: filteredY, raw: ankleY, t: now }];
+        return n.length > 1800 ? n.slice(-1800) : n; // keep up to ~60s at 30fps
       });
-      if (ev === 'step') setSteps(detectorRef.current.steps);
+
+      if (ev === 'step') {
+        setSteps(detectorRef.current.steps);
+        // ── Record exact timestamp of this step ──
+        setStepTimestamps(prev => [...prev, now]);
+      }
       if (ev === 'miss') {
         setMisses(detectorRef.current.misses); setShowMiss(true);
         clearTimeout(missTimerRef.current); missTimerRef.current = setTimeout(() => setShowMiss(false), 600);
@@ -828,7 +1022,9 @@ export default function AiCounterPage() {
   const startSession = useCallback(() => {
     detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
     kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
-    setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false); setSavedOk(false); setSignalHist([]);
+    setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false); setSavedOk(false);
+    setSignalHist([]); setStepTimestamps([]);              // ← reset both
+    sessionStartTimeRef.current = Date.now();              // ← record wall-clock start
     isRunRef.current = true; setIsRunning(true);
     elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
   }, [detCfg]);
@@ -846,7 +1042,7 @@ export default function AiCounterPage() {
     if (uploadUrl) URL.revokeObjectURL(uploadUrl);
     const url = URL.createObjectURL(file);
     setUploadFile(file); setUploadUrl(url); setMode('upload');
-    setVideoMuted(true); // always start muted for new file
+    setVideoMuted(true);
   }, [uploadUrl]);
 
   // ── Process video ──────────────────────────────────────────────────────────
@@ -854,7 +1050,7 @@ export default function AiCounterPage() {
     const video = uploadVideoRef.current, canvas = canvasRef.current;
     if (!video || !canvas) return;
     setBackendError(''); setCodecError(false); setUploadProgress(0);
-    video.muted = videoMuted; // apply current mute preference
+    video.muted = videoMuted;
     video.load();
     try { await waitForVideoReady(video, 12000); } catch { setCodecError(true); return; }
     if (!video.videoWidth) { setCodecError(true); return; }
@@ -863,7 +1059,9 @@ export default function AiCounterPage() {
     const ok = await initBackend(backendId, video, false); if (!ok) return;
     detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
     kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
-    setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false); setSignalHist([]);
+    setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false);
+    setSignalHist([]); setStepTimestamps([]);              // ← reset both
+    sessionStartTimeRef.current = Date.now();              // ← record wall-clock start
     isRunRef.current = true; setIsRunning(true); setMode('running');
 
     const dur = video.duration || 0; let aborted = false;
@@ -945,9 +1143,11 @@ export default function AiCounterPage() {
     if (uploadUrl) { URL.revokeObjectURL(uploadUrl); setUploadUrl(''); }
     setUploadFile(null); setMode('idle'); setIsRunning(false);
     setSessionDone(false); setSteps(0); setMisses(0); setElapsed(0);
-    setUploadProgress(0); setCodecError(false); setBackendError(''); setSavedOk(false); setSignalHist([]);
+    setUploadProgress(0); setCodecError(false); setBackendError(''); setSavedOk(false);
+    setSignalHist([]); setStepTimestamps([]);
     setVideoMuted(true);
     detectorRef.current.reset(); kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
+    sessionStartTimeRef.current = null;
   }, [uploadUrl, stopCameraStream]);
 
   useEffect(() => () => {
@@ -962,11 +1162,8 @@ export default function AiCounterPage() {
   const activeBdef  = BACKENDS[backendId];
 
   // ── Derived visibility flags ───────────────────────────────────────────────
-  // Settings panels (model selector + tuning) are hidden while a session runs.
   const showSettingsPanels = !isRunning;
-  // Live graph floats over the video only while running.
   const showLiveGraph      = isRunning && (mode === 'camera' || mode === 'running');
-  // Audio toggle appears for uploaded video (both in upload-ready and running states).
   const showAudioToggle    = (mode === 'upload' || mode === 'running') && !sessionDone;
 
   return (
@@ -1037,8 +1234,6 @@ export default function AiCounterPage() {
           </div>
           <MissFlash visible={showMiss} />
 
-
-
           {/* Active backend badge */}
           {(mode === 'camera' || mode === 'running') && (
             <div style={{ position: 'absolute', bottom: '10px', right: '10px', zIndex: 15,
@@ -1049,7 +1244,7 @@ export default function AiCounterPage() {
             </div>
           )}
 
-          {/* ── Audio toggle button — top-left corner over video ── */}
+          {/* Audio toggle button */}
           {showAudioToggle && (
             <button
               onClick={toggleVideoAudio}
@@ -1156,7 +1351,12 @@ export default function AiCounterPage() {
         </div>
 
         {/* ── Live ankle signal graph — shown below video while running ── */}
-        <LiveSignalOverlay signalHistory={signalHist} config={detCfg} visible={showLiveGraph} />
+        <LiveSignalOverlay
+          signalHistory={signalHist}
+          stepTimestamps={stepTimestamps}
+          config={detCfg}
+          visible={showLiveGraph}
+        />
 
         {/* Controls */}
         <div style={s.controls}>
@@ -1181,7 +1381,12 @@ export default function AiCounterPage() {
                 if (mode === 'camera') setTimeout(() => startCamera(), 100);
               }}
             />
-            <DetectionTuningPanel config={detCfg} onChange={p => setDetCfg(prev => ({ ...prev, ...p }))} signalHistory={signalHist} />
+            <DetectionTuningPanel
+              config={detCfg}
+              onChange={p => setDetCfg(prev => ({ ...prev, ...p }))}
+              signalHistory={signalHist}
+              stepTimestamps={stepTimestamps}
+            />
           </div>
         )}
 
@@ -1212,6 +1417,17 @@ export default function AiCounterPage() {
               </div>
             </div>
 
+            {/* ── NEW: Review Timeline ── */}
+            <ReviewTimeline
+              signalHistory={signalHist}
+              stepTimestamps={stepTimestamps}
+              config={detCfg}
+              sessionStartTime={sessionStartTimeRef.current}
+              videoRef={videoRef}
+              uploadVideoRef={uploadVideoRef}
+              isVideoMode={mode === 'running' || (uploadUrl && !!(uploadVideoRef.current))}
+            />
+
             <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #1e293b', padding: '12px 14px' }}>
               <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Users size={11} /> Sla op bij skipper
@@ -1235,7 +1451,8 @@ export default function AiCounterPage() {
                 if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
                 if (uploadVideoRef.current) { try { uploadVideoRef.current.pause(); uploadVideoRef.current.currentTime = 0; } catch (_) {} }
                 isRunRef.current = false; setIsRunning(false); setSessionDone(false);
-                setSteps(0); setMisses(0); setElapsed(0); setSavedOk(false); setUploadProgress(0); setSignalHist([]);
+                setSteps(0); setMisses(0); setElapsed(0); setSavedOk(false); setUploadProgress(0);
+                setSignalHist([]); setStepTimestamps([]);
                 detectorRef.current.reset(); setMode('upload');
               }}>
                 <RefreshCw size={14} /> Opnieuw
