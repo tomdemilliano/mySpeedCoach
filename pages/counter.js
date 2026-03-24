@@ -540,6 +540,9 @@ export default function CounterPage() {
   const telemetryRef     = useRef([]);
   const sessionStartRef  = useRef(null);
   const autoStopTimerRef = useRef(null);
+  // Guard against triggerPostSessionFlow being called twice while async work is in flight.
+  // isProcessingQueue (state) can't prevent this because React state updates are async.
+  const postSessionRunningRef = useRef(false);
 
   useEffect(() => {
     if (disciplines.length > 0 && !disciplineId) setDisciplineId(disciplines[0].id);
@@ -679,7 +682,9 @@ export default function CounterPage() {
 
   useEffect(() => {
     if (sessionMode !== 'individual') return;
-    if (currentData?.isFinished && !isProcessingQueue && pendingQueue.length === 0) triggerPostSessionFlow();
+    if (currentData?.isFinished && !postSessionRunningRef.current) {
+      triggerPostSessionFlow();
+    }
   }, [currentData?.isFinished]);
 
   useEffect(() => {
@@ -882,6 +887,9 @@ export default function CounterPage() {
 
   const triggerPostSessionFlow = async () => {
     if (!selectedSkipper || !currentData) return;
+    if (postSessionRunningRef.current) return;   // ← synchronous double-call guard
+    postSessionRunningRef.current = true;
+
     const { clubId, memberId } = selectedSkipper;
     const score     = currentData.steps || 0;
     const telemetry = telemetryRef.current;
@@ -907,7 +915,11 @@ export default function CounterPage() {
       catch (e) { console.error('Counter badge check failed:', e); }
     }
     const previousBest = bestRecord?.score || 0;
-    if (score > previousBest) { setPendingQueue([{ type: 'record', data: { score, discipline: disciplineId, sessionType, previousBest, telemetry } }]); setIsProcessingQueue(true); }
+    if (score > previousBest) {
+      setPendingQueue([{ type: 'record', data: { score, discipline: disciplineId, sessionType, previousBest, telemetry } }]);
+      setIsProcessingQueue(true);
+    }
+    postSessionRunningRef.current = false;  // ← release the guard
   };
 
   const handleQueueAccept = async () => {
@@ -927,6 +939,7 @@ export default function CounterPage() {
   const handleReset = async () => {
     clearTimeout(autoStopTimerRef.current); clearInterval(relayTimerRef.current); clearInterval(tuCountdownRef.current);
     telemetryRef.current = [];
+    postSessionRunningRef.current = false;
     if (selectedSkipper?.rtdbUid) await LiveSessionFactory.resetSession(selectedSkipper.rtdbUid);
     setSelectedSkipper(null); setSetupDone(false); setSelectedTeamOrder([]); setIsProcessingQueue(false); setPendingQueue([]); setNewlyEarnedBadges([]);
     setTuAttempts([]); setTuCurrentSteps(0); setTuMissCountdown(null); setTuIsActive(false); setTuIsFinished(false);
@@ -937,6 +950,7 @@ export default function CounterPage() {
   const handleNewSession = async () => {
     clearTimeout(autoStopTimerRef.current); clearInterval(relayTimerRef.current); clearInterval(tuCountdownRef.current);
     telemetryRef.current = [];
+    postSessionRunningRef.current = false;
     if (selectedSkipper?.rtdbUid) await LiveSessionFactory.resetSession(selectedSkipper.rtdbUid);
     setIsProcessingQueue(false); setPendingQueue([]); setNewlyEarnedBadges([]); setSetupDone(false); setSelectedTeamOrder([]);
     setTuAttempts([]); setTuCurrentSteps(0); setTuMissCountdown(null); setTuIsActive(false); setTuIsFinished(false);
