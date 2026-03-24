@@ -108,11 +108,12 @@ async function loadBackend(backendId) {
 
 // ─── Default detection config ─────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
-  peakMinProminence:  0.012,
+  peakMinProminence:  0.010,
   peakMinIntervalMs: 120,
   missGapMs:         600,
   kalmanEnabled:     true,
   kalmanProcessNoise: 0.01,
+  exitFactor:        1.0,
 };
 
 // ─── Ankle Kalman Filter ──────────────────────────────────────────────────────
@@ -176,14 +177,14 @@ class StepDetector {
     };
   }
   _detect(y, t) {
-    const { peakMinProminence: P, peakMinIntervalMs: I, missGapMs: M } = this.config;
+    const { peakMinProminence: P, peakMinIntervalMs: I, missGapMs: M, exitFactor: EF = 1.0 } = this.config;
     if (this.signal.length < 5) return null;
     const avgY = this.signal.slice(-5).reduce((s, p) => s + p.y, 0) / 5;
     if (this.valleyY === null) { this.valleyY = avgY; return null; }
     if (!this.inPeak && (this.valleyY - avgY) > P) { this.inPeak = true; this.peakY = avgY; }
     if (this.inPeak) {
       if (avgY < this.peakY) this.peakY = avgY;
-      if (avgY > this.peakY + P * 0.8) {
+      if (avgY > this.peakY + P * EF) {
         this.inPeak = false; this.valleyY = avgY;
         if ((this.valleyY - this.peakY) >= P) {
           const dt = t - this.lastStepTime;
