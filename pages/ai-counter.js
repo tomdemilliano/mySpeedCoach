@@ -163,7 +163,17 @@ class StepDetector {
     if (!this.sessionStart) this.sessionStart = t;
     this.signal.push({ y, t });
     if (this.signal.length > 90) this.signal.shift();
-    return this._detect(y, t);
+    const ev = this._detect(y, t);
+    return ev;
+  }
+  // Returns a snapshot of internal state AFTER the last push — used for per-sample debug recording
+  get debugState() {
+    return {
+      valleyY:  this.valleyY,
+      peakY:    this.peakY,
+      inPeak:   this.inPeak,
+      lastStepTime: this.lastStepTime,
+    };
   }
   _detect(y, t) {
     const { peakMinProminence: P, peakMinIntervalMs: I, missGapMs: M } = this.config;
@@ -270,26 +280,25 @@ function drawSignalToCanvas(ctx, w, h, signalHistory, stepTimestamps, config, pl
   });
   ctx.stroke();
 
-  // Step markers — yellow triangles above the signal line
+  // Step markers — yellow vertical lines with step number
   if (stepTimestamps && stepTimestamps.length > 0) {
-    stepTimestamps.forEach(st => {
+    stepTimestamps.forEach(entry => {
+      const st = entry?.t ?? entry; // support both {t,n} objects and plain numbers
       if (st < tMin - 50 || st > tMax + 50) return;
       const x = toX(st);
 
       // Vertical line
-      ctx.strokeStyle = 'rgba(250,204,21,0.55)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(250,204,21,0.7)';
+      ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
 
-      // Triangle pointing down at top of chart
-      const tx = x, ty2 = 3, ts = 5;
-      ctx.fillStyle = '#facc15';
-      ctx.beginPath();
-      ctx.moveTo(tx, ty2 + ts * 1.5);   // bottom point
-      ctx.lineTo(tx - ts, ty2);          // top-left
-      ctx.lineTo(tx + ts, ty2);          // top-right
-      ctx.closePath();
-      ctx.fill();
+      // Step number label at top
+      if (entry?.n != null) {
+        ctx.fillStyle = '#facc15';
+        ctx.font = 'bold 8px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText(entry.n, x, 9);
+      }
     });
   }
 
@@ -386,16 +395,101 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
     , signalHistory[0]);
 
     // Count steps up to this point
-    const stepsUpTo = stepTimestamps ? stepTimestamps.filter(st => st <= targetT).length : 0;
+    const stepsUpTo = stepTimestamps ? stepTimestamps.filter(s => (s?.t ?? s) <= targetT).length : 0;
     // Time from session start
     const elapsedMs = targetT - tMin;
+
+    // ── Compute rolling avgY at this sample (mirror detector: last 5 samples) ──
+    const idx = signalHistory.indexOf(nearest);
+    const window5 = signalHistory.slice(Math.max(0, idx - 4), idx + 1);
+    const avgY = window5.reduce((sum, p) => sum + p.y, 0) / window5.length;
+
+    // Detector internal state stored on sample
+    const valleyY = nearest.valleyY ?? null;
+    const peakY   = nearest.peakY   ?? null;
+    const inPeak  = nearest.inPeak  ?? false;
+    const P = config.peakMinProminence;
+    const I = config.peakMinIntervalMs;
+
+    // ── Find nearest counted step within 300ms ──
+    const nearestStepEntry = stepTimestamps?.reduce((best, s) => {
+      const st = s?.t ?? s;
+      if (!best) return s;
+      return Math.abs(st - targetT) < Math.abs((best?.t ?? best) - targetT) ? s : best;
+    }, null);
+    const nearestStepT = nearestStepEntry ? (nearestStepEntry?.t ?? nearestStepEntry) : null;
+    const nearestStepDt = nearestStepT != null ? Math.abs(nearestStepT - targetT) : Infinity;
+    const isAtStep = nearestStepDt < 300;
+
+    // ── Build a human explanation of why / why not ──
+    let explanationLines = [];
+
+    if (valleyY === null) {
+      explanationLines = [{ type: 'neutral', text: 'Te vroeg: detector initialiseert nog (wacht op 5 samples).' }];
+    } else {
+      // Phase description
+      if (inPeak) {
+        const prominence = valleyY - peakY;
+        explanationLines.push({ type: 'info', text: `In piek-fase: enkel is omhoog gegaan (laagste punt peakY=${peakY?.toFixed(3)}).` });
+        explanationLines.push({ type: 'info', text: `Piek-prominentie tot nu: ${prominence.toFixed(3)} (drempel: ${P.toFixed(3)}).` });
+        explanationLines.push({ type: 'neutral', text: 'Wacht op terugkeer omlaag om piek te bevestigen…' });
+      } else {
+        const dip = valleyY - avgY;
+        if (dip > P) {
+          explanationLines.push({ type: 'info', text: `Dip gedetecteerd: bodem (${avgY.toFixed(3)}) ligt ${dip.toFixed(3)} onder dal (${valleyY.toFixed(3)}).` });
+          explanationLines.push({ type: 'ok',   text: `Drempel ${P.toFixed(3)} overschreden → detector gaat piek-fase in.` });
+        } else {
+          explanationLines.push({ type: 'neutral', text: `Rust-fase: geen piek actief. Dal=${valleyY?.toFixed(3)}, huidig gem.=${avgY.toFixed(3)}.` });
+          explanationLines.push({ type: 'warn', text: `Dip ${dip.toFixed(3)} < drempel ${P.toFixed(3)} → nog geen beweging herkend.` });
+        }
+      }
+    }
+
+    // Step / no-step at this position
+    if (isAtStep) {
+      const stepEntry = nearestStepEntry;
+      const stepN = stepEntry?.n;
+      explanationLines.push({ type: 'ok', text: `✓ Stap #${stepN ?? '?'} geteld ${nearestStepDt < 10 ? 'hier' : `${Math.round(nearestStepDt)} ms geleden`}.` });
+      // Interval check (reconstruct from step list)
+      const prevStep = stepTimestamps?.filter(s => (s?.t ?? s) < (nearestStepT ?? 0)).slice(-1)[0];
+      if (prevStep) {
+        const dt = nearestStepT - (prevStep?.t ?? prevStep);
+        if (dt < I) {
+          explanationLines.push({ type: 'warn', text: `Interval ${dt} ms < minimum ${I} ms → deze stap had geblokkeerd kunnen worden.` });
+        } else {
+          explanationLines.push({ type: 'ok', text: `Interval ${dt} ms ≥ minimum ${I} ms → doorgelaten.` });
+        }
+      }
+    } else {
+      // Why wasn't a step counted here?
+      if (!inPeak && valleyY !== null) {
+        const dip = valleyY - avgY;
+        if (dip <= P) {
+          explanationLines.push({ type: 'warn', text: `Geen stap: beweging ${dip.toFixed(3)} te klein (min ${P.toFixed(3)}).` });
+        }
+      }
+      // Interval block?
+      const lastStep = stepTimestamps?.filter(s => (s?.t ?? s) <= targetT).slice(-1)[0];
+      if (lastStep) {
+        const dtSince = targetT - (lastStep?.t ?? lastStep);
+        if (dtSince < I) {
+          explanationLines.push({ type: 'warn', text: `Interval-blokkade: slechts ${Math.round(dtSince)} ms na laatste stap (min ${I} ms).` });
+        }
+      }
+    }
 
     setHoverInfo({
       elapsedMs,
       ankleY: nearest.y,
       rawY: nearest.raw ?? nearest.y,
+      avgY,
+      valleyY,
+      peakY,
+      inPeak,
       stepsUpTo,
-      nearestStep: stepTimestamps?.find(st => Math.abs(st - targetT) < 200) != null,
+      isAtStep,
+      nearestStepDt: isAtStep ? nearestStepDt : null,
+      explanationLines,
     });
 
     // ── Seek the upload video ──
@@ -473,45 +567,103 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
         />
       </div>
 
-      {/* ── Metrics panel — shown when playhead is active ── */}
+      {/* ── Step explanation panel — shown when playhead is active ── */}
       {hoverInfo && (
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '6px',
-        }}>
-          <div style={metricCard}>
-            <span style={metricVal}>{fmtTime(hoverInfo.elapsedMs)}</span>
-            <span style={metricLabel}>tijdstip</span>
-          </div>
-          <div style={metricCard}>
-            <span style={{ ...metricVal, color: '#22c55e' }}>{hoverInfo.stepsUpTo}</span>
-            <span style={metricLabel}>stappen tot hier</span>
-          </div>
-          <div style={metricCard}>
-            <span style={{ ...metricVal, color: '#00d4aa', fontFamily: 'monospace' }}>
-              {hoverInfo.ankleY.toFixed(3)}
-            </span>
-            <span style={metricLabel}>enkel Y (gefilterd)</span>
-          </div>
-          {Math.abs(hoverInfo.rawY - hoverInfo.ankleY) > 0.002 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+
+          {/* Compact metrics row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: '5px' }}>
             <div style={metricCard}>
-              <span style={{ ...metricVal, color: '#64748b', fontFamily: 'monospace' }}>
-                {hoverInfo.rawY.toFixed(3)}
-              </span>
-              <span style={metricLabel}>enkel Y (ruw)</span>
+              <span style={metricVal}>{fmtTime(hoverInfo.elapsedMs)}</span>
+              <span style={metricLabel}>tijdstip</span>
             </div>
-          )}
-          <div style={{ ...metricCard, borderColor: hoverInfo.nearestStep ? '#facc1555' : '#1e293b' }}>
-            <span style={{ ...metricVal, color: hoverInfo.nearestStep ? '#facc15' : '#334155' }}>
-              {hoverInfo.nearestStep ? '✓ stap' : '–'}
-            </span>
-            <span style={metricLabel}>detectie (&lt;200 ms)</span>
+            <div style={metricCard}>
+              <span style={{ ...metricVal, color: '#22c55e' }}>{hoverInfo.stepsUpTo}</span>
+              <span style={metricLabel}>stappen tot hier</span>
+            </div>
+            <div style={metricCard}>
+              <span style={{ ...metricVal, color: '#00d4aa', fontFamily: 'monospace', fontSize: '13px' }}>
+                {hoverInfo.avgY.toFixed(3)}
+              </span>
+              <span style={metricLabel}>gem. Y (5 samples)</span>
+            </div>
+            {hoverInfo.valleyY != null && (
+              <div style={metricCard}>
+                <span style={{ ...metricVal, color: '#60a5fa', fontFamily: 'monospace', fontSize: '13px' }}>
+                  {hoverInfo.valleyY.toFixed(3)}
+                </span>
+                <span style={metricLabel}>dalreferentie</span>
+              </div>
+            )}
+            {hoverInfo.peakY != null && hoverInfo.inPeak && (
+              <div style={{ ...metricCard, borderColor: '#a78bfa44' }}>
+                <span style={{ ...metricVal, color: '#a78bfa', fontFamily: 'monospace', fontSize: '13px' }}>
+                  {hoverInfo.peakY.toFixed(3)}
+                </span>
+                <span style={metricLabel}>piek-minimum</span>
+              </div>
+            )}
+            <div style={{ ...metricCard, borderColor: hoverInfo.inPeak ? '#f59e0b55' : '#1e293b' }}>
+              <span style={{ ...metricVal, color: hoverInfo.inPeak ? '#f59e0b' : '#334155', fontSize: '13px' }}>
+                {hoverInfo.inPeak ? '▲ piek-fase' : '– rust-fase'}
+              </span>
+              <span style={metricLabel}>detector-toestand</span>
+            </div>
           </div>
-          <div style={metricCard}>
-            <span style={{ ...metricVal, color: '#f59e0b', fontFamily: 'monospace' }}>
-              {config.peakMinProminence.toFixed(3)}
-            </span>
-            <span style={metricLabel}>drempel</span>
+
+          {/* Explanation block */}
+          <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', border: `1px solid ${hoverInfo.isAtStep ? '#facc1533' : '#1e293b'}`, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <div style={{ fontSize: '9px', fontWeight: '700', color: '#334155', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '3px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+              🔍 Detectie-uitleg op dit punt
+            </div>
+            {hoverInfo.explanationLines.map((line, i) => {
+              const colors = { ok: '#22c55e', warn: '#f59e0b', info: '#60a5fa', neutral: '#475569' };
+              const icons  = { ok: '✓', warn: '⚠', info: 'ℹ', neutral: '·' };
+              return (
+                <div key={i} style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                  <span style={{ fontSize: '11px', color: colors[line.type], flexShrink: 0, marginTop: '0px', lineHeight: 1.4 }}>{icons[line.type]}</span>
+                  <span style={{ fontSize: '11px', color: line.type === 'neutral' ? '#475569' : '#94a3b8', lineHeight: 1.4 }}>{line.text}</span>
+                </div>
+              );
+            })}
+            {hoverInfo.explanationLines.length === 0 && (
+              <span style={{ fontSize: '11px', color: '#334155' }}>Geen data op dit punt.</span>
+            )}
           </div>
+
+          {/* How the algorithm works — collapsed explainer */}
+          <details style={{ backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b', padding: '8px 12px' }}>
+            <summary style={{ fontSize: '10px', fontWeight: '700', color: '#334155', cursor: 'pointer', userSelect: 'none', letterSpacing: '0.3px' }}>
+              📖 Hoe werkt de stap-detectie?
+            </summary>
+            <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569', lineHeight: 1.55 }}>
+              <p style={{ margin: 0 }}>
+                De detector volgt continu de <strong style={{ color: '#64748b' }}>enkelhoogte Y</strong> (0 = boven, 1 = onder in frame).
+                Een stap wordt geteld als een volledige <em>piek-cyclus</em> is afgerond met voldoende grootte.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ display: 'flex', gap: '7px' }}>
+                  <span style={{ color: '#60a5fa', flexShrink: 0 }}>①</span>
+                  <span><strong style={{ color: '#60a5fa' }}>Dal-referentie (dalreferentie)</strong> — het lopende hoogste Y-punt (= laagste positie van de enkel). Past zich langzaam aan als de enkel omhoog gaat.</span>
+                </div>
+                <div style={{ display: 'flex', gap: '7px' }}>
+                  <span style={{ color: '#a78bfa', flexShrink: 0 }}>②</span>
+                  <span><strong style={{ color: '#a78bfa' }}>Piek-fase</strong> — wordt geactiveerd zodra het gemiddelde Y meer dan <strong style={{ color: '#f59e0b' }}>drempel ({config.peakMinProminence.toFixed(3)})</strong> daalt t.o.v. het dal. Dit betekent dat de enkel omhoog beweegt (sprong).</span>
+                </div>
+                <div style={{ display: 'flex', gap: '7px' }}>
+                  <span style={{ color: '#22c55e', flexShrink: 0 }}>③</span>
+                  <span><strong style={{ color: '#22c55e' }}>Stap tellen</strong> — wanneer de enkel vanuit de piek weer <strong>genoeg terugzakt</strong> (≥ drempel), wordt een stap geteld — maar alleen als er minimaal <strong style={{ color: '#f59e0b' }}>{config.peakMinIntervalMs} ms</strong> verstreken is sinds de vorige stap.</span>
+                </div>
+                <div style={{ display: 'flex', gap: '7px' }}>
+                  <span style={{ color: '#ef4444', flexShrink: 0 }}>④</span>
+                  <span><strong style={{ color: '#ef4444' }}>Mist</strong> — als er langer dan <strong style={{ color: '#f59e0b' }}>{config.missGapMs} ms × 2</strong> geen stap wordt gedetecteerd terwijl de skipper wel springt, telt de detector een mister.</span>
+                </div>
+              </div>
+              <p style={{ margin: 0, color: '#334155', fontSize: '10px' }}>
+                💡 Tip: als stappen worden gemist, verlaag de <em>Pieksensitiviteit</em>. Bij dubbeltelling, verhoog het <em>Min. interval</em>.
+              </p>
+            </div>
+          </details>
         </div>
       )}
 
@@ -556,7 +708,65 @@ const metricCard  = { backgroundColor: '#0f172a', borderRadius: '8px', border: '
 const metricVal   = { fontSize: '15px', fontWeight: '800', color: '#94a3b8', lineHeight: 1 };
 const metricLabel = { fontSize: '9px', color: '#334155', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.4px' };
 
-// ─── Backend Selector ─────────────────────────────────────────────────────────
+// ─── CSV Export ───────────────────────────────────────────────────────────────
+function exportCsv(signalHistory, stepTimestamps, detCfg, backendId, disciplineId, sessionType, trackedFoot, sessionStartTime) {
+  const tMin = sessionStartTime || (signalHistory[0]?.t ?? 0);
+
+  // Build a set of step timestamps for fast lookup
+  const stepTimes = new Set((stepTimestamps || []).map(s => s?.t ?? s));
+  const stepByT   = {};
+  (stepTimestamps || []).forEach(s => { stepByT[s?.t ?? s] = s?.n ?? '?'; });
+
+  // Header
+  const cols = [
+    'elapsed_ms', 'timestamp_ms', 'ankle_y_filtered', 'ankle_y_raw',
+    'valley_y', 'peak_y', 'in_peak',
+    'step_counted', 'step_number',
+  ];
+
+  const rows = signalHistory.map(p => {
+    const closest = [...stepTimes].reduce((best, st) =>
+      Math.abs(st - p.t) < Math.abs(best - p.t) ? st : best
+    , Infinity);
+    const isStep = isFinite(closest) && Math.abs(closest - p.t) < 50; // within 50ms = this sample IS a step
+
+    return [
+      p.t - tMin,
+      p.t,
+      p.y.toFixed(5),
+      (p.raw ?? p.y).toFixed(5),
+      p.valleyY != null ? p.valleyY.toFixed(5) : '',
+      p.peakY   != null ? p.peakY.toFixed(5)   : '',
+      p.inPeak  != null ? (p.inPeak ? '1' : '0') : '',
+      isStep ? '1' : '0',
+      isStep ? (stepByT[closest] ?? '') : '',
+    ].join(',');
+  });
+
+  // Meta header block
+  const meta = [
+    `# AI Stapteller export`,
+    `# Datum: ${new Date().toISOString()}`,
+    `# Backend: ${BACKENDS[backendId]?.label || backendId}`,
+    `# Onderdeel: ${disciplineId}  Type: ${sessionType}  Voet: ${trackedFoot}`,
+    `# Pieksensitiviteit: ${detCfg.peakMinProminence}  Min.interval: ${detCfg.peakMinIntervalMs}ms  Mist-drempel: ${detCfg.missGapMs}ms`,
+    `# Kalman: ${detCfg.kalmanEnabled ? `aan (Q=${detCfg.kalmanProcessNoise})` : 'uit'}`,
+    `# Stappen totaal: ${(stepTimestamps || []).length}`,
+    `#`,
+    cols.join(','),
+  ].join('\n');
+
+  const csv = meta + '\n' + rows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `stapteller_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+
 function BackendSelector({ value, onChange, disabled, loadingId }) {
   return (
     <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '12px 14px' }}>
@@ -906,16 +1116,21 @@ export default function AiCounterPage() {
       const now = Date.now();
       const ev = detectorRef.current.push(filteredY, now);
 
-      // Accumulate signal history with timestamps
+      // Accumulate signal history with timestamps + detector internal state for explanation
       setSignalHist(prev => {
-        const n = [...prev, { y: filteredY, raw: ankleY, t: now }];
-        return n.length > 1800 ? n.slice(-1800) : n; // keep up to ~60s at 30fps
+        const dbg = detectorRef.current.debugState;
+        const n = [...prev, { y: filteredY, raw: ankleY, t: now,
+          valleyY: dbg.valleyY, peakY: dbg.peakY, inPeak: dbg.inPeak,
+          lastStepTime: dbg.lastStepTime,
+        }];
+        return n.length > 1800 ? n.slice(-1800) : n;
       });
 
       if (ev === 'step') {
         setSteps(detectorRef.current.steps);
-        // ── Record exact timestamp of this step ──
-        setStepTimestamps(prev => [...prev, now]);
+        // Record exact timestamp + step number for explanation
+        const stepNum = detectorRef.current.steps;
+        setStepTimestamps(prev => [...prev, { t: now, n: stepNum }]);
       }
       if (ev === 'miss') {
         setMisses(detectorRef.current.misses); setShowMiss(true);
@@ -1534,6 +1749,19 @@ export default function AiCounterPage() {
                 <RefreshCw size={14} /> Opnieuw
               </button>
             </div>
+
+            {/* CSV export */}
+            {signalHist.length > 0 && (
+              <button
+                style={{ ...s.ghostBtn, width: '100%', justifyContent: 'center', borderColor: '#1e3a5f', color: '#60a5fa', gap: '7px' }}
+                onClick={() => exportCsv(signalHist, stepTimestamps, detCfg, backendId, disciplineId, sessionType, trackedFoot, sessionStartTimeRef.current)}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
+                  <path d="M7 1v8M4 6l3 3 3-3M2 11h10" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Exporteer meetdata als CSV
+              </button>
+            )}
 
             <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start', backgroundColor: '#f59e0b11', border: '1px solid #f59e0b33', borderRadius: '8px', padding: '8px 10px', fontSize: '11px', color: '#94a3b8', lineHeight: 1.5 }}>
               <Info size={11} color="#f59e0b" style={{ flexShrink: 0, marginTop: 1 }} />
