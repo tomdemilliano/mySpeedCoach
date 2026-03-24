@@ -716,69 +716,99 @@ const metricLabel = { fontSize: '9px', color: '#334155', fontWeight: '600', text
 // the user can keep the video muted and beep detection still works.
 //
 // Usage:
-//   const bd = new BeepDetector(videoElement, onBeep, options)
-//   bd.start()   → begins polling
-//   bd.stop()    → tears down AudioContext
-//   bd.calibrate() → snapshots current noise floor (call before first beep)
+//   const bd = new BeepDetector(onBeep, options)
+//   bd.attachVideo(videoElement)  → call once after video.play()
+//   bd.startPolling()             → begin listening
+//   bd.stopPolling()              → pause (keeps AudioContext alive)
+//   bd.destroy()                  → full teardown (only when video element changes)
 
 class BeepDetector {
-  constructor(videoEl, onBeep, opts = {}) {
-    this.video   = videoEl;
-    this.onBeep  = onBeep;  // called with { freq, db, videoTime }
+  constructor(onBeep, opts = {}) {
+    // NOTE: video element is NOT passed to the constructor — it is wired once
+    // via attachVideo() because createMediaElementSource can only be called
+    // once per HTMLMediaElement across the entire page lifetime.
+    this.onBeep  = onBeep;
     this.opts = {
       fftSize:            2048,
-      smoothing:          0.15,   // low = fast response
-      minFreq:            500,    // Hz — lower bound of search band
-      maxFreq:            5000,   // Hz — upper bound
-      tonalityThreshold:  22,     // dB above band mean → "tonal frame"
-      absThreshold:       -48,    // dBFS — ignore very quiet signals
-      minDurationMs:      60,     // minimum beep length
-      maxDurationMs:      600,    // longer = voice/music → ignore
-      cooldownMs:         1200,   // silence after a detected beep
+      smoothing:          0.15,
+      minFreq:            500,
+      maxFreq:            5000,
+      tonalityThreshold:  22,
+      absThreshold:       -48,
+      minDurationMs:      60,
+      maxDurationMs:      600,
+      cooldownMs:         1200,
       ...opts,
     };
     this._ctx        = null;
     this._analyser   = null;
-    this._source     = null;
-    this._rafId      = null;
+    this._source     = null;   // created once, never recreated
     this._freqBuf    = null;
-    this._noiseFloor = -60;       // dBFS, updated by calibrate()
-    this._beepStart  = null;      // timestamp when tonal burst began
-    this._lastBeep   = 0;         // timestamp of last confirmed beep
-    this._running    = false;
+    this._rafId      = null;
+    this._noiseFloor = -60;
+    this._beepStart  = null;
+    this._lastBeep   = 0;
+    this._polling    = false;
+    this._attached   = false;  // true once createMediaElementSource has been called
   }
 
-  start() {
-    if (this._running) return;
+  // Call once after video.play() — wires the Web Audio graph.
+  // Subsequent calls with the SAME element are no-ops.
+  // Passing a NEW element tears down the old graph first.
+  attachVideo(videoEl) {
+    if (this._attached && this._source) {
+      // Already wired to this element — nothing to do
+      return;
+    }
     try {
-      this._ctx      = new (window.AudioContext || window.webkitAudioContext)();
+      // Create AudioContext on first call (requires a user-gesture to already have happened)
+      if (!this._ctx) {
+        this._ctx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (this._ctx.state === 'suspended') {
+        this._ctx.resume().catch(() => {});
+      }
       this._analyser = this._ctx.createAnalyser();
       this._analyser.fftSize              = this.opts.fftSize;
       this._analyser.smoothingTimeConstant = this.opts.smoothing;
-      // Connect video audio → analyser AND → speakers.
-      // processVideo already set video.muted = false before play(), so audio is live.
-      // After createMediaElementSource the element's own output is bypassed;
-      // all routing goes through the Web Audio graph.
-      this._source = this._ctx.createMediaElementSource(this.video);
+      // THE line that can only run once per video element:
+      this._source = this._ctx.createMediaElementSource(videoEl);
       this._source.connect(this._analyser);
-      this._source.connect(this._ctx.destination); // keeps audio audible
-      this._freqBuf = new Float32Array(this._analyser.frequencyBinCount);
-      this._running = true;
-      this._poll();
+      this._source.connect(this._ctx.destination); // audio still plays through speakers
+      this._freqBuf  = new Float32Array(this._analyser.frequencyBinCount);
+      this._attached = true;
     } catch (e) {
-      console.warn('[BeepDetector] setup failed:', e?.message);
+      console.warn('[BeepDetector] attachVideo failed:', e?.message);
     }
   }
 
-  stop() {
-    this._running = false;
-    cancelAnimationFrame(this._rafId);
-    try { this._source?.disconnect(); } catch (_) {}
-    try { this._ctx?.close(); } catch (_) {}
-    this._ctx = this._analyser = this._source = null;
+  // Tear down completely — only call when the video element itself is being replaced
+  destroy() {
+    this.stopPolling();
+    try { this._source?.disconnect(); }  catch (_) {}
+    try { this._ctx?.close(); }          catch (_) {}
+    this._ctx = this._analyser = this._source = this._freqBuf = null;
+    this._attached = false;
   }
 
-  // Call once during the silent portion before the first beep to snapshot noise floor
+  // Start listening for beeps
+  startPolling() {
+    if (!this._attached || this._polling) return;
+    this._polling    = true;
+    this._beepStart  = null;
+    this._lastBeep   = 0;
+    this._noiseFloor = -60;
+    this._poll();
+    // Auto-calibrate noise floor after 300ms (video has had time to start)
+    setTimeout(() => this.calibrate(), 300);
+  }
+
+  // Pause listening — does NOT destroy the AudioContext or source node
+  stopPolling() {
+    this._polling = false;
+    cancelAnimationFrame(this._rafId);
+  }
+
   calibrate() {
     if (!this._analyser || !this._freqBuf) return;
     this._analyser.getFloatFrequencyData(this._freqBuf);
@@ -800,14 +830,13 @@ class BeepDetector {
   }
 
   _poll() {
-    if (!this._running) return;
+    if (!this._polling) return;
     this._rafId = requestAnimationFrame(() => this._poll());
     if (!this._analyser || !this._freqBuf) return;
 
     this._analyser.getFloatFrequencyData(this._freqBuf);
     const { minBin, maxBin, binHz } = this._bands();
 
-    // Find peak bin and compute mean in band
     let peakDb = -Infinity, peakBin = minBin;
     let sum = 0, count = 0;
     for (let i = minBin; i <= maxBin; i++) {
@@ -817,12 +846,12 @@ class BeepDetector {
       sum += v; count++;
     }
     const meanDb   = count > 0 ? sum / count : -100;
-    const tonality = peakDb - meanDb;  // dB above mean → high = pure tone
+    const tonality = peakDb - meanDb;
 
-    const now      = performance.now();
-    const isTonal  = tonality > this.opts.tonalityThreshold
-                  && peakDb   > this.opts.absThreshold
-                  && peakDb   > this._noiseFloor + 12;
+    const now     = performance.now();
+    const isTonal = tonality > this.opts.tonalityThreshold
+                 && peakDb   > this.opts.absThreshold
+                 && peakDb   > this._noiseFloor + 12;
 
     if (isTonal) {
       if (this._beepStart === null) this._beepStart = now;
@@ -832,11 +861,10 @@ class BeepDetector {
        && now - this._lastBeep > this.opts.cooldownMs) {
         this._lastBeep = now;
         const freq = peakBin * binHz;
-        this.onBeep({ freq: Math.round(freq), db: Math.round(peakDb), videoTime: this.video.currentTime });
+        this.onBeep({ freq: Math.round(freq), db: Math.round(peakDb) });
       }
     } else {
-      // Reset candidate if silence/noise returns
-      if (this._beepStart !== null && performance.now() - this._beepStart > 80) {
+      if (this._beepStart !== null && now - this._beepStart > 80) {
         this._beepStart = null;
       }
     }
@@ -1484,10 +1512,15 @@ export default function AiCounterPage() {
     const file = e.target.files?.[0]; if (!file || !file.type.startsWith('video/')) return;
     setCodecError(false); setBackendError(''); setUploadProgress(0); setSessionDone(false); setSavedOk(false);
     if (uploadUrl) URL.revokeObjectURL(uploadUrl);
+    // New file = new video element state. Fully tear down the AudioContext so
+    // attachBeepDetector creates a fresh one for the new playback.
+    destroyBeepDetector();
+    setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
+    setBeepsDetected(0);
     const url = URL.createObjectURL(file);
     setUploadFile(file); setUploadUrl(url); setMode('upload');
     setVideoMuted(true);
-  }, [uploadUrl]);
+  }, [uploadUrl, destroyBeepDetector]);
 
   // ── Process video ──────────────────────────────────────────────────────────
   const processVideo = useCallback(async () => {
@@ -1510,7 +1543,7 @@ export default function AiCounterPage() {
 
     // In beep-mode: wait for first beep before setting isRunning.
     // In normal mode: start immediately as before.
-    // NOTE: startBeepDetector is called AFTER video.play() below — not here —
+    // NOTE: attachBeepDetector is called AFTER video.play() below — not here —
     // because createMediaElementSource requires the element to be in playing state.
     const usingBeepMode = beepModeRef.current;
     if (usingBeepMode) {
@@ -1532,8 +1565,7 @@ export default function AiCounterPage() {
 
     const finish = () => {
       clearInterval(elapsedRef.current); setUploadProgress(100); aborted = true;
-      stopBeepDetector();
-      // In beep-mode: if we never got 2nd beep, just stop counting with what we have
+      stopBeepDetector(); // pause only — same video element, may retry
       if (beepModeRef.current && beepStateRef.current === 'counting') {
         beepStateRef.current = 'done'; setBeepState('done');
       }
@@ -1562,8 +1594,8 @@ export default function AiCounterPage() {
       };
       video.currentTime = 0; await new Promise(r => { video.onseeked = r; });
       try { await video.play(); } catch (e) { setBackendError('Video afspelen mislukt: ' + e.message); clearInterval(elapsedRef.current); isRunRef.current = false; setIsRunning(false); return; }
-      // Start beep detector AFTER play() — createMediaElementSource needs a live element
-      if (usingBeepMode) startBeepDetector(video);
+      // Attach beep detector AFTER play() — createMediaElementSource requires a playing element
+      if (usingBeepMode) attachBeepDetector(video);
       frameRef.current = requestAnimationFrame(loop);
     } else {
       const loop = async () => {
@@ -1574,11 +1606,11 @@ export default function AiCounterPage() {
       };
       video.currentTime = 0; await new Promise(r => { video.onseeked = r; });
       try { await video.play(); } catch (e) { setBackendError('Video afspelen mislukt: ' + e.message); clearInterval(elapsedRef.current); isRunRef.current = false; setIsRunning(false); return; }
-      // Start beep detector AFTER play() — createMediaElementSource needs a live element
-      if (usingBeepMode) startBeepDetector(video);
+      // Attach beep detector AFTER play() — createMediaElementSource requires a playing element
+      if (usingBeepMode) attachBeepDetector(video);
       frameRef.current = requestAnimationFrame(loop);
     }
-  }, [backendId, detCfg, initBackend, processTfjsFrame, onMpResults, stopSession, videoMuted]);
+  }, [backendId, detCfg, initBackend, processTfjsFrame, onMpResults, stopSession, videoMuted, attachBeepDetector]);
 
   // ── Toggle audio on the fly ────────────────────────────────────────────────
   const toggleVideoAudio = useCallback(() => {
@@ -1594,49 +1626,54 @@ export default function AiCounterPage() {
   useEffect(() => { beepModeRef.current  = beepMode;  }, [beepMode]);
   useEffect(() => { beepStateRef.current = beepState; }, [beepState]);
 
+  // stopBeepDetector: pause polling only — NEVER destroy the AudioContext/source
+  // (createMediaElementSource can only run once per element; destroying recreates it → crash)
   const stopBeepDetector = useCallback(() => {
-    if (beepDetectorRef.current) { beepDetectorRef.current.stop(); beepDetectorRef.current = null; }
+    if (beepDetectorRef.current) beepDetectorRef.current.stopPolling();
   }, []);
 
-  const startBeepDetector = useCallback((videoEl) => {
-    stopBeepDetector();
-    const bd = new BeepDetector(videoEl, ({ freq, db, videoTime }) => {
-      if (!beepModeRef.current) return;
-      const state = beepStateRef.current;
-      console.log(`[Beep] detected @ ${videoTime.toFixed(2)}s  freq=${freq}Hz  db=${db}dB  state=${state}`);
+  // attachBeepDetector: called once per video.play(). Creates the BeepDetector instance
+  // on first call; subsequent calls (Opnieuw) reuse the same instance and just restart polling.
+  const attachBeepDetector = useCallback((videoEl) => {
+    // Build the instance once, with the callback baked in
+    if (!beepDetectorRef.current) {
+      beepDetectorRef.current = new BeepDetector(({ freq, db }) => {
+        if (!beepModeRef.current) return;
+        const state = beepStateRef.current;
+        console.log(`[Beep] freq=${freq}Hz  db=${db}dB  state=${state}`);
+        setBeepsDetected(n => n + 1);
+        if (state === 'waiting_start') {
+          beepStateRef.current = 'counting';
+          setBeepState('counting');
+          setTimeout(() => {
+            detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
+            kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
+            setSteps(0); setMisses(0); setElapsed(0);
+            setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
+            sessionStartTimeRef.current = Date.now();
+            isRunRef.current = true; setIsRunning(true);
+            elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
+          }, 50);
+        } else if (state === 'counting') {
+          beepStateRef.current = 'done';
+          setBeepState('done');
+          isRunRef.current = false; setIsRunning(false);
+          clearInterval(elapsedRef.current);
+          setFinalSteps(detectorRef.current.steps);
+          setFinalMisses(detectorRef.current.misses);
+          setSessionDone(true);
+        }
+      });
+    }
+    // Wire the audio graph (no-op if already attached to this element)
+    beepDetectorRef.current.attachVideo(videoEl);
+    beepDetectorRef.current.startPolling();
+  }, [detCfg]);
 
-      setBeepsDetected(n => n + 1);
-
-      if (state === 'waiting_start') {
-        // First beep → start counting
-        beepStateRef.current = 'counting';
-        setBeepState('counting');
-        // Small delay (50ms) so the beep itself isn't in the counted signal
-        setTimeout(() => {
-          detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
-          kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
-          setSteps(0); setMisses(0); setElapsed(0);
-          setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
-          sessionStartTimeRef.current = Date.now();
-          isRunRef.current = true; setIsRunning(true);
-          elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
-        }, 50);
-      } else if (state === 'counting') {
-        // Second beep → stop counting
-        beepStateRef.current = 'done';
-        setBeepState('done');
-        isRunRef.current = false; setIsRunning(false);
-        clearInterval(elapsedRef.current);
-        setFinalSteps(detectorRef.current.steps);
-        setFinalMisses(detectorRef.current.misses);
-        setSessionDone(true);
-      }
-    });
-    // Calibrate noise floor immediately (video not playing yet so this is silence)
-    bd.start();
-    setTimeout(() => bd.calibrate(), 200); // short delay for AudioContext to warm up
-    beepDetectorRef.current = bd;
-  }, [stopBeepDetector, detCfg]);
+  // destroyBeepDetector: full teardown, only called when a new video FILE is selected
+  const destroyBeepDetector = useCallback(() => {
+    if (beepDetectorRef.current) { beepDetectorRef.current.destroy(); beepDetectorRef.current = null; }
+  }, []);
 
   const toggleBeepMode = useCallback(() => {
     setBeepMode(prev => {
@@ -1644,27 +1681,20 @@ export default function AiCounterPage() {
       beepModeRef.current = next;
       if (!next) {
         stopBeepDetector();
-        // Restore the user's mute preference on the video element
         if (uploadVideoRef.current) uploadVideoRef.current.muted = videoMuted;
       } else {
-        // Reset beep state
         setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
         setBeepsDetected(0);
-        // If video is already loaded, attach detector immediately
-        if (uploadVideoRef.current && uploadUrl) {
-          startBeepDetector(uploadVideoRef.current);
-        }
       }
       return next;
     });
-  }, [stopBeepDetector, startBeepDetector, uploadUrl, videoMuted]);
+  }, [stopBeepDetector, videoMuted]);
 
   const cancelBeepMode = useCallback(() => {
     stopBeepDetector();
     setBeepMode(false); beepModeRef.current = false;
     setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
     setBeepsDetected(0);
-    // If currently counting, stop
     if (isRunRef.current) {
       isRunRef.current = false; setIsRunning(false);
       clearInterval(elapsedRef.current);
@@ -1693,7 +1723,7 @@ export default function AiCounterPage() {
   // ── Reset all ──────────────────────────────────────────────────────────────
   const resetAll = useCallback(() => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
-    isRunRef.current = false; stopCameraStream(); stopBeepDetector();
+    isRunRef.current = false; stopCameraStream(); destroyBeepDetector();
     if (uploadUrl) { URL.revokeObjectURL(uploadUrl); setUploadUrl(''); }
     setUploadFile(null); setMode('idle'); setIsRunning(false);
     setSessionDone(false); setSteps(0); setMisses(0); setElapsed(0);
@@ -1709,7 +1739,7 @@ export default function AiCounterPage() {
 
   useEffect(() => () => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
-    stopCameraStream(); stopBeepDetector(); if (uploadUrl) URL.revokeObjectURL(uploadUrl);
+    stopCameraStream(); destroyBeepDetector(); if (uploadUrl) URL.revokeObjectURL(uploadUrl);
   }, []); // eslint-disable-line
 
   const currentDisc = getDisc(disciplineId);
