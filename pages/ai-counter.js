@@ -346,19 +346,20 @@ function LiveSignalOverlay({ signalHistory, stepTimestamps, config, visible }) {
 
 // ─── Post-Session Review Timeline ─────────────────────────────────────────────
 // Full-width scrollable graph. Clicking/dragging seeks the video to that point.
-// Works for both uploaded video and live camera (camera has no seekable video,
-// so seeking is skipped gracefully).
-function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTime, videoRef, uploadVideoRef, isVideoMode }) {
-  const scrollRef  = useRef(null);
-  const canvasRef  = useRef(null);
-  const [playheadT, setPlayheadT] = useState(null);
+// Works for both uploaded video and live camera (camera has no seekable video).
+function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTime, uploadVideoRef, hasUploadVideo }) {
+  const canvasRef   = useRef(null);
+  const isDragging  = useRef(false);
 
-  // How wide to render: 2px per signal sample, minimum 600px
+  const [playheadT,  setPlayheadT]  = useState(null);
+  // Metrics shown at hover/playhead position
+  const [hoverInfo,  setHoverInfo]  = useState(null);
+
   const PX_PER_SAMPLE = 2.5;
   const canvasW = Math.max(600, (signalHistory?.length || 0) * PX_PER_SAMPLE);
-  const canvasH = 90;
+  const canvasH = 100;
 
-  // Redraw whenever data changes
+  // Redraw whenever data or playhead changes
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -366,11 +367,12 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
   }, [signalHistory, stepTimestamps, config, playheadT, canvasW]);
 
   const seekToX = useCallback((clientX) => {
-    const canvas = canvasRef.current; if (!canvas || !signalHistory?.length) return;
+    const canvas = canvasRef.current;
+    if (!canvas || !signalHistory?.length) return;
+
     const rect = canvas.getBoundingClientRect();
-    // getBoundingClientRect gives CSS width; canvas may be scaled
-    const cssRatio = canvasW / rect.width;
-    const canvasX = (clientX - rect.left) * cssRatio;
+    // canvas may be CSS-scaled (width prop != rendered width), so ratio by CSS width
+    const canvasX = ((clientX - rect.left) / rect.width) * canvasW;
     const ratio = Math.max(0, Math.min(1, canvasX / canvasW));
 
     const tMin = signalHistory[0].t;
@@ -378,15 +380,42 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
     const targetT = tMin + ratio * (tMax - tMin);
     setPlayheadT(targetT);
 
-    // Seek video
-    if (isVideoMode && uploadVideoRef?.current) {
-      const videoSec = (targetT - sessionStartTime) / 1000;
-      try { uploadVideoRef.current.currentTime = Math.max(0, videoSec); } catch (_) {}
-    }
-    // For live camera there's no seekable video, so we just show the playhead
-  }, [signalHistory, canvasW, isVideoMode, uploadVideoRef, sessionStartTime]);
+    // ── Find nearest signal sample for metrics ──
+    const nearest = signalHistory.reduce((best, p) =>
+      Math.abs(p.t - targetT) < Math.abs(best.t - targetT) ? p : best
+    , signalHistory[0]);
 
-  const isDragging = useRef(false);
+    // Count steps up to this point
+    const stepsUpTo = stepTimestamps ? stepTimestamps.filter(st => st <= targetT).length : 0;
+    // Time from session start
+    const elapsedMs = targetT - tMin;
+
+    setHoverInfo({
+      elapsedMs,
+      ankleY: nearest.y,
+      rawY: nearest.raw ?? nearest.y,
+      stepsUpTo,
+      nearestStep: stepTimestamps?.find(st => Math.abs(st - targetT) < 200) != null,
+    });
+
+    // ── Seek the upload video ──
+    if (hasUploadVideo && uploadVideoRef?.current && sessionStartTime) {
+      // Map wall-clock timestamp → video seconds
+      // sessionStartTime is Date.now() captured at the start of processVideo,
+      // which is before video.play() — so offset matches signal timestamps.
+      const videoSec = (targetT - sessionStartTime) / 1000;
+      const vid = uploadVideoRef.current;
+      try {
+        // Only seek if video is in a seekable state
+        if (vid.readyState >= 1 && isFinite(videoSec) && videoSec >= 0) {
+          vid.pause();
+          vid.currentTime = Math.min(videoSec, vid.duration || videoSec);
+        }
+      } catch (e) {
+        console.warn('[ReviewTimeline] seek failed:', e?.message);
+      }
+    }
+  }, [signalHistory, stepTimestamps, canvasW, hasUploadVideo, uploadVideoRef, sessionStartTime]);
 
   const onPointerDown = useCallback((e) => {
     isDragging.current = true;
@@ -408,16 +437,16 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
   return (
     <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
         <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span>📊</span> Signaalreview
+          📊 Signaalreview
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '10px', color: '#facc15', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <span style={{ width: '0', height: '0', borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '6px solid #facc15', display: 'inline-block' }} />
+            <span style={{ width: '1.5px', height: '10px', backgroundColor: '#facc15', display: 'inline-block' }} />
             {stepCount} stappen gemarkeerd
           </span>
-          {isVideoMode && (
+          {hasUploadVideo && (
             <span style={{ fontSize: '10px', color: '#f472b6', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <span style={{ width: '12px', height: '2px', backgroundColor: '#f472b6', display: 'inline-block' }} />
               klik om te scrubben
@@ -426,18 +455,12 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
         </div>
       </div>
 
-      {/* Scrollable canvas wrapper */}
-      <div
-        ref={scrollRef}
-        style={{
-          overflowX: 'auto',
-          overflowY: 'hidden',
-          borderRadius: '8px',
-          border: '1px solid #0f172a',
-          cursor: 'crosshair',
-          WebkitOverflowScrolling: 'touch',
-        }}
-      >
+      {/* Scrollable canvas */}
+      <div style={{
+        overflowX: 'auto', overflowY: 'hidden',
+        borderRadius: '8px', border: '1px solid #0f172a',
+        cursor: 'crosshair', WebkitOverflowScrolling: 'touch',
+      }}>
         <canvas
           ref={canvasRef}
           width={canvasW}
@@ -449,6 +472,48 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
           onPointerLeave={onPointerUp}
         />
       </div>
+
+      {/* ── Metrics panel — shown when playhead is active ── */}
+      {hoverInfo && (
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '6px',
+        }}>
+          <div style={metricCard}>
+            <span style={metricVal}>{fmtTime(hoverInfo.elapsedMs)}</span>
+            <span style={metricLabel}>tijdstip</span>
+          </div>
+          <div style={metricCard}>
+            <span style={{ ...metricVal, color: '#22c55e' }}>{hoverInfo.stepsUpTo}</span>
+            <span style={metricLabel}>stappen tot hier</span>
+          </div>
+          <div style={metricCard}>
+            <span style={{ ...metricVal, color: '#00d4aa', fontFamily: 'monospace' }}>
+              {hoverInfo.ankleY.toFixed(3)}
+            </span>
+            <span style={metricLabel}>enkel Y (gefilterd)</span>
+          </div>
+          {Math.abs(hoverInfo.rawY - hoverInfo.ankleY) > 0.002 && (
+            <div style={metricCard}>
+              <span style={{ ...metricVal, color: '#64748b', fontFamily: 'monospace' }}>
+                {hoverInfo.rawY.toFixed(3)}
+              </span>
+              <span style={metricLabel}>enkel Y (ruw)</span>
+            </div>
+          )}
+          <div style={{ ...metricCard, borderColor: hoverInfo.nearestStep ? '#facc1555' : '#1e293b' }}>
+            <span style={{ ...metricVal, color: hoverInfo.nearestStep ? '#facc15' : '#334155' }}>
+              {hoverInfo.nearestStep ? '✓ stap' : '–'}
+            </span>
+            <span style={metricLabel}>detectie (&lt;200 ms)</span>
+          </div>
+          <div style={metricCard}>
+            <span style={{ ...metricVal, color: '#f59e0b', fontFamily: 'monospace' }}>
+              {config.peakMinProminence.toFixed(3)}
+            </span>
+            <span style={metricLabel}>drempel</span>
+          </div>
+        </div>
+      )}
 
       {/* Legend */}
       <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
@@ -465,10 +530,10 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
           ruw
         </span>
         <span style={{ fontSize: '9px', color: '#facc15', display: 'flex', alignItems: 'center', gap: '3px' }}>
-          <span style={{ width: '0', height: '0', borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '6px solid #facc15', display: 'inline-block' }} />
+          <span style={{ width: '1.5px', height: '10px', backgroundColor: '#facc15', display: 'inline-block' }} />
           getelde stap
         </span>
-        {isVideoMode && (
+        {hasUploadVideo && (
           <span style={{ fontSize: '9px', color: '#f472b6', display: 'flex', alignItems: 'center', gap: '3px' }}>
             <span style={{ width: '12px', height: '2px', backgroundColor: '#f472b6', display: 'inline-block' }} />
             afspeelpositie
@@ -476,9 +541,8 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
         )}
       </div>
 
-      {/* Instruction */}
       <div style={{ fontSize: '10px', color: '#334155', lineHeight: 1.5 }}>
-        {isVideoMode
+        {hasUploadVideo
           ? 'Klik of sleep op de tijdlijn om de video te scrubben en stap voor stap te controleren.'
           : 'Scroll de tijdlijn om het volledige enkelsignaal te bekijken.'
         }
@@ -486,6 +550,11 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
     </div>
   );
 }
+
+// Small style helpers for the metrics cards
+const metricCard  = { backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b', padding: '7px 10px', display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-start' };
+const metricVal   = { fontSize: '15px', fontWeight: '800', color: '#94a3b8', lineHeight: 1 };
+const metricLabel = { fontSize: '9px', color: '#334155', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.4px' };
 
 // ─── Backend Selector ─────────────────────────────────────────────────────────
 function BackendSelector({ value, onChange, disabled, loadingId }) {
@@ -536,16 +605,8 @@ function MissFlash({ visible }) {
 }
 
 // ─── Detection Tuning Panel ───────────────────────────────────────────────────
-function DetectionTuningPanel({ config, onChange, signalHistory, stepTimestamps }) {
+function DetectionTuningPanel({ config, onChange }) {
   const [open, setOpen] = useState(false);
-  const gRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const canvas = gRef.current; if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    drawSignalToCanvas(ctx, canvas.width, canvas.height, signalHistory, stepTimestamps, config, null);
-  }, [signalHistory, stepTimestamps, open, config.peakMinProminence, config.kalmanEnabled]);
 
   const sliders = [
     { key: 'peakMinProminence', label: 'Pieksensitiviteit',  hint: 'Hoe groot de beweging. Lager = gevoeliger.',         min: 0.003, max: 0.05,  step: 0.001, fmt: v => v.toFixed(3) },
@@ -617,31 +678,7 @@ function DetectionTuningPanel({ config, onChange, signalHistory, stepTimestamps 
               <div style={{ fontSize: '10px', color: '#475569', marginTop: '3px' }}>{sl.hint}</div>
             </div>
           ))}
-          {/* Signal graph — now with step markers */}
-          <div style={{ marginTop: '6px' }}>
-            <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>Enkelsignaal</span>
-              {config.kalmanEnabled && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '400' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                    <span style={{ width: '12px', height: '2px', backgroundColor: '#00d4aa', display: 'inline-block' }} />
-                    <span style={{ color: '#00d4aa' }}>gefilterd</span>
-                  </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                    <span style={{ width: '12px', height: '1px', backgroundColor: '#475569', display: 'inline-block', borderTop: '1px dashed #475569' }} />
-                    <span>ruw</span>
-                  </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                    <span style={{ width: '0', height: '0', borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '6px solid #facc15', display: 'inline-block' }} />
-                    <span style={{ color: '#facc15' }}>stap</span>
-                  </span>
-                </span>
-              )}
-            </div>
-            <canvas ref={gRef} width={320} height={80}
-              style={{ width: '100%', height: '80px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b', display: 'block' }} />
-            {(!signalHistory || signalHistory.length < 5) && <div style={{ fontSize: '10px', color: '#334155', textAlign: 'center', marginTop: '4px' }}>Geen signaaldata beschikbaar</div>}
-          </div>
+          {/* Signal graph removed — full review timeline is available in results */}
         </div>
       )}
     </div>
@@ -1162,7 +1199,10 @@ export default function AiCounterPage() {
   const activeBdef  = BACKENDS[backendId];
 
   // ── Derived visibility flags ───────────────────────────────────────────────
-  const showSettingsPanels = !isRunning;
+  // Settings panels only when idle/upload/camera (not during active session or after)
+  const showSettingsPanels = !isRunning && !sessionDone;
+  // Subtle settings summary shown when running or done (instead of full panels)
+  const showSettingsSummary = isRunning || sessionDone;
   const showLiveGraph      = isRunning && (mode === 'camera' || mode === 'running');
   const showAudioToggle    = (mode === 'upload' || mode === 'running') && !sessionDone;
 
@@ -1227,10 +1267,21 @@ export default function AiCounterPage() {
               muted={videoMuted}
               preload="auto"
               onError={() => setCodecError(true)}
+              onSeeked={() => {
+                // When scrubbing in review mode, repaint the canvas with the seeked frame
+                if (sessionDone && canvasRef.current && uploadVideoRef.current) {
+                  const vid = uploadVideoRef.current;
+                  const cvs = canvasRef.current;
+                  if (vid.videoWidth > 0) {
+                    cvs.width = vid.videoWidth; cvs.height = vid.videoHeight;
+                    cvs.getContext('2d').drawImage(vid, 0, 0, cvs.width, cvs.height);
+                  }
+                }
+              }}
             />
           )}
           <div style={s.canvasLetterbox}>
-            <canvas ref={canvasRef} style={{ ...s.canvas, display: (mode === 'camera' || mode === 'running') ? 'block' : 'none' }} />
+            <canvas ref={canvasRef} style={{ ...s.canvas, display: (mode === 'camera' || mode === 'running' || sessionDone) ? 'block' : 'none' }} />
           </div>
           <MissFlash visible={showMiss} />
 
@@ -1366,7 +1417,35 @@ export default function AiCounterPage() {
           {(mode === 'camera' || isVideoMode) && !isRunning && !sessionDone && <button style={s.ghostBtn} onClick={resetAll}><ArrowLeft size={14} /> Terug</button>}
         </div>
 
-        {/* ── Settings panels — hidden while session is running ── */}
+        {/* ── Settings summary — subtle pill shown while running or when done ── */}
+        {showSettingsSummary && (
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center',
+            backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b',
+            padding: '7px 12px',
+          }}>
+            <span style={{ fontSize: '9px', fontWeight: '700', color: '#334155', textTransform: 'uppercase', letterSpacing: '0.5px', marginRight: '2px' }}>Config</span>
+            <span style={{ fontSize: '10px', color: activeBdef.color, backgroundColor: `${activeBdef.color}18`, borderRadius: '5px', padding: '1px 7px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '3px' }}>
+              <Cpu size={9} /> {activeBdef.label}
+            </span>
+            <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>
+              sensitiviteit {detCfg.peakMinProminence.toFixed(3)}
+            </span>
+            <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>
+              interval {detCfg.peakMinIntervalMs} ms
+            </span>
+            <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>
+              {trackedFoot === 'left' ? '👟 links' : '👟 rechts'}
+            </span>
+            {detCfg.kalmanEnabled && (
+              <span style={{ fontSize: '10px', color: '#3b82f6', backgroundColor: '#3b82f618', borderRadius: '5px', padding: '1px 7px' }}>
+                kalman ✓
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* ── Settings panels — only before session starts ── */}
         {showSettingsPanels && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <BackendSelector value={backendId} disabled={isRunning} loadingId={backendLoading}
@@ -1384,8 +1463,6 @@ export default function AiCounterPage() {
             <DetectionTuningPanel
               config={detCfg}
               onChange={p => setDetCfg(prev => ({ ...prev, ...p }))}
-              signalHistory={signalHist}
-              stepTimestamps={stepTimestamps}
             />
           </div>
         )}
@@ -1423,9 +1500,8 @@ export default function AiCounterPage() {
               stepTimestamps={stepTimestamps}
               config={detCfg}
               sessionStartTime={sessionStartTimeRef.current}
-              videoRef={videoRef}
               uploadVideoRef={uploadVideoRef}
-              isVideoMode={mode === 'running' || (uploadUrl && !!(uploadVideoRef.current))}
+              hasUploadVideo={!!uploadUrl && !!(uploadVideoRef.current)}
             />
 
             <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #1e293b', padding: '12px 14px' }}>
