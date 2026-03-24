@@ -9,14 +9,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ClubMemberFactory, UserMemberLinkFactory, UserFactory,
-  ClubFactory, GroupFactory,
+  ClubFactory, GroupFactory, LiveSessionFactory,
 } from '../constants/dbSchema';
 import { useDisciplines } from '../hooks/useDisciplines';
 import {
   ArrowLeft, Camera, Upload, FlipHorizontal, Play, Square,
   Zap, AlertTriangle, CheckCircle2, RefreshCw, Eye, EyeOff,
   Trophy, Info, Video, SlidersHorizontal, ChevronDown, ChevronUp,
-  Users, Volume2, VolumeX,
+  Users, Volume2, VolumeX, Heart,
 } from 'lucide-react';
 
 // ─── CDN URLs ─────────────────────────────────────────────────────────────────
@@ -797,8 +797,22 @@ function SkipperPicker({ counterUser, onSelect, selectedSkipper }) {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function AiCounterPage() {
-  // Backend is always MediaPipe — no picker needed
   const BACKEND_LABEL = 'MediaPipe BlazePose';
+
+  // ── Read selection passed from counter.js via URL params ─────────────────
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const paramDisciplineId = urlParams.get('disciplineId') || '';
+  const paramSessionType  = urlParams.get('sessionType')  || 'Training';
+  const paramMemberId     = urlParams.get('memberId')     || '';
+  const paramFirstName    = urlParams.get('firstName')    || '';
+  const paramLastName     = urlParams.get('lastName')     || '';
+  const paramRtdbUid      = urlParams.get('rtdbUid')      || '';
+  const paramClubId       = urlParams.get('clubId')       || '';
+
+  // Skipper passed from counter page — pre-filled, not editable on this page
+  const passedSkipper = paramMemberId
+    ? { memberId: paramMemberId, clubId: paramClubId, firstName: paramFirstName, lastName: paramLastName, rtdbUid: paramRtdbUid }
+    : null;
 
   const [backendLoading, setBackendLoading] = useState(false);
   const [backendError,   setBackendError]   = useState('');
@@ -818,11 +832,15 @@ export default function AiCounterPage() {
   const [finalSteps,     setFinalSteps]     = useState(0);
   const [finalMisses,    setFinalMisses]    = useState(0);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [disciplineId,   setDisciplineId]   = useState('');
-  const [sessionType,    setSessionType]    = useState('Training');
+
+  // disciplineId and sessionType come from URL params — not editable here
+  const disciplineId = paramDisciplineId;
+  const sessionType  = paramSessionType;
+
   const [trackedFoot,    setTrackedFoot]    = useState('left');
   const [counterUser,    setCounterUser]    = useState(null);
-  const [selSkipper,     setSelSkipper]     = useState(null);
+  // selSkipper is pre-filled from URL params; can still be overridden via the SkipperPicker
+  const [selSkipper,     setSelSkipper]     = useState(passedSkipper);
   const [saving,         setSaving]         = useState(false);
   const [savedOk,        setSavedOk]        = useState(false);
   const [detCfg,         setDetCfg]         = useState({ ...DEFAULT_CONFIG });
@@ -838,7 +856,10 @@ export default function AiCounterPage() {
   const beepModeRef      = useRef(false);
   const beepStateRef     = useRef('waiting_start');
 
-  // ── NEW: preview state — first frame of uploaded video shown before analysis ──
+  // ── Live BPM from skipper's RTDB node ────────────────────────────────────
+  const [liveBpm, setLiveBpm] = useState(0);
+
+  // ── Preview state ─────────────────────────────────────────────────────────
   const [videoPreviewReady, setVideoPreviewReady] = useState(false);
 
   const videoRef       = useRef(null);
@@ -855,7 +876,11 @@ export default function AiCounterPage() {
   const trackedRef     = useRef(trackedFoot);
   const overlayRef     = useRef(showOverlay);
   const mpPoseRef      = useRef(null);
-  const mpCamRef       = useRef(null);
+  const mpCamRef            = useRef(null);
+  // Refs to keep processAnkle (empty-deps callback) up-to-date without re-creating it
+  const stepsRef            = useRef(0);
+  const liveBpmRef          = useRef(0);
+  const syncStepsToRtdbRef  = useRef(null);
 
   useEffect(() => { trackedRef.current  = trackedFoot; }, [trackedFoot]);
   useEffect(() => { overlayRef.current  = showOverlay; }, [showOverlay]);
@@ -870,7 +895,42 @@ export default function AiCounterPage() {
     const uid = getCookie(); if (!uid) return;
     UserFactory.get(uid).then(s => { if (s.exists()) setCounterUser({ id: uid, ...s.data() }); });
   }, []);
-  useEffect(() => { if (disciplines.length > 0 && !disciplineId) setDisciplineId(disciplines[0].id); }, [disciplines]);
+
+  // ── Subscribe to skipper's live BPM from RTDB ────────────────────────────
+  useEffect(() => {
+    const rtdbUid = selSkipper?.rtdbUid || paramRtdbUid;
+    if (!rtdbUid) return;
+    const unsub = LiveSessionFactory.subscribeToLive(rtdbUid, data => {
+      if (data?.bpm) { setLiveBpm(data.bpm); liveBpmRef.current = data.bpm; }
+    });
+    return () => unsub();
+  }, [selSkipper?.rtdbUid, paramRtdbUid]);
+
+  // ── Sync AI step count to RTDB (mirrors manual counter) ──────────────────
+  const syncStepsToRtdb = useCallback((stepCount, bpm) => {
+    const rtdbUid = selSkipper?.rtdbUid || paramRtdbUid;
+    if (!rtdbUid || !disciplineId) return;
+    LiveSessionFactory.syncHeartbeat(rtdbUid, bpm || 0, 'online').catch(() => {});
+    const firstTap = stepCount === 1 ? Date.now() : null;
+    LiveSessionFactory.incrementSteps(rtdbUid, bpm || 0, firstTap).catch(() => {});
+  }, [selSkipper?.rtdbUid, paramRtdbUid, disciplineId]);
+
+  // Keep the ref current so processAnkle (empty deps) can always call latest version
+  useEffect(() => { syncStepsToRtdbRef.current = syncStepsToRtdb; }, [syncStepsToRtdb]);
+
+  // ── Init RTDB session slot when AI counting starts ────────────────────────
+  const initRtdbSession = useCallback(() => {
+    const rtdbUid = selSkipper?.rtdbUid || paramRtdbUid;
+    if (!rtdbUid || !disciplineId) return;
+    LiveSessionFactory.startCounter(rtdbUid, disciplineId, sessionType).catch(() => {});
+  }, [selSkipper?.rtdbUid, paramRtdbUid, disciplineId, sessionType]);
+
+  // ── Stop RTDB session when AI counting ends ───────────────────────────────
+  const stopRtdbSession = useCallback(() => {
+    const rtdbUid = selSkipper?.rtdbUid || paramRtdbUid;
+    if (!rtdbUid) return;
+    LiveSessionFactory.stopCounter(rtdbUid).catch(() => {});
+  }, [selSkipper?.rtdbUid, paramRtdbUid]);
 
   // ── Shared ankle processor ────────────────────────────────────────────────
   const processAnkle = useCallback((ankleY, ankleX, confidence, image) => {
@@ -911,9 +971,12 @@ export default function AiCounterPage() {
       setSignalHist([...signalBufRef.current]);
 
       if (ev === 'step') {
-        setSteps(detectorRef.current.steps);
         const stepNum = detectorRef.current.steps;
+        stepsRef.current = stepNum;
+        setSteps(stepNum);
         setStepTimestamps(prev => [...prev, { t: now, n: stepNum }]);
+        // Sync to RTDB via ref so this stable callback always calls the latest version
+        syncStepsToRtdbRef.current?.(stepNum, liveBpmRef.current);
       }
       if (ev === 'miss') {
         setMisses(detectorRef.current.misses); setShowMiss(true);
@@ -1004,18 +1067,21 @@ export default function AiCounterPage() {
   const startSession = useCallback(() => {
     detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
     kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
+    stepsRef.current = 0;
     setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false); setSavedOk(false);
     setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
     sessionStartTimeRef.current = Date.now();
     isRunRef.current = true; setIsRunning(true);
+    initRtdbSession();
     elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
-  }, [detCfg]);
+  }, [detCfg, initRtdbSession]);
 
   const stopSession = useCallback(() => {
     isRunRef.current = false; setIsRunning(false);
     clearInterval(elapsedRef.current); cancelAnimationFrame(frameRef.current);
     setFinalSteps(detectorRef.current.steps); setFinalMisses(detectorRef.current.misses); setSessionDone(true);
-  }, []);
+    stopRtdbSession();
+  }, [stopRtdbSession]);
 
   // ── Beep detection ─────────────────────────────────────────────────────────
   useEffect(() => { beepModeRef.current  = beepMode;  }, [beepMode]);
@@ -1037,10 +1103,12 @@ export default function AiCounterPage() {
           clearInterval(elapsedRef.current);
           detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
           kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
+          stepsRef.current = 0;
           setSteps(0); setMisses(0); setElapsed(0);
           setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
           sessionStartTimeRef.current = Date.now();
           isRunRef.current = true; setIsRunning(true);
+          initRtdbSession();
           elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
         } else if (state === 'counting') {
           beepStateRef.current = 'done';
@@ -1050,12 +1118,13 @@ export default function AiCounterPage() {
           setFinalSteps(detectorRef.current.steps);
           setFinalMisses(detectorRef.current.misses);
           setSessionDone(true);
+          stopRtdbSession();
         }
       });
     }
     beepDetectorRef.current.attachVideo(videoEl);
     beepDetectorRef.current.startPolling();
-  }, [detCfg]);
+  }, [detCfg, initRtdbSession, stopRtdbSession]);
 
   const destroyBeepDetector = useCallback(() => {
     if (beepDetectorRef.current) { beepDetectorRef.current.destroy(); beepDetectorRef.current = null; }
@@ -1241,7 +1310,8 @@ export default function AiCounterPage() {
   // ── Reset all ──────────────────────────────────────────────────────────────
   const resetAll = useCallback(() => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
-    isRunRef.current = false; stopCameraStream(); destroyBeepDetector();
+    isRunRef.current = false; stepsRef.current = 0; stopCameraStream(); destroyBeepDetector();
+    stopRtdbSession();
     if (uploadUrl) { URL.revokeObjectURL(uploadUrl); setUploadUrl(''); }
     setUploadFile(null); setMode('idle'); setIsRunning(false);
     setSessionDone(false); setSteps(0); setMisses(0); setElapsed(0);
@@ -1253,7 +1323,7 @@ export default function AiCounterPage() {
     setBeepsDetected(0);
     detectorRef.current.reset(); kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
     sessionStartTimeRef.current = null;
-  }, [uploadUrl, stopCameraStream]);
+  }, [uploadUrl, stopCameraStream, stopRtdbSession]);
 
   useEffect(() => () => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
@@ -1289,37 +1359,35 @@ export default function AiCounterPage() {
 
       <div style={s.body}>
 
-        {/* Config strip — always visible */}
-        <div style={s.configStrip}>
-          <div style={s.configGroup}>
-            <span style={s.configLabel}>Onderdeel</span>
-            <select style={s.configSelect} value={disciplineId} onChange={e => setDisciplineId(e.target.value)} disabled={isRunning}>
-              {disciplines.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-          </div>
-          <div style={s.configGroup}>
-            <span style={s.configLabel}>Type</span>
-            <div style={s.configToggle}>
-              {['Training', 'Wedstrijd'].map(t => (
-                <button key={t} onClick={() => !isRunning && setSessionType(t)} disabled={isRunning}
-                  style={{ ...s.configToggleBtn, backgroundColor: sessionType === t ? (t === 'Wedstrijd' ? '#ef4444' : '#3b82f6') : 'transparent', color: sessionType === t ? 'white' : '#64748b' }}>
-                  {t === 'Training' ? '🏋️' : '🏆'} {t}
-                </button>
-              ))}
+        {/* ── Skipper info bar — shown when skipper was passed from counter ── */}
+        {(selSkipper || passedSkipper) && (() => {
+          const sk = selSkipper || passedSkipper;
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '10px 14px', flexWrap: 'wrap' }}>
+              {/* Avatar */}
+              <div style={{ width: '34px', height: '34px', borderRadius: '50%', backgroundColor: '#3b82f622', border: '1px solid #3b82f644', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '700', color: '#60a5fa', flexShrink: 0 }}>
+                {(sk.firstName?.[0] || '?')}{(sk.lastName?.[0] || '')}
+              </div>
+              {/* Name + context */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '14px', fontWeight: '700', color: '#f1f5f9' }}>{sk.firstName} {sk.lastName}</div>
+                <div style={{ fontSize: '11px', color: '#64748b', display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '1px' }}>
+                  {disciplineId && getDisc && <span style={{ color: '#94a3b8' }}>{getDisc(disciplineId)?.name || disciplineId}</span>}
+                  {disciplineId && <span style={{ color: '#334155' }}>·</span>}
+                  <span style={{ padding: '1px 7px', borderRadius: '8px', fontSize: '10px', fontWeight: '700', backgroundColor: sessionType === 'Wedstrijd' ? '#ef444422' : '#3b82f622', color: sessionType === 'Wedstrijd' ? '#ef4444' : '#60a5fa', border: `1px solid ${sessionType === 'Wedstrijd' ? '#ef444440' : '#3b82f640'}` }}>{sessionType}</span>
+                </div>
+              </div>
+              {/* Live BPM */}
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontSize: '22px', fontWeight: '900', color: liveBpm > 0 ? '#ef4444' : '#334155', lineHeight: 1, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Heart size={14} color={liveBpm > 0 ? '#ef4444' : '#334155'} style={{ flexShrink: 0 }} />
+                  {liveBpm > 0 ? liveBpm : '--'}
+                </div>
+                <div style={{ fontSize: '9px', color: '#475569', fontWeight: '700', textTransform: 'uppercase' }}>BPM</div>
+              </div>
             </div>
-          </div>
-          <div style={s.configGroup}>
-            <span style={s.configLabel}>Voet</span>
-            <div style={s.configToggle}>
-              {[['left', 'Links'], ['right', 'Rechts']].map(([v, l]) => (
-                <button key={v} onClick={() => !isRunning && setTrackedFoot(v)} disabled={isRunning}
-                  style={{ ...s.configToggleBtn, backgroundColor: trackedFoot === v ? '#22c55e' : 'transparent', color: trackedFoot === v ? 'white' : '#64748b' }}>
-                  {l}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+          );
+        })()}
 
         {/* Video area */}
         <div style={s.videoWrap}>
@@ -1452,7 +1520,23 @@ export default function AiCounterPage() {
           {mode === 'camera' && isRunning && durationSec && <div style={s.progressBar}><div style={{ ...s.progressFill, width: `${progress * 100}%`, backgroundColor: progress > 0.8 ? '#ef4444' : '#3b82f6' }} /></div>}
         </div>
 
-        {/* ── Upload controls — shown below video when file is loaded ── */}
+        {/* ── Foot selector — always shown below video when not running/done ── */}
+        {!isRunning && !sessionDone && (mode === 'camera' || mode === 'upload' || mode === 'idle') && (
+          <div style={{ backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #334155', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '10px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', flexShrink: 0 }}>Voet volgen</span>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              {[['left', '👟 Links'], ['right', '👟 Rechts']].map(([v, l]) => (
+                <button key={v} onClick={() => setTrackedFoot(v)}
+                  style={{ padding: '6px 14px', borderRadius: '8px', border: `1.5px solid ${trackedFoot === v ? '#22c55e' : '#334155'}`, backgroundColor: trackedFoot === v ? '#22c55e22' : 'transparent', color: trackedFoot === v ? '#22c55e' : '#64748b', fontWeight: trackedFoot === v ? '700' : '500', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.12s' }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            <span style={{ fontSize: '10px', color: '#334155', marginLeft: 'auto' }}>
+              Kies de meest zichtbare enkel
+            </span>
+          </div>
+        )}
         {mode === 'upload' && !isRunning && !sessionDone && !codecError && videoPreviewReady && (
           <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
@@ -1529,14 +1613,14 @@ export default function AiCounterPage() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b', padding: '7px 12px' }}>
             <span style={{ fontSize: '9px', fontWeight: '700', color: '#334155', textTransform: 'uppercase', letterSpacing: '0.5px', marginRight: '2px' }}>Config</span>
             <span style={{ fontSize: '10px', color: '#3b82f6', backgroundColor: '#3b82f618', borderRadius: '5px', padding: '1px 7px', fontWeight: '700' }}>MediaPipe BlazePose</span>
-            <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>sensitiviteit {detCfg.peakMinProminence.toFixed(3)}</span>
-            <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>amplitude {detCfg.peakMinAmplitude?.toFixed(3) ?? '0.015'}</span>
-            <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>interval {detCfg.peakMinIntervalMs} ms</span>
-            <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>
+            <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>sens {detCfg.peakMinProminence.toFixed(3)}</span>
+            <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>ampl {detCfg.peakMinAmplitude?.toFixed(3) ?? '0.015'}</span>
+            <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>int {detCfg.peakMinIntervalMs} ms</span>
+            <span style={{ fontSize: '10px', color: '#22c55e', backgroundColor: '#22c55e18', borderRadius: '5px', padding: '1px 7px' }}>
               {trackedFoot === 'left' ? '👟 links' : '👟 rechts'}
             </span>
             {detCfg.kalmanEnabled && <span style={{ fontSize: '10px', color: '#3b82f6', backgroundColor: '#3b82f618', borderRadius: '5px', padding: '1px 7px' }}>kalman ✓</span>}
-            {beepMode && <span style={{ fontSize: '10px', color: '#f59e0b', backgroundColor: '#f59e0b18', borderRadius: '5px', padding: '1px 7px', display: 'flex', alignItems: 'center', gap: '3px' }}>🔔 beep-modus</span>}
+            {beepMode && <span style={{ fontSize: '10px', color: '#f59e0b', backgroundColor: '#f59e0b18', borderRadius: '5px', padding: '1px 7px', display: 'flex', alignItems: 'center', gap: '3px' }}>🔔 beep</span>}
           </div>
         )}
 
@@ -1582,12 +1666,28 @@ export default function AiCounterPage() {
               hasUploadVideo={!!uploadUrl && !!(uploadVideoRef.current)}
             />
 
-            <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #1e293b', padding: '12px 14px' }}>
-              <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Users size={11} /> Sla op bij skipper
+            {/* ── Save section ── */}
+            {passedSkipper ? (
+              /* Skipper was pre-filled from counter.js — show compact confirmation */
+              <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #22c55e33', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#22c55e22', border: '1px solid #22c55e44', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700', color: '#22c55e', flexShrink: 0 }}>
+                  {passedSkipper.firstName?.[0]}{passedSkipper.lastName?.[0]}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>{passedSkipper.firstName} {passedSkipper.lastName}</div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>Sessie wordt hier opgeslagen</div>
+                </div>
+                <CheckCircle2 size={14} color="#22c55e" />
               </div>
-              <SkipperPicker counterUser={counterUser} onSelect={setSelSkipper} selectedSkipper={selSkipper} />
-            </div>
+            ) : (
+              /* No skipper in URL — show the full picker */
+              <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #1e293b', padding: '12px 14px' }}>
+                <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Users size={11} /> Sla op bij skipper
+                </div>
+                <SkipperPicker counterUser={counterUser} onSelect={setSelSkipper} selectedSkipper={selSkipper} />
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: '10px' }}>
               {!savedOk ? (
@@ -1604,10 +1704,11 @@ export default function AiCounterPage() {
                 cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current);
                 if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
                 if (uploadVideoRef.current) { try { uploadVideoRef.current.pause(); uploadVideoRef.current.currentTime = 0; } catch (_) {} }
-                isRunRef.current = false; setIsRunning(false); setSessionDone(false);
+                isRunRef.current = false; stepsRef.current = 0; setIsRunning(false); setSessionDone(false);
                 setSteps(0); setMisses(0); setElapsed(0); setSavedOk(false); setUploadProgress(0);
                 setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
                 detectorRef.current.reset(); setMode('upload'); setVideoPreviewReady(false);
+                stopRtdbSession();
               }}>
                 <RefreshCw size={14} /> Opnieuw
               </button>
@@ -1669,12 +1770,6 @@ const s = {
   headerTitle:  { fontSize: '15px', fontWeight: '800', color: '#f1f5f9' },
   overlayToggle:{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center', minWidth: 28 },
   body:         { flex: 1, display: 'flex', flexDirection: 'column', maxWidth: '640px', width: '100%', margin: '0 auto', padding: '12px 12px 32px', gap: '12px' },
-  configStrip:  { display: 'flex', gap: '8px', flexWrap: 'wrap', backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '10px 12px' },
-  configGroup:  { display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: '120px' },
-  configLabel:  { fontSize: '9px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' },
-  configSelect: { backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '7px', color: 'white', fontSize: '12px', padding: '6px 8px', fontFamily: 'inherit', width: '100%' },
-  configToggle: { display: 'flex', gap: '4px' },
-  configToggleBtn: { flex: 1, padding: '5px 6px', borderRadius: '6px', border: '1px solid #334155', fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s', whiteSpace: 'nowrap' },
   videoWrap:    { position: 'relative', width: '100%', aspectRatio: '4/3', backgroundColor: '#0a0f1a', borderRadius: '16px', border: '1px solid #1e293b', overflow: 'hidden' },
   canvasLetterbox: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
   canvas:       { maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', display: 'block' },
