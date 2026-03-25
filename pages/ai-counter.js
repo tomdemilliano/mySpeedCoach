@@ -57,7 +57,11 @@ class AnkleKalmanFilter {
   }
   update(rawY, confidence, t, Q = 0.01) {
     if (this._x === null) { this._x = rawY; this._v = 0; this._lastT = t; return rawY; }
-    const dt = Math.min((t - this._lastT) / 33.0, 4.0);
+    // Use actual measured frame interval instead of assuming 30fps (33ms).
+    // On mobile the gap between processed frames may be 80-150ms — hardcoding 33 made dt balloon to 4x clamp constantly.
+    const rawDt = Math.min(t - this._lastT, 200); // ignore gaps > 200ms (app was backgrounded)
+    const dt = rawDt / 33.0;                       // normalise to 30fps baseline, no upper clamp needed
+    
     this._lastT = t;
     const xPred = this._x + this._v * dt;
     const vPred = this._v;
@@ -877,6 +881,8 @@ export default function AiCounterPage() {
   const overlayRef     = useRef(showOverlay);
   const mpPoseRef      = useRef(null);
   const mpCamRef            = useRef(null);
+  const offscreenRef        = useRef(null);  // downscale canvas for pose inference
+  const lastFrameTimeRef    = useRef(0);     // throttle: skip frames on slow devices
   // Refs to keep processAnkle (empty-deps callback) up-to-date without re-creating it
   const stepsRef            = useRef(0);
   const liveBpmRef          = useRef(0);
@@ -1036,7 +1042,18 @@ export default function AiCounterPage() {
         onFrame: async () => {
           if (!videoEl.videoWidth) return;
           canvas.width = videoEl.videoWidth; canvas.height = videoEl.videoHeight;
-          await pose.send({ image: videoEl });
+          
+          const now = performance.now();
+          if (now - lastFrameTimeRef.current < 80) return;
+          lastFrameTimeRef.current = now;
+          
+          if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
+          const scale = Math.min(1, 480 / videoEl.videoWidth);
+          offscreenRef.current.width  = Math.round(videoEl.videoWidth  * scale);
+          offscreenRef.current.height = Math.round(videoEl.videoHeight * scale);
+          offscreenRef.current.getContext('2d').drawImage(videoEl, 0, 0, offscreenRef.current.width, offscreenRef.current.height);
+          
+          await pose.send({ image: offscreenRef.current });
         },
         width: 640, height: 480, facingMode,
       });
@@ -1255,11 +1272,28 @@ export default function AiCounterPage() {
     };
 
     const pose = mpPoseRef.current;
+    const INFER_INTERVAL_MS = 80; // ~12fps max — enough for step detection, kind to mobile CPUs
     const loop = async () => {
       if (aborted) return;
       if (video.readyState >= 2 && video.videoWidth > 0 && !video.paused && !video.ended) {
         if (canvas.width !== video.videoWidth) { canvas.width = video.videoWidth; canvas.height = video.videoHeight; }
-        try { await pose.send({ image: video }); }
+        
+        const now = performance.now();
+        const elapsed = now - lastFrameTimeRef.current;
+        if (elapsed < INFER_INTERVAL_MS) {
+          frameRef.current = requestAnimationFrame(loop);
+          return;
+        }
+        lastFrameTimeRef.current = now;
+        
+        // Downscale to max 480px wide before sending to pose — landmark coords stay 0-1 normalised
+        if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
+        const scale = Math.min(1, 480 / video.videoWidth);
+        offscreenRef.current.width  = Math.round(video.videoWidth  * scale);
+        offscreenRef.current.height = Math.round(video.videoHeight * scale);
+        offscreenRef.current.getContext('2d').drawImage(video, 0, 0, offscreenRef.current.width, offscreenRef.current.height);
+        
+        try { await pose.send({ image: offscreenRef.current }); }
         catch (e) {
           console.warn('[AI Counter] MP error, recovering:', e?.message);
           try {
