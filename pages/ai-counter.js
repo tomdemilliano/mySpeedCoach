@@ -52,7 +52,6 @@ const AI_MODELS = {
     label:       'MediaPipe BlazePose Landmarker',
     sublabel:    'Snel op mobiel en desktop',
     recommended: 'both',
-    scripts: [MP_POSE, MP_CAMERA, MP_DRAWING],
   },
 };
 
