@@ -47,6 +47,40 @@ const DEFAULT_CONFIG = {
   exitFactor:        1.0,
 };
 
+// ─── AI Model registry ────────────────────────────────────────────────────────
+const AI_MODELS = {
+  blazepose: {
+    id:          'blazepose',
+    label:       'MediaPipe BlazePose',
+    sublabel:    'Best accuracy · slower on mobile',
+    recommended: 'desktop',
+    scripts: [MP_POSE, MP_CAMERA, MP_DRAWING],
+  },
+  movenet_lightning: {
+    id:          'movenet_lightning',
+    label:       'MoveNet Lightning',
+    sublabel:    'Fast · great for mobile',
+    recommended: 'mobile',
+    scripts: [
+      'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js',
+      'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js',
+    ],
+  },
+  movenet_thunder: {
+    id:          'movenet_thunder',
+    label:       'MoveNet Thunder',
+    sublabel:    'More accurate · moderate speed',
+    recommended: 'mobile',
+    scripts: [
+      'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js',
+      'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js',
+    ],
+  },
+};
+
+// MoveNet keypoint indices (17-point model)
+const MN_ANKLE = { left: 15, right: 16 };
+
 // ─── Ankle Kalman Filter ──────────────────────────────────────────────────────
 class AnkleKalmanFilter {
   constructor() { this.reset(); }
@@ -676,6 +710,50 @@ function DetectionTuningPanel({ config, onChange }) {
   );
 }
 
+//AI Model picker
+function ModelPicker({ selectedModel, onChange }) {
+  return (
+    <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ fontSize: '10px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+        AI-model
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+        {Object.values(AI_MODELS).map(m => {
+          const active = selectedModel === m.id;
+          return (
+            <button
+              key={m.id}
+              onClick={() => onChange(m.id)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '10px',
+                padding: '9px 12px', borderRadius: '10px', fontFamily: 'inherit', cursor: 'pointer',
+                border: `1.5px solid ${active ? '#3b82f6' : '#334155'}`,
+                backgroundColor: active ? '#3b82f622' : 'transparent',
+                textAlign: 'left', transition: 'all 0.12s',
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '13px', fontWeight: '700', color: active ? '#60a5fa' : '#94a3b8' }}>{m.label}</div>
+                <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>{m.sublabel}</div>
+              </div>
+              <div style={{
+                fontSize: '9px', fontWeight: '700', padding: '2px 7px', borderRadius: '6px',
+                backgroundColor: m.recommended === 'mobile' ? '#22c55e22' : '#3b82f622',
+                color:           m.recommended === 'mobile' ? '#22c55e'   : '#60a5fa',
+                border: `1px solid ${m.recommended === 'mobile' ? '#22c55e44' : '#3b82f644'}`,
+                whiteSpace: 'nowrap',
+              }}>
+                {m.recommended === 'mobile' ? '📱 mobiel' : '🖥 desktop'}
+              </div>
+              {active && <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#3b82f6', flexShrink: 0 }} />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Skipper Picker ────────────────────────────────────────────────────────────
 const lSt  = { fontSize: '10px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' };
 const cSt  = { padding: '5px 12px', borderRadius: '14px', border: '1px solid #334155', background: 'transparent', color: '#64748b', fontSize: '12px', fontWeight: '500', cursor: 'pointer', fontFamily: 'inherit' };
@@ -801,7 +879,7 @@ function SkipperPicker({ counterUser, onSelect, selectedSkipper }) {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function AiCounterPage() {
-  const BACKEND_LABEL = 'MediaPipe BlazePose';
+  const BACKEND_LABEL = AI_MODELS[selectedModel]?.label ?? 'Onbekend model';
 
   // ── Read selection passed from counter.js via URL params ─────────────────
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
@@ -812,6 +890,7 @@ export default function AiCounterPage() {
   const paramLastName     = urlParams.get('lastName')     || '';
   const paramRtdbUid      = urlParams.get('rtdbUid')      || '';
   const paramClubId       = urlParams.get('clubId')       || '';
+  
 
   // Skipper passed from counter page — pre-filled, not editable on this page
   const passedSkipper = paramMemberId
@@ -887,6 +966,14 @@ export default function AiCounterPage() {
   const stepsRef            = useRef(0);
   const liveBpmRef          = useRef(0);
   const syncStepsToRtdbRef  = useRef(null);
+
+  // AI Model picker
+  const [selectedModel,  setSelectedModel]  = useState('blazepose');
+  const selectedModelRef = useRef('blazepose');
+  const mnDetectorRef    = useRef(null);  // MoveNet detector instance
+
+  // Keep selectedModelRef in sync:
+  useEffect(() => { selectedModelRef.current = selectedModel; }, [selectedModel]);
 
   useEffect(() => { trackedRef.current  = trackedFoot; }, [trackedFoot]);
   useEffect(() => { overlayRef.current  = showOverlay; }, [showOverlay]);
@@ -997,6 +1084,70 @@ export default function AiCounterPage() {
     }
   }, []);
 
+	// ── MoveNet frame processor ───────────────────────────────────────────────────
+	const runMoveNetFrame = useCallback(async (imageSource, canvas) => {
+	const detector = mnDetectorRef.current;
+	if (!detector) return;
+	
+	// Downscale for inference
+	if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
+	const scale = Math.min(1, 480 / (imageSource.videoWidth || imageSource.width));
+	offscreenRef.current.width  = Math.round((imageSource.videoWidth  || imageSource.width)  * scale);
+	offscreenRef.current.height = Math.round((imageSource.videoHeight || imageSource.height) * scale);
+	offscreenRef.current.getContext('2d').drawImage(imageSource, 0, 0, offscreenRef.current.width, offscreenRef.current.height);
+	
+	let poses;
+	try { poses = await detector.estimatePoses(offscreenRef.current); }
+	catch (e) { console.warn('[MoveNet] estimatePoses failed:', e?.message); return; }
+	
+	if (!poses?.length) return;
+	const keypoints = poses[0].keypoints;
+	
+	// Draw full skeleton overlay if enabled
+	if (overlayRef.current) {
+		const ctx = canvas.getContext('2d');
+		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		// Draw keypoints
+		keypoints.forEach(kp => {
+		if ((kp.score ?? 0) < 0.3) return;
+		const x = kp.x * (canvas.width  / offscreenRef.current.width);
+		const y = kp.y * (canvas.height / offscreenRef.current.height);
+		ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+		ctx.fillStyle = '#00d4aa'; ctx.fill();
+		});
+		// Draw skeleton connections (MoveNet 17-point pairs)
+		const pairs = [[0,1],[0,2],[1,3],[2,4],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
+		const ctx2 = canvas.getContext('2d');
+		ctx2.strokeStyle = '#00d4aa'; ctx2.lineWidth = 2; ctx2.globalAlpha = 0.6;
+		pairs.forEach(([a, b]) => {
+		const kpA = keypoints[a], kpB = keypoints[b];
+		if ((kpA?.score ?? 0) < 0.3 || (kpB?.score ?? 0) < 0.3) return;
+		ctx2.beginPath();
+		ctx2.moveTo(kpA.x * (canvas.width / offscreenRef.current.width), kpA.y * (canvas.height / offscreenRef.current.height));
+		ctx2.lineTo(kpB.x * (canvas.width / offscreenRef.current.width), kpB.y * (canvas.height / offscreenRef.current.height));
+		ctx2.stroke();
+		});
+		ctx2.globalAlpha = 1;
+	}
+	
+	// Extract ankle — MoveNet keypoints are in pixel coords of the inference canvas
+	// normalise back to 0-1 range for processAnkle
+	const ankleIdx = trackedRef.current === 'left' ? MN_ANKLE.left : MN_ANKLE.right;
+	const ank = keypoints[ankleIdx];
+	if (!ank) return;
+	
+	const normX = ank.x / offscreenRef.current.width;
+	const normY = ank.y / offscreenRef.current.height;
+	const conf  = ank.score ?? 0;
+	
+	if (conf > 0.25) {
+		lastAnkleYRef.current = normY;
+		processAnkle(normY, normX, conf, null);
+	} else {
+		processAnkle(lastAnkleYRef.current, 0.5, 0, null);
+	}
+	}, [processAnkle]);
+  
   // ── MediaPipe results callback ─────────────────────────────────────────────
   const onMpResults = useCallback((results) => {
     const canvas = canvasRef.current; if (!canvas || canvas.width === 0) return;
@@ -1021,47 +1172,105 @@ export default function AiCounterPage() {
     }
   }, [processAnkle]);
 
-  // ── Init MediaPipe backend ─────────────────────────────────────────────────
-  const initBackend = useCallback(async (videoEl, isLive) => {
-    setBackendError(''); setBackendLoading(true);
-    try { await Promise.all([loadScript(MP_POSE), loadScript(MP_CAMERA), loadScript(MP_DRAWING)]); }
-    catch (e) { setBackendError(`MediaPipe laden mislukt: ${e.message}`); setBackendLoading(false); return false; }
-    setBackendLoading(false);
-
-    if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
-    if (!window.Pose) { setBackendError('MediaPipe niet beschikbaar.'); return false; }
-    const pose = new window.Pose({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${f}` });
-    pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, enableSegmentation: false, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-    pose.onResults(onMpResults);
-    mpPoseRef.current = pose;
-
-    if (isLive && window.Camera) {
-      if (mpCamRef.current) { try { mpCamRef.current.stop(); } catch (_) {} }
-      const canvas = canvasRef.current;
-      const cam = new window.Camera(videoEl, {
-        onFrame: async () => {
-          if (!videoEl.videoWidth) return;
-          canvas.width = videoEl.videoWidth; canvas.height = videoEl.videoHeight;
-          
-          const now = performance.now();
-          if (now - lastFrameTimeRef.current < 80) return;
-          lastFrameTimeRef.current = now;
-          
-          if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
-          const scale = Math.min(1, 480 / videoEl.videoWidth);
-          offscreenRef.current.width  = Math.round(videoEl.videoWidth  * scale);
-          offscreenRef.current.height = Math.round(videoEl.videoHeight * scale);
-          offscreenRef.current.getContext('2d').drawImage(videoEl, 0, 0, offscreenRef.current.width, offscreenRef.current.height);
-          
-          await pose.send({ image: offscreenRef.current });
-        },
-        width: 640, height: 480, facingMode,
-      });
-      await cam.start(); mpCamRef.current = cam;
-    }
-    return true;
-  }, [onMpResults, facingMode]);
-
+  // ── Init AI-model backend ─────────────────────────────────────────────────
+	const initBackend = useCallback(async (videoEl, isLive) => {
+	setBackendError(''); setBackendLoading(true);
+	const model = selectedModelRef.current;
+	const cfg   = AI_MODELS[model];
+	
+	// Load scripts
+	try { await Promise.all(cfg.scripts.map(loadScript)); }
+	catch (e) { setBackendError(`Model laden mislukt: ${e.message}`); setBackendLoading(false); return false; }
+	setBackendLoading(false);
+	
+	// ── BlazePose (existing path, unchanged) ──────────────────────────────────
+	if (model === 'blazepose') {
+		if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
+		if (!window.Pose) { setBackendError('MediaPipe niet beschikbaar.'); return false; }
+		const pose = new window.Pose({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${f}` });
+		pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, enableSegmentation: false, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+		pose.onResults(onMpResults);
+		mpPoseRef.current = pose;
+	
+		if (isLive && window.Camera) {
+		if (mpCamRef.current) { try { mpCamRef.current.stop(); } catch (_) {} }
+		const canvas = canvasRef.current;
+		const cam = new window.Camera(videoEl, {
+			onFrame: async () => {
+			if (!videoEl.videoWidth) return;
+			canvas.width = videoEl.videoWidth; canvas.height = videoEl.videoHeight;
+			const now = performance.now();
+			if (now - lastFrameTimeRef.current < 80) return;
+			lastFrameTimeRef.current = now;
+			if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
+			const scale = Math.min(1, 480 / videoEl.videoWidth);
+			offscreenRef.current.width  = Math.round(videoEl.videoWidth  * scale);
+			offscreenRef.current.height = Math.round(videoEl.videoHeight * scale);
+			offscreenRef.current.getContext('2d').drawImage(videoEl, 0, 0, offscreenRef.current.width, offscreenRef.current.height);
+			await pose.send({ image: offscreenRef.current });
+			},
+			width: 640, height: 480, facingMode,
+		});
+		await cam.start(); mpCamRef.current = cam;
+		}
+		return true;
+	}
+	
+	// ── MoveNet (Lightning or Thunder) ────────────────────────────────────────
+	if (model === 'movenet_lightning' || model === 'movenet_thunder') {
+		if (!window.poseDetection || !window.tf) { setBackendError('TensorFlow.js niet beschikbaar.'); return false; }
+	
+		// Destroy previous MoveNet detector if any
+		if (mnDetectorRef.current) { try { mnDetectorRef.current.dispose(); } catch (_) {} mnDetectorRef.current = null; }
+	
+		const modelType = model === 'movenet_lightning'
+		? window.poseDetection.SupportedModels.MoveNet
+		: window.poseDetection.SupportedModels.MoveNet;
+		const detectorConfig = {
+		modelType: model === 'movenet_lightning'
+			? window.poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
+			: window.poseDetection.movenet.modelType.SINGLEPOSE_THUNDER,
+		};
+	
+		try {
+		mnDetectorRef.current = await window.poseDetection.createDetector(modelType, detectorConfig);
+		} catch (e) {
+		setBackendError(`MoveNet laden mislukt: ${e.message}`); return false;
+		}
+	
+		if (isLive) {
+		// For live camera with MoveNet we manage getUserMedia ourselves
+		// (no MediaPipe Camera helper needed)
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({
+			video: { facingMode, width: { ideal: 640 }, height: { ideal: 480 } },
+			});
+			videoEl.srcObject = stream;
+			await videoEl.play();
+		} catch (e) {
+			setBackendError(`Camera toegang mislukt: ${e.message}`); return false;
+		}
+	
+		const canvas = canvasRef.current;
+		const runLoop = async () => {
+			if (!isRunRef.current && !videoEl.srcObject) return; // stopped
+			if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+			canvas.width = videoEl.videoWidth; canvas.height = videoEl.videoHeight;
+			const now = performance.now();
+			if (now - lastFrameTimeRef.current >= 80) {
+				lastFrameTimeRef.current = now;
+				await runMoveNetFrame(videoEl, canvas);
+			}
+			}
+			frameRef.current = requestAnimationFrame(runLoop);
+		};
+		frameRef.current = requestAnimationFrame(runLoop);
+		}
+		return true;
+	}
+	
+	setBackendError('Onbekend model.'); return false;
+	}, [onMpResults, facingMode]);
   // ── Camera start ───────────────────────────────────────────────────────────
   const startCamera = useCallback(async () => {
     const video = videoRef.current; if (!video) return;
@@ -1293,7 +1502,21 @@ export default function AiCounterPage() {
         offscreenRef.current.height = Math.round(video.videoHeight * scale);
         offscreenRef.current.getContext('2d').drawImage(video, 0, 0, offscreenRef.current.width, offscreenRef.current.height);
         
-        try { await pose.send({ image: offscreenRef.current }); }
+        // Update the video upload loop
+        if (selectedModelRef.current === 'blazepose') {
+          try { await pose.send({ image: offscreenRef.current }); }
+          catch (e) {
+            console.warn('[AI Counter] MP error, recovering:', e?.message);
+            try {
+              mpPoseRef.current.close();
+              const np = new window.Pose({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${f}` });
+              np.setOptions({ modelComplexity: 1, smoothLandmarks: true, enableSegmentation: false, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+              np.onResults(onMpResults); mpPoseRef.current = np;
+            } catch { finish(); return; }
+          }
+        } else {
+          await runMoveNetFrame(video, canvas);
+        }
         catch (e) {
           console.warn('[AI Counter] MP error, recovering:', e?.message);
           try {
@@ -1345,6 +1568,7 @@ export default function AiCounterPage() {
   const resetAll = useCallback(() => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
     isRunRef.current = false; stepsRef.current = 0; stopCameraStream(); destroyBeepDetector();
+    if (mnDetectorRef.current) { try { mnDetectorRef.current.dispose(); } catch (_) {} mnDetectorRef.current = null; }
     stopRtdbSession();
     if (uploadUrl) { URL.revokeObjectURL(uploadUrl); setUploadUrl(''); }
     setUploadFile(null); setMode('idle'); setIsRunning(false);
@@ -1362,6 +1586,7 @@ export default function AiCounterPage() {
   useEffect(() => () => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
     stopCameraStream(); destroyBeepDetector(); if (uploadUrl) URL.revokeObjectURL(uploadUrl);
+    if (mnDetectorRef.current) { try { mnDetectorRef.current.dispose(); } catch (_) {} }
   }, []); // eslint-disable-line
 
   const currentDisc = getDisc(disciplineId);
@@ -1656,6 +1881,20 @@ export default function AiCounterPage() {
             {detCfg.kalmanEnabled && <span style={{ fontSize: '10px', color: '#3b82f6', backgroundColor: '#3b82f618', borderRadius: '5px', padding: '1px 7px' }}>kalman ✓</span>}
             {beepMode && <span style={{ fontSize: '10px', color: '#f59e0b', backgroundColor: '#f59e0b18', borderRadius: '5px', padding: '1px 7px', display: 'flex', alignItems: 'center', gap: '3px' }}>🔔 beep</span>}
           </div>
+        )}
+
+         {/* Model detection selector */}
+        {showSettingsPanels && (
+          <>
+            <ModelPicker
+              selectedModel={selectedModel}
+              onChange={v => { setSelectedModel(v); selectedModelRef.current = v; }}
+            />
+            <DetectionTuningPanel
+              config={detCfg}
+              onChange={p => setDetCfg(prev => ({ ...prev, ...p }))}
+            />
+          </>
         )}
 
         {/* Detection tuning only (no backend selector) */}
