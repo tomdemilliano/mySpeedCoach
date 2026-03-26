@@ -684,50 +684,6 @@ function DetectionTuningPanel({ config, onChange }) {
   );
 }
 
-//AI Model picker
-function ModelPicker({ selectedModel, onChange }) {
-  return (
-    <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      <div style={{ fontSize: '10px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        AI-model
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
-        {Object.values(AI_MODELS).map(m => {
-          const active = selectedModel === m.id;
-          return (
-            <button
-              key={m.id}
-              onClick={() => onChange(m.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '10px',
-                padding: '9px 12px', borderRadius: '10px', fontFamily: 'inherit', cursor: 'pointer',
-                border: `1.5px solid ${active ? '#3b82f6' : '#334155'}`,
-                backgroundColor: active ? '#3b82f622' : 'transparent',
-                textAlign: 'left', transition: 'all 0.12s',
-              }}
-            >
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '13px', fontWeight: '700', color: active ? '#60a5fa' : '#94a3b8' }}>{m.label}</div>
-                <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>{m.sublabel}</div>
-              </div>
-              <div style={{
-                fontSize: '9px', fontWeight: '700', padding: '2px 7px', borderRadius: '6px',
-                backgroundColor: m.recommended === 'mobile' ? '#22c55e22' : '#3b82f622',
-                color:           m.recommended === 'mobile' ? '#22c55e'   : '#60a5fa',
-                border: `1px solid ${m.recommended === 'mobile' ? '#22c55e44' : '#3b82f644'}`,
-                whiteSpace: 'nowrap',
-              }}>
-                {m.recommended === 'mobile' ? '📱 mobiel' : '🖥 desktop'}
-              </div>
-              {active && <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#3b82f6', flexShrink: 0 }} />}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ─── Skipper Picker ────────────────────────────────────────────────────────────
 const lSt  = { fontSize: '10px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' };
 const cSt  = { padding: '5px 12px', borderRadius: '14px', border: '1px solid #334155', background: 'transparent', color: '#64748b', fontSize: '12px', fontWeight: '500', cursor: 'pointer', fontFamily: 'inherit' };
@@ -1451,7 +1407,7 @@ export default function AiCounterPage() {
         countedBy:     counterUser?.id   || null,
         countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName} (AI)` : 'AI',
         countingMethod: 'AI',
-        aiConfig: { backend: selectedModelRef.current, backendLabel: 'MediaPipe Pose Landmarker', ...detCfg, trackedFoot },
+        aiConfig: { backend: 'tasks-vision', backendLabel: 'MediaPipe Pose Landmarker', ...detCfg, trackedFoot },
       });
       setSavedOk(true);
     } catch (e) { console.error(e); alert('Opslaan mislukt.'); }
@@ -1776,18 +1732,12 @@ export default function AiCounterPage() {
         )}
 
          {/* Model detection selector */}
-        {showSettingsPanels && (
-          <>
-            <ModelPicker
-              selectedModel={selectedModel}
-              onChange={v => { setSelectedModel(v); selectedModelRef.current = v; }}
-            />
-            <DetectionTuningPanel
-              config={detCfg}
-              onChange={p => setDetCfg(prev => ({ ...prev, ...p }))}
-            />
-          </>
-        )}
+		{showSettingsPanels && (
+		  <DetectionTuningPanel
+		    config={detCfg}
+  		  onChange={p => setDetCfg(prev => ({ ...prev, ...p }))}
+		  />
+		)}
 
         {/* Results */}
         {sessionDone && (
