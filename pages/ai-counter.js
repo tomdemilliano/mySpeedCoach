@@ -1071,16 +1071,22 @@ export default function AiCounterPage() {
       }
     
       try {
-        // Load the UMD bundle — sets window.MPTasksVision (or window.PoseLandmarker etc.)
+        // Load the CJS bundle — this one works as a plain script tag and sets window globals
         await loadScript(
-          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js'
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.cjs'
         );
     
-        // tasks-vision UMD exposes everything on window directly
-        const { PoseLandmarker, FilesetResolver } = window;
+        // The CJS build exports via the 'vision' global
+        const mpVision = window.vision ?? window;
+        const { PoseLandmarker, FilesetResolver } = mpVision;
     
         if (!PoseLandmarker || !FilesetResolver) {
-          throw new Error('PoseLandmarker of FilesetResolver niet gevonden op window na laden script.');
+          // Fallback: some builds put them directly on window
+          throw new Error(
+            `PoseLandmarker niet gevonden. Beschikbare window-keys: ${
+              Object.keys(window).filter(k => k.toLowerCase().includes('pose') || k.toLowerCase().includes('mediapipe') || k.toLowerCase().includes('vision')).join(', ') || '(geen)'
+            }`
+          );
         }
     
         const filesetResolver = await FilesetResolver.forVisionTasks(MP_TASKS_VISION_URL);
