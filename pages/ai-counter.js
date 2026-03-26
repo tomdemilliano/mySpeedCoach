@@ -1071,22 +1071,15 @@ export default function AiCounterPage() {
       }
     
       try {
-        // Load the CJS bundle — this one works as a plain script tag and sets window globals
-        await loadScript(
-          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.cjs'
-        );
+        // Use Function() to prevent Next.js bundler from trying to resolve this import at build time
+        const mpUrl = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm';
+        const vision = await Function('u', 'return import(u)')(mpUrl);
     
-        // The CJS build exports via the 'vision' global
-        const mpVision = window.vision ?? window;
-        const { PoseLandmarker, FilesetResolver } = mpVision;
+        const PoseLandmarker  = vision.PoseLandmarker  ?? vision.default?.PoseLandmarker;
+        const FilesetResolver = vision.FilesetResolver ?? vision.default?.FilesetResolver;
     
         if (!PoseLandmarker || !FilesetResolver) {
-          // Fallback: some builds put them directly on window
-          throw new Error(
-            `PoseLandmarker niet gevonden. Beschikbare window-keys: ${
-              Object.keys(window).filter(k => k.toLowerCase().includes('pose') || k.toLowerCase().includes('mediapipe') || k.toLowerCase().includes('vision')).join(', ') || '(geen)'
-            }`
-          );
+          throw new Error('PoseLandmarker of FilesetResolver niet gevonden in module. Keys: ' + Object.keys(vision).join(', '));
         }
     
         const filesetResolver = await FilesetResolver.forVisionTasks(MP_TASKS_VISION_URL);
