@@ -1516,7 +1516,7 @@ export default function AiCounterPage() {
           }
         } else {
           await runMoveNetFrame(video, canvas);
-        }
+        };
         catch (e) {
           console.warn('[AI Counter] MP error, recovering:', e?.message);
           try {
