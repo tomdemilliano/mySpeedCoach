@@ -1061,7 +1061,6 @@ export default function AiCounterPage() {
     const initBackend = useCallback(async (videoEl, isLive) => {
       setBackendError(''); setBackendLoading(true);
     
-      // Tear down any previous instance
       if (mpPoseRef.current) {
         try { mpPoseRef.current.close(); } catch (_) {}
         mpPoseRef.current = null;
@@ -1072,31 +1071,37 @@ export default function AiCounterPage() {
       }
     
       try {
-        // Dynamic ESM import — works cleanly with Next.js, no global script tags
-        const vision = await import(
-          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm'
+        // Load the UMD bundle — sets window.MPTasksVision (or window.PoseLandmarker etc.)
+        await loadScript(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js'
         );
-        const { PoseLandmarker, FilesetResolver, DrawingUtils } = vision;
+    
+        // tasks-vision UMD exposes everything on window directly
+        const { PoseLandmarker, FilesetResolver } = window;
+    
+        if (!PoseLandmarker || !FilesetResolver) {
+          throw new Error('PoseLandmarker of FilesetResolver niet gevonden op window na laden script.');
+        }
     
         const filesetResolver = await FilesetResolver.forVisionTasks(MP_TASKS_VISION_URL);
     
         const poseLandmarker = await PoseLandmarker.createFromOptions(filesetResolver, {
           baseOptions: {
-            modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+            modelAssetPath:
+              'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
             delegate: 'GPU',
           },
-          runningMode:        isLive ? 'VIDEO' : 'VIDEO',
-          numPoses:           1,
+          runningMode: 'VIDEO',
+          numPoses: 1,
           minPoseDetectionConfidence: 0.5,
-          minPosePresenceConfidence:  0.5,
-          minTrackingConfidence:      0.5,
+          minPosePresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
         });
     
         mpPoseRef.current = poseLandmarker;
         setBackendLoading(false);
     
         if (isLive) {
-          // Get camera stream ourselves
           try {
             const stream = await navigator.mediaDevices.getUserMedia({
               video: { facingMode, width: { ideal: 640 }, height: { ideal: 480 } },
@@ -1114,9 +1119,8 @@ export default function AiCounterPage() {
               canvas.width  = videoEl.videoWidth;
               canvas.height = videoEl.videoHeight;
               const now = performance.now();
-              if (now - lastFrameTimeRef.current >= 33) { // up to 30fps
+              if (now - lastFrameTimeRef.current >= 33) {
                 lastFrameTimeRef.current = now;
-                // tasks-vision VIDEO mode takes a timestamp in ms
                 const results = poseLandmarker.detectForVideo(videoEl, now);
                 onMpResults(results, now);
               }
