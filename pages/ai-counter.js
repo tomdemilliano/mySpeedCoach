@@ -1888,14 +1888,6 @@ export default function AiCounterPage() {
           </>
         )}
 
-        {/* Detection tuning only (no backend selector) */}
-        {showSettingsPanels && (
-          <DetectionTuningPanel
-            config={detCfg}
-            onChange={p => setDetCfg(prev => ({ ...prev, ...p }))}
-          />
-        )}
-
         {/* Results */}
         {sessionDone && (
           <div style={s.resultsPanel}>
