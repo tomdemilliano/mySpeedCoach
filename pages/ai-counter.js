@@ -973,6 +973,7 @@ export default function AiCounterPage() {
   const [selectedModel,  setSelectedModel]  = useState('blazepose');
   const selectedModelRef = useRef('blazepose');
   const mnDetectorRef    = useRef(null);  // MoveNet detector instance
+  const mnBusyRef = useRef(false);
 
   // Keep selectedModelRef in sync:
   useEffect(() => { selectedModelRef.current = selectedModel; }, [selectedModel]);
@@ -1087,74 +1088,90 @@ export default function AiCounterPage() {
   }, []);
 
 	// ── MoveNet frame processor ───────────────────────────────────────────────────
-	const runMoveNetFrame = useCallback(async (imageSource, canvas) => {
-	const detector = mnDetectorRef.current;
-	if (!detector) return;
+	
+	const runMoveNetFrame = useCallback(async (imageSource, canvas) => {	
+		if (mnBusyRef.current) return; 
+  		mnBusyRef.current = true;       
+		const detector = mnDetectorRef.current;
+		if (!detector) { mnBusyRef.current = false; return; }
 	
 	// Downscale for inference
-	if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
-	const scale = Math.min(1, 480 / (imageSource.videoWidth || imageSource.width));
-	offscreenRef.current.width  = Math.round((imageSource.videoWidth  || imageSource.width)  * scale);
-	offscreenRef.current.height = Math.round((imageSource.videoHeight || imageSource.height) * scale);
-	offscreenRef.current.getContext('2d').drawImage(imageSource, 0, 0, offscreenRef.current.width, offscreenRef.current.height);
 	
-	let poses;
-	try { poses = await detector.estimatePoses(offscreenRef.current); }
-	catch (e) { console.warn('[MoveNet] estimatePoses failed:', e?.message); return; }
-	
-	if (!poses?.length) return;
-	const keypoints = poses[0].keypoints;
-	
-	// Draw full skeleton overlay if enabled
-	if (overlayRef.current) {
-		const ctx = canvas.getContext('2d');
-		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
+		const srcW = imageSource.videoWidth || imageSource.width;
+		const srcH = imageSource.videoHeight || imageSource.height;
+		const scale = Math.min(1, 480 / srcW);
+		const targetW = Math.round(srcW * scale);
+		const targetH = Math.round(srcH * scale);
+		if (offscreenRef.current.width !== targetW || offscreenRef.current.height !== targetH) {
+			offscreenRef.current.width  = targetW;
+			offscreenRef.current.height = targetH;
+		}
+		offscreenRef.current.getContext('2d').drawImage(imageSource, 0, 0, offscreenRef.current.width, offscreenRef.current.height);
+		
+		let poses;
+		try { poses = await detector.estimatePoses(offscreenRef.current); }
+		catch (e) { 
+			console.warn('[MoveNet] estimatePoses failed:', e?.message); 
+			mnBusyRef.current = false;	
+			return; 
+		}
+		
+		if (!poses?.length) return;
+		const keypoints = poses[0].keypoints;
+		
+		// Draw full skeleton overlay if enabled
+		
+		if (overlayRef.current) {
+			const ctx = canvas.getContext('2d');
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
+			
+			// show video always
+			ctx.drawImage(imageSource, 0, 0, canvas.width, canvas.height);
+			// Draw keypoints
+			keypoints.forEach(kp => {
+				if ((kp.score ?? 0) < 0.3) return;
+				const x = kp.x * (canvas.width  / offscreenRef.current.width);
+				const y = kp.y * (canvas.height / offscreenRef.current.height);
+				ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+				ctx.fillStyle = '#00d4aa'; ctx.fill();
+			});
+			// Draw skeleton connections (MoveNet 17-point pairs)
+			const pairs = [[0,1],[0,2],[1,3],[2,4],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
+			const ctx2 = canvas.getContext('2d');
+			ctx2.strokeStyle = '#00d4aa'; ctx2.lineWidth = 2; ctx2.globalAlpha = 0.6;
+			pairs.forEach(([a, b]) => {
+				const kpA = keypoints[a], kpB = keypoints[b];
+				if ((kpA?.score ?? 0) < 0.3 || (kpB?.score ?? 0) < 0.3) return;
+				ctx2.beginPath();
+				ctx2.moveTo(kpA.x * (canvas.width / offscreenRef.current.width), kpA.y * (canvas.height / offscreenRef.current.height));
+				ctx2.lineTo(kpB.x * (canvas.width / offscreenRef.current.width), kpB.y * (canvas.height / offscreenRef.current.height));
+				ctx2.stroke();
+			});
+			ctx2.globalAlpha = 1;
+		}
+		
+		// Extract ankle — MoveNet keypoints are in pixel coords of the inference canvas
+		// normalise back to 0-1 range for processAnkle
+		const ankleIdx = trackedRef.current === 'left' ? MN_ANKLE.left : MN_ANKLE.right;
+		const ank = keypoints[ankleIdx];
+		if (!ank) return;
+		const normX = ank.x / offscreenRef.current.width;
+		const normY = ank.y / offscreenRef.current.height;
+		const conf  = ank.score ?? 0;
+		
+		if (conf > 0.25) {
+			lastAnkleYRef.current = normY;
+			processAnkle(normY, normX, conf, null);
+		} else {
+			processAnkle(lastAnkleYRef.current, 0.5, 0, null);
+		}
 
-		// show video always
-		ctx.drawImage(imageSource, 0, 0, canvas.width, canvas.height);
-		// Draw keypoints
-		keypoints.forEach(kp => {
-		if ((kp.score ?? 0) < 0.3) return;
-		const x = kp.x * (canvas.width  / offscreenRef.current.width);
-		const y = kp.y * (canvas.height / offscreenRef.current.height);
-		ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
-		ctx.fillStyle = '#00d4aa'; ctx.fill();
-		});
-		// Draw skeleton connections (MoveNet 17-point pairs)
-		const pairs = [[0,1],[0,2],[1,3],[2,4],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
-		const ctx2 = canvas.getContext('2d');
-		ctx2.strokeStyle = '#00d4aa'; ctx2.lineWidth = 2; ctx2.globalAlpha = 0.6;
-		pairs.forEach(([a, b]) => {
-		const kpA = keypoints[a], kpB = keypoints[b];
-		if ((kpA?.score ?? 0) < 0.3 || (kpB?.score ?? 0) < 0.3) return;
-		ctx2.beginPath();
-		ctx2.moveTo(kpA.x * (canvas.width / offscreenRef.current.width), kpA.y * (canvas.height / offscreenRef.current.height));
-		ctx2.lineTo(kpB.x * (canvas.width / offscreenRef.current.width), kpB.y * (canvas.height / offscreenRef.current.height));
-		ctx2.stroke();
-		});
-		ctx2.globalAlpha = 1;
-	}
-	
-	// Extract ankle — MoveNet keypoints are in pixel coords of the inference canvas
-	// normalise back to 0-1 range for processAnkle
-	const ankleIdx = trackedRef.current === 'left' ? MN_ANKLE.left : MN_ANKLE.right;
-	const ank = keypoints[ankleIdx];
-	if (!ank) return;
-	
-	const normX = ank.x / offscreenRef.current.width;
-	const normY = ank.y / offscreenRef.current.height;
-	const conf  = ank.score ?? 0;
-	
-	if (conf > 0.25) {
-		lastAnkleYRef.current = normY;
-		processAnkle(normY, normX, conf, null);
-	} else {
-		processAnkle(lastAnkleYRef.current, 0.5, 0, null);
-	}
+		mnBusyRef.current = false;		
 	}, [processAnkle]);
   
   // ── MediaPipe results callback ─────────────────────────────────────────────
-  const onMpResults = useCallback((results) => {
+	const onMpResults = useCallback((results) => {
     const canvas = canvasRef.current; if (!canvas || canvas.width === 0) return;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1242,7 +1259,10 @@ export default function AiCounterPage() {
 			? window.poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
 			: window.poseDetection.movenet.modelType.SINGLEPOSE_THUNDER,
 		};
-	
+
+		await window.tf.setBackend('webgl');
+		await window.tf.ready();
+		
 		try {
 		mnDetectorRef.current = await window.poseDetection.createDetector(modelType, detectorConfig);
 		} catch (e) {
@@ -1492,7 +1512,7 @@ export default function AiCounterPage() {
     };
 
     const pose = mpPoseRef.current;
-    const INFER_INTERVAL_MS = selectedModelRef.current === 'blazepose' ? 0 : 80;
+    const INFER_INTERVAL_MS = selectedModelRef.current === 'blazepose' ? 0 : 120;
     const loop = async () => {
       if (aborted) return;
       if (video.readyState >= 2 && video.videoWidth > 0 && !video.paused && !video.ended) {
