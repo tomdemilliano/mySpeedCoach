@@ -1181,7 +1181,13 @@ export default function AiCounterPage() {
 	const cfg   = AI_MODELS[model];
 	
 	// Load scripts
-	try { for (const src of cfg.scripts) { await loadScript(src); } }
+	try {
+		if (model === 'blazepose') {
+			await Promise.all(cfg.scripts.map(loadScript));
+		} else {
+			for (const src of cfg.scripts) { await loadScript(src); }
+		}
+	}
 	catch (e) { setBackendError(`Model laden mislukt: ${e.message}`); setBackendLoading(false); return false; }
 	setBackendLoading(false);
 	
@@ -1202,7 +1208,7 @@ export default function AiCounterPage() {
 			if (!videoEl.videoWidth) return;
 			canvas.width = videoEl.videoWidth; canvas.height = videoEl.videoHeight;
 			const now = performance.now();
-			if (now - lastFrameTimeRef.current < 80) return;
+			if (now - lastFrameTimeRef.current < (selectedModelRef.current === 'blazepose' ? 0 : 80)) return;
 			lastFrameTimeRef.current = now;
 			if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
 			const scale = Math.min(1, 480 / videoEl.videoWidth);
@@ -1483,7 +1489,7 @@ export default function AiCounterPage() {
     };
 
     const pose = mpPoseRef.current;
-    const INFER_INTERVAL_MS = 80; // ~12fps max — enough for step detection, kind to mobile CPUs
+    const INFER_INTERVAL_MS = selectedModelRef.current === 'blazepose' ? 0 : 80;
     const loop = async () => {
       if (aborted) return;
       if (video.readyState >= 2 && video.videoWidth > 0 && !video.paused && !video.ended) {
