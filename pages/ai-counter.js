@@ -62,8 +62,10 @@ const AI_MODELS = {
     sublabel:    'Fast · great for mobile',
     recommended: 'mobile',
     scripts: [
-      'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js',
-      'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js',
+		'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.17.0/dist/tf-core.min.js',
+		'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.17.0/dist/tf-backend-webgl.min.js',
+		'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.17.0/dist/tf-converter.min.js',
+		'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js',
     ],
   },
   movenet_thunder: {
@@ -72,8 +74,10 @@ const AI_MODELS = {
     sublabel:    'More accurate · moderate speed',
     recommended: 'mobile',
     scripts: [
-      'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js',
-      'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js',
+		'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.17.0/dist/tf-core.min.js',
+		'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.17.0/dist/tf-backend-webgl.min.js',
+		'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.17.0/dist/tf-converter.min.js',
+		'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js',models/pose-detection@2.1.3/dist/pose-detection.min.js',
     ],
   },
 };
@@ -1177,7 +1181,7 @@ export default function AiCounterPage() {
 	const cfg   = AI_MODELS[model];
 	
 	// Load scripts
-	try { await Promise.all(cfg.scripts.map(loadScript)); }
+	try { for (const src of cfg.scripts) { await loadScript(src); } }
 	catch (e) { setBackendError(`Model laden mislukt: ${e.message}`); setBackendLoading(false); return false; }
 	setBackendLoading(false);
 	
