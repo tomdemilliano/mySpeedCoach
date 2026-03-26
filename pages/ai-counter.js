@@ -1516,15 +1516,6 @@ export default function AiCounterPage() {
           }
         } else {
           await runMoveNetFrame(video, canvas);
-        };
-        catch (e) {
-          console.warn('[AI Counter] MP error, recovering:', e?.message);
-          try {
-            mpPoseRef.current.close();
-            const np = new window.Pose({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${f}` });
-            np.setOptions({ modelComplexity: 1, smoothLandmarks: true, enableSegmentation: false, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-            np.onResults(onMpResults); mpPoseRef.current = np;
-          } catch { finish(); return; }
         }
       }
       if (video.ended) { finish(); return; }
