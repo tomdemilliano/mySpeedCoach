@@ -1109,6 +1109,9 @@ export default function AiCounterPage() {
 	if (overlayRef.current) {
 		const ctx = canvas.getContext('2d');
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+		// show video always
+		ctx.drawImage(imageSource, 0, 0, canvas.width, canvas.height);
 		// Draw keypoints
 		keypoints.forEach(kp => {
 		if ((kp.score ?? 0) < 0.3) return;
