@@ -1010,7 +1010,6 @@ export default function AiCounterPage() {
       const canvas = canvasRef.current;
       if (!canvas || canvas.width === 0) return;
       const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
     
       if (!results.landmarks?.[0]) return;
       const lms = results.landmarks[0];
@@ -1112,20 +1111,23 @@ export default function AiCounterPage() {
           }
     
           const canvas = canvasRef.current;
-          const runLoop = () => {
-            if (!videoEl.srcObject) return;
-            if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
-              canvas.width  = videoEl.videoWidth;
-              canvas.height = videoEl.videoHeight;
-              const now = performance.now();
-              if (now - lastFrameTimeRef.current >= 33) {
-                lastFrameTimeRef.current = now;
-                const results = poseLandmarker.detectForVideo(videoEl, now);
-                onMpResults(results, now);
-              }
-            }
-            frameRef.current = requestAnimationFrame(runLoop);
-          };
+			const runLoop = () => {
+				if (!videoEl.srcObject) return;
+				if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+					canvas.width  = videoEl.videoWidth;
+					canvas.height = videoEl.videoHeight;
+					const now = performance.now();
+					if (now - lastFrameTimeRef.current >= 33) {
+						lastFrameTimeRef.current = now;
+						// Draw the video frame first, then overlay the skeleton
+						const ctx = canvas.getContext('2d');
+						ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height)
+						const results = poseLandmarker.detectForVideo(videoEl, now);
+						onMpResults(results, now);
+					}
+				}
+				frameRef.current = requestAnimationFrame(runLoop);
+			};
           frameRef.current = requestAnimationFrame(runLoop);
         }
     
@@ -1348,42 +1350,44 @@ export default function AiCounterPage() {
 
     const pose = mpPoseRef.current;
     const INFER_INTERVAL_MS = 0;
-    const loop = async () => {
-      if (aborted) return;
-      if (video.readyState >= 2 && video.videoWidth > 0 && !video.paused && !video.ended) {
-        if (canvas.width !== video.videoWidth) { canvas.width = video.videoWidth; canvas.height = video.videoHeight; }
-        
-        const now = performance.now();
-        const elapsed = now - lastFrameTimeRef.current;
-        if (elapsed < INFER_INTERVAL_MS) {
-          frameRef.current = requestAnimationFrame(loop);
-          return;
-        }
-        lastFrameTimeRef.current = now;
-        
-        // Downscale to max 480px wide before sending to pose — landmark coords stay 0-1 normalised
-        if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
-        const scale = Math.min(1, 480 / video.videoWidth);
-        offscreenRef.current.width  = Math.round(video.videoWidth  * scale);
-        offscreenRef.current.height = Math.round(video.videoHeight * scale);
-        offscreenRef.current.getContext('2d').drawImage(video, 0, 0, offscreenRef.current.width, offscreenRef.current.height);
-        
-        // Update the video upload loop
-		  const poseLandmarker = mpPoseRef.current;
-		  if (!poseLandmarker) { finish(); return; }
-		  try {
-			  const now = performance.now();
-			  const results = poseLandmarker.detectForVideo(offscreenRef.current, now);
-			  onMpResults(results, now);
-		  } catch (e) {
-			  console.warn('[AI Counter] detectForVideo error:', e?.message);
-			  finish(); return;
-		  }
-	  }
-      if (video.ended) { finish(); return; }
-      frameRef.current = requestAnimationFrame(loop);
-    };
-    video.currentTime = 0; await new Promise(r => { video.onseeked = r; });
+	const loop = async () => {
+		if (aborted) return;
+		if (video.readyState >= 2 && video.videoWidth > 0 && !video.paused && !video.ended) {
+			if (canvas.width !== video.videoWidth) { canvas.width = video.videoWidth; canvas.height = video.videoHeight; }
+			
+			const now = performance.now();
+			const elapsed = now - lastFrameTimeRef.current;
+			if (elapsed < INFER_INTERVAL_MS) {
+				frameRef.current = requestAnimationFrame(loop);
+				return;
+			}
+			lastFrameTimeRef.current = now;
+			
+			if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
+			const scale = Math.min(1, 480 / video.videoWidth);
+			offscreenRef.current.width  = Math.round(video.videoWidth  * scale);
+			offscreenRef.current.height = Math.round(video.videoHeight * scale);
+			offscreenRef.current.getContext('2d').drawImage(video, 0, 0, offscreenRef.current.width, offscreenRef.current.height);
+			
+			// Draw the actual video frame to the visible canvas before skeleton overlay
+			const ctx = canvas.getContext('2d');
+			ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+			
+			const poseLandmarker = mpPoseRef.current;
+			if (!poseLandmarker) { finish(); return; }
+			try {
+				const now2 = performance.now();
+				const results = poseLandmarker.detectForVideo(offscreenRef.current, now2);
+				onMpResults(results, now2);
+			} catch (e) {
+				console.warn('[AI Counter] detectForVideo error:', e?.message);
+				finish(); return;
+			}
+		}
+		if (video.ended) { finish(); return; }
+		frameRef.current = requestAnimationFrame(loop);
+	};
+	video.currentTime = 0; await new Promise(r => { video.onseeked = r; });
     try { await video.play(); } catch (e) { setBackendError('Video afspelen mislukt: ' + e.message); clearInterval(elapsedRef.current); isRunRef.current = false; setIsRunning(false); return; }
     if (usingBeepMode) attachBeepDetector(video);
     frameRef.current = requestAnimationFrame(loop);
