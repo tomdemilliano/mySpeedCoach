@@ -879,8 +879,6 @@ function SkipperPicker({ counterUser, onSelect, selectedSkipper }) {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function AiCounterPage() {
-  const BACKEND_LABEL = AI_MODELS[selectedModel]?.label ?? 'Onbekend model';
-
   // ── Read selection passed from counter.js via URL params ─────────────────
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
   const paramDisciplineId = urlParams.get('disciplineId') || '';
@@ -1548,7 +1546,7 @@ export default function AiCounterPage() {
         countedBy:     counterUser?.id   || null,
         countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName} (AI)` : 'AI',
         countingMethod: 'AI',
-        aiConfig: { backend: 'mediapipe', backendLabel: BACKEND_LABEL, ...detCfg, trackedFoot },
+        aiConfig: { backend: selectedModelRef.current, backendLabel: AI_MODELS[selectedModelRef.current]?.label ?? selectedModelRef.current, ...detCfg, trackedFoot },
       });
       setSavedOk(true);
     } catch (e) { console.error(e); alert('Opslaan mislukt.'); }
@@ -1795,7 +1793,7 @@ export default function AiCounterPage() {
               <Video size={15} color="#60a5fa" style={{ flexShrink: 0 }} />
               <span style={{ fontSize: '13px', fontWeight: '600', color: '#f1f5f9', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{uploadFile?.name}</span>
               <span style={{ fontSize: '10px', color: '#3b82f6', backgroundColor: '#3b82f618', border: '1px solid #3b82f633', borderRadius: '6px', padding: '2px 8px', fontWeight: '700', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                MediaPipe BlazePose
+                {AI_MODELS[selectedModel]?.label ?? selectedModel}
               </span>
             </div>
 
@@ -1862,7 +1860,7 @@ export default function AiCounterPage() {
         {showSettingsSummary && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b', padding: '7px 12px' }}>
             <span style={{ fontSize: '9px', fontWeight: '700', color: '#334155', textTransform: 'uppercase', letterSpacing: '0.5px', marginRight: '2px' }}>Config</span>
-            <span style={{ fontSize: '10px', color: '#3b82f6', backgroundColor: '#3b82f618', borderRadius: '5px', padding: '1px 7px', fontWeight: '700' }}>MediaPipe BlazePose</span>
+            <span style={{ fontSize: '10px', color: '#3b82f6', backgroundColor: '#3b82f618', borderRadius: '5px', padding: '1px 7px', fontWeight: '700' }}>{AI_MODELS[selectedModel]?.label ?? selectedModel}</span>
             <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>sens {detCfg.peakMinProminence.toFixed(3)}</span>
             <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>ampl {detCfg.peakMinAmplitude?.toFixed(3) ?? '0.015'}</span>
             <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>int {detCfg.peakMinIntervalMs} ms</span>
@@ -1895,7 +1893,7 @@ export default function AiCounterPage() {
               <CheckCircle2 size={22} color="#22c55e" />
               <span style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9' }}>Sessie voltooid</span>
               <span style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: '700', color: '#3b82f6', backgroundColor: '#3b82f618', borderRadius: '6px', padding: '2px 8px' }}>
-                MediaPipe BlazePose
+                {AI_MODELS[selectedModel]?.label ?? selectedModel}
               </span>
             </div>
             <div style={s.resultGrid}>
