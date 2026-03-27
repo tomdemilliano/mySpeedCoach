@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   UserFactory, ClubFactory, GroupFactory,
-  ClubJoinRequestFactory, ClubMemberFactory, BadgeFactory,
+  ClubJoinRequestFactory, ClubMemberFactory, BadgeFactory, 
+  UserMemberLinkFactory,
 } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
 import {
