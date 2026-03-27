@@ -63,7 +63,7 @@ function LabelCell({ value, onChange }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function LabelGrid({ clubId, season, members, groups, groupMemberMap, uid, disciplines }) {
-  const eligibleDiscs = disciplines.filter(d => d.isActive !== false);
+  const eligibleDiscs = disciplines.filter(d => d.hasCompetitiveLabel && d.isActive !== false);
 
   // Only competitive skippers
   const competitiveMembers = members.filter(m => m.skipperType === 'competitive');
