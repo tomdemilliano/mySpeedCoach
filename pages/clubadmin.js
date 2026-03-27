@@ -191,6 +191,8 @@ function ClubMemberFormModal({ member, clubId, createdByUid, onClose }) {
     firstName: member?.firstName || '',
     lastName:  member?.lastName  || '',
     birthDate: member?.birthDate?.seconds ? new Date(member.birthDate.seconds * 1000).toISOString().split('T')[0] : '',
+    skipperType: member?.skipperType ?? null,
+    isStaff:     member?.isStaff     ?? false,
     notes:     member?.notes || '',
   });
   const [saving, setSaving] = useState(false);
@@ -207,6 +209,8 @@ function ClubMemberFormModal({ member, clubId, createdByUid, onClose }) {
         firstName: form.firstName.trim(),
         lastName:  form.lastName.trim(),
         birthDate: form.birthDate ? new Date(form.birthDate) : null,
+        skipperType: form.skipperType,
+        isStaff:     form.isStaff,
         notes:     form.notes.trim(),
       };
       isEdit
@@ -242,6 +246,41 @@ function ClubMemberFormModal({ member, clubId, createdByUid, onClose }) {
           <div>
             <label style={s.fieldLabel}>Notities</label>
             <input style={s.input} placeholder="optioneel" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          </div>
+          <label style={s.fieldLabel}>Type skipper</label>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
+            {[
+              { value: 'competitive', label: '🏆 Competitief' },
+              { value: 'recreative',  label: '🎉 Recreatief'  },
+              { value: null,          label: '—  Geen'         },
+            ].map(opt => (
+              <button
+              key={String(opt.value)}
+              type="button"
+                onClick={() => setForm(f => ({ ...f, skipperType: opt.value }))}
+                  style={{
+                    flex: 1, padding: '8px 6px', borderRadius: '8px', fontFamily: 'inherit',
+                    fontSize: '12px', fontWeight: '600', cursor: 'pointer',
+                    border: `1px solid ${form.skipperType === opt.value ? '#3b82f6' : '#334155'}`,
+                    backgroundColor: form.skipperType === opt.value ? '#3b82f622' : 'transparent',
+                    color: form.skipperType === opt.value ? '#60a5fa' : '#64748b',
+                  }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+ 
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+            <input
+            type="checkbox"
+              id="isStaffCheck"
+              checked={form.isStaff}
+              onChange={e => setForm(f => ({ ...f, isStaff: e.target.checked }))}
+            />
+            <label htmlFor="isStaffCheck" style={{ fontSize: '13px', color: '#94a3b8', cursor: 'pointer' }}>
+              Stafmedewerker (coach, begeleider, …)
+            </label>
           </div>
         </div>
         {error && <div style={s.errorBanner}><AlertCircle size={13} /> {error}</div>}
