@@ -8,8 +8,12 @@ import {
   ShieldAlert, UserPlus, Building2, Users, Trash2, Search,
   Edit2, X, Save, ArrowLeft, Plus, Heart, HeartOff, PlusCircle,
   Calendar, Bell, CheckCircle2, XCircle, Clock, MessageSquare,
-  Check, AlertCircle, Award, ChevronRight,
+  Check, AlertCircle, Award, ChevronRight, Calendar
 } from 'lucide-react';
+import SeasonManager from '../components/SeasonManager';
+import LabelGrid     from '../components/LabelGrid';
+import { useCurrentSeason } from '../hooks/useCurrentSeason';
+import { useDisciplines }   from '../hooks/useDisciplines';
 
 // ─── URL query helper ─────────────────────────────────────────────────────────
 const getQueryParam = (key) => {
@@ -481,6 +485,13 @@ export default function ClubAdmin() {
   const [rejectSaving,       setRejectSaving]       = useState(false);
   const [approveModalRequest,setApproveModalRequest]= useState(null);
 
+  // load disciplines & seasondata
+  const { disciplines } = useDisciplines();
+  const { currentSeason } = useCurrentSeason(activeClub?.id, activeClub);
+  const [activeClubData, setActiveClubData] = useState(activeClub);
+  // keep activeClubData in sync:
+  useEffect(() => setActiveClubData(activeClub), [activeClub]);
+
   // ── Bootstrap ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (authLoading || !uid) return;
@@ -650,6 +661,7 @@ export default function ClubAdmin() {
   const tabs = [
     { key: 'groepen',  label: 'Groepen' },
     { key: 'leden',    label: 'Leden' },
+    { key: 'seizoenen', label: 'Seizoenen & Labels', badge: 0 },
     { key: 'requests', label: 'Aanvragen', badge: pendingCount },
   ];
 
@@ -1137,6 +1149,41 @@ export default function ClubAdmin() {
             )}
           </div>
         )}
+
+        {/* ═══ SEIZOENEN EN L ═══ */}
+        {activeTab === 'seizoenen' && (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', alignItems: 'start' }}>
+ 
+              <div>
+                <div style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Calendar size={18} color="#3b82f6" /> Seizoenen
+                </div>
+                <SeasonManager
+                  clubId={activeClub.id}
+                  club={activeClubData}
+                  uid={uid}
+                  onClubUpdate={(updates) => setActiveClubData(prev => ({ ...prev, ...updates }))}
+                />
+              </div>
+ 
+              <div>
+                <div style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Award size={18} color="#f59e0b" /> Niveaulabels
+                </div>
+                <LabelGrid
+                  clubId={activeClub.id}
+                  season={currentSeason}
+                  members={clubMemberProfiles}
+                  uid={uid}
+                  disciplines={disciplines}
+                />
+              </div>
+
+            </div>
+          </div>
+        )}
+          
       </main>
 
       {/* ══ MODALS ══ */}
