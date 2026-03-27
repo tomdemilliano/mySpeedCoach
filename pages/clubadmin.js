@@ -546,24 +546,15 @@ export default function ClubAdmin() {
         ClubFactory.getAll(all => setAdminClubs(all));
       } else if (role === 'clubadmin') {
         setIsClubAdmin(true);
-        ClubFactory.getAll(allClubs => {
-          let found = [];
-          let pending = allClubs.length;
-          if (pending === 0) { setAdminClubs([]); return; }
-          allClubs.forEach(club => {
-            GroupFactory.getGroupsByClub(club.id, groups => {
-              let gPending = groups.length;
-              if (gPending === 0) { if (--pending === 0) setAdminClubs(found); return; }
-              groups.forEach(group => {
-                GroupFactory.getMembersByGroup(club.id, group.id, mems => {
-                  const isCoach = mems.some(m => (m.memberId || m.id) === uid && m.isCoach);
-                  if (isCoach && !found.find(c => c.id === club.id)) found = [...found, club];
-                  if (--gPending === 0 && --pending === 0) setAdminClubs(found);
-                });
-              });
-            });
-          });
+        // A clubadmin's club access is determined by their UserMemberLinks,
+        // not by group coach membership. Resolve their linked clubs directly.
+        const unsub = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
+          if (profiles.length === 0) { setAdminClubs([]); return; }
+          const clubIdSet = new Set(profiles.map(p => p.member.clubId));
+          const snaps = await Promise.all([...clubIdSet].map(id => ClubFactory.getById(id)));
+          setAdminClubs(snaps.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() })));
         });
+        return () => unsub();
       }
     });
   }, [uid, authLoading]);
