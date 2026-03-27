@@ -120,8 +120,13 @@ export const SCHEMA = {
     },
 
     clubs: {
-      name:    "string",
-      logoUrl: "string",
+      seasonStartDay:   "number",   // 1–31
+      seasonStartMonth: "number",   // 1–12
+      logoUrl:          "string",
+      contactEmail:     "string",
+      street:           "string",
+      city:             "string",
+      postalCode:       "string",
       groups: {
         name:    "string",
         useHRM:  "boolean",
@@ -162,8 +167,6 @@ export const SCHEMA = {
       disciplines:    [{ disciplineId: "string", label: "A|B|C" }],
       updatedAt:      "timestamp",
       updatedBy:      "uid",
-      seasonStartDay:   "number",   // 1–31
-      seasonStartMonth: "number",   // 1–12
     },
 
     clubJoinRequests: {
