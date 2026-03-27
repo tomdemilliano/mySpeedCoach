@@ -12,6 +12,7 @@ import {
   CheckCircle2, XCircle, ChevronDown, ChevronUp, MessageSquare,
   ArrowLeft, Medal, Activity, Hash, Calendar, ArrowRight
 } from 'lucide-react';
+import SeasonBanner from '../components/SeasonBanner';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const parseHeartRate = (value) => {
@@ -251,6 +252,7 @@ export default function IndexPage() {
   const [joinError,      setJoinError]      = useState('');
   const [viewMode,       setViewMode]       = useState('skipper');
   const [isCoachInGroup, setIsCoachInGroup] = useState(false);
+  const [primaryClub, setPrimaryClub]       = useState(null);
 
   // ── Load clubs ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -280,6 +282,13 @@ export default function IndexPage() {
     });
     return () => unsub();
   }, [uid]);
+
+  useEffect(() => {
+    if (!memberContext) return;
+    ClubFactory.getById(memberContext.clubId).then(snap => {
+      if (snap.exists()) setPrimaryClub({ id: snap.id, ...snap.data() });
+    });
+  }, [memberContext?.clubId]);
 
   // ── Records, goals, sessions, badges ──────────────────────────────────────
   useEffect(() => {
@@ -586,6 +595,13 @@ export default function IndexPage() {
             </div>
           </a>
         )}
+
+        <SeasonBanner
+          clubId={memberContext?.clubId}
+          club={primaryClub}
+          userRole={currentUser?.role}
+          coachView={isCoach}
+        />
         
         <AnnouncementsWidget memberContext={memberContext} />
         <PushPermissionBanner uid={uid} />
