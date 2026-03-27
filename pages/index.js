@@ -550,13 +550,13 @@ export default function IndexPage() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
           {newRejections > 0 && (
-            <button onClick={() => setShowSettings(true)} style={{ position: 'relative', background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
-              <Bell size={18} color="#f59e0b" />
-              <span style={{ position: 'absolute', top: '-2px', right: '-2px', backgroundColor: '#ef4444', color: 'white', fontSize: '9px', fontWeight: 'bold', width: '14px', height: '14px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{newRejections}</span>
-            </button>
+            <a href="/settings?tab=lidmaatschap" style={{ position: 'relative', display: 'flex', padding: '4px' }}>
+            <Bell size={18} color="#f59e0b" />
+            <span style={{ position: 'absolute', top: '-2px', right: '-2px', backgroundColor: '#ef4444', color: 'white', fontSize: '9px', fontWeight: 'bold', width: '14px', height: '14px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{newRejections}</span>
+            </a>
           )}
           <HrmHeaderWidget connected={hrmConnected} bpm={heartRate} deviceName={hrmDeviceName} zones={zones} onConnect={connectBluetooth} onDisconnect={disconnectHrm} />
-          <button style={s.iconBtn} onClick={() => setShowSettings(true)}><Settings size={18} /></button>
+          <a href="/settings" style={{ ...s.iconBtn, textDecoration: 'none' }}><Settings size={18} /></a>
           <button style={{ ...s.iconBtn, color: '#ef4444' }} onClick={logout}><LogOut size={18} /></button>
         </div>
       </header>
