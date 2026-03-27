@@ -514,7 +514,11 @@ function ErrorBanner({ message }) {
 export default function SettingsPage() {
   const { uid } = useAuth();
   const [currentUser, setCurrentUser] = useState(null);
-  const [activeTab,   setActiveTab]   = useState('algemeen');
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window === 'undefined') return 'algemeen';
+    const param = new URLSearchParams(window.location.search).get('tab');
+    return TABS.some(t => t.key === param) ? param : 'algemeen';
+  });
   const [loading,     setLoading]     = useState(true);
 
   useEffect(() => {
