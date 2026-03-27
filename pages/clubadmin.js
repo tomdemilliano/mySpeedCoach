@@ -8,7 +8,7 @@ import {
   ShieldAlert, UserPlus, Building2, Users, Trash2, Search,
   Edit2, X, Save, ArrowLeft, Plus, Heart, HeartOff, PlusCircle,
   Calendar, Bell, CheckCircle2, XCircle, Clock, MessageSquare,
-  Check, AlertCircle, Award, ChevronRight, Calendar
+  Check, AlertCircle, Award, ChevronRight
 } from 'lucide-react';
 import SeasonManager from '../components/SeasonManager';
 import LabelGrid     from '../components/LabelGrid';
