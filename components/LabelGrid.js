@@ -2,15 +2,17 @@
  * components/LabelGrid.js
  *
  * Grid for assigning competitive level labels (A / B / C) to skippers.
- * Rows = competitive skippers, columns = label-eligible disciplines + Allround.
- * One "Opslaan" button saves the entire grid state.
+ * Rows = competitive skippers, columns = active disciplines + Allround (last).
+ * Group filter above the grid. Group tags on each member row.
  *
  * Props:
- *   clubId        : string
- *   season        : season object { id, name }
- *   members       : ClubMember[] — all club members
- *   uid           : string — current user uid (for updatedBy)
- *   disciplines   : discipline[] — from useDisciplines()
+ *   clubId      : string
+ *   season      : season object { id, name }
+ *   members     : ClubMember[]  — all club members (all types)
+ *   groups      : group[]       — all groups for this club { id, name }
+ *   groupMemberMap : { [groupId]: string[] } — memberId[] per group
+ *   uid         : string
+ *   disciplines : discipline[]
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -19,17 +21,27 @@ import { Save, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 
 const LABEL_OPTIONS = ['A', 'B', 'C'];
 
+// Neutral, non-judgmental color palette for A / B / C
+const LABEL_COLORS = {
+  A: '#3b82f6',  // blue
+  B: '#a78bfa',  // purple
+  C: '#06b6d4',  // teal
+};
+
+function labelColor(label) {
+  return LABEL_COLORS[label] || '#64748b';
+}
+
 // ─── Single label cell ────────────────────────────────────────────────────────
-function LabelCell({ value, onChange, disabled }) {
+function LabelCell({ value, onChange }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'center' }}>
       <select
         value={value || ''}
         onChange={e => onChange(e.target.value || null)}
-        disabled={disabled}
         style={{
           appearance: 'none', WebkitAppearance: 'none',
-          width: '52px',
+          width: '48px',
           padding: '5px 4px',
           textAlign: 'center',
           backgroundColor: value ? labelColor(value) + '22' : '#0f172a',
@@ -38,7 +50,7 @@ function LabelCell({ value, onChange, disabled }) {
           color: value ? labelColor(value) : '#475569',
           fontSize: '13px',
           fontWeight: value ? '800' : '400',
-          cursor: disabled ? 'default' : 'pointer',
+          cursor: 'pointer',
           fontFamily: 'inherit',
         }}
       >
@@ -49,19 +61,32 @@ function LabelCell({ value, onChange, disabled }) {
   );
 }
 
-function labelColor(label) {
-  return label === 'A' ? '#22c55e' : label === 'B' ? '#f59e0b' : '#ef4444';
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function LabelGrid({ clubId, season, members, uid, disciplines }) {
-  // Only label-eligible disciplines
-  const eligibleDiscs = disciplines.filter(d => d.hasCompetitiveLabel && d.isActive !== false);
+export default function LabelGrid({ clubId, season, members, groups, groupMemberMap, uid, disciplines }) {
+  const eligibleDiscs = disciplines.filter(d => d.isActive !== false);
 
   // Only competitive skippers
   const competitiveMembers = members.filter(m => m.skipperType === 'competitive');
 
-  // grid: { [memberId]: { allround: 'A'|'B'|'C'|null, disciplines: { [discId]: 'A'|'B'|'C'|null } } }
+  // Group filter state
+  const [filterGroupId, setFilterGroupId] = useState('');
+
+  // Build a map of memberId → group names (where they are skipper)
+  const memberGroupNames = {};
+  competitiveMembers.forEach(m => {
+    const names = [];
+    (groups || []).forEach(g => {
+      if ((groupMemberMap?.[g.id] || []).includes(m.id)) names.push(g.name);
+    });
+    memberGroupNames[m.id] = names;
+  });
+
+  // Filtered members based on group selection
+  const filteredMembers = filterGroupId
+    ? competitiveMembers.filter(m => (groupMemberMap?.[filterGroupId] || []).includes(m.id))
+    : competitiveMembers;
+
+  // grid: { [memberId]: { allround: string|null, disciplines: { [discId]: string|null } } }
   const [grid,    setGrid]    = useState({});
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
@@ -86,23 +111,17 @@ export default function LabelGrid({ clubId, season, members, uid, disciplines })
       await Promise.all(competitiveMembers.map(async member => {
         const doc = await MemberLabelFactory.getForMember(clubId, season.id, member.id);
         if (doc && !cancelled) {
-          initial[member.id] = {
-            allround: doc.allroundLabel || null,
-            disciplines: {},
-          };
+          initial[member.id] = { allround: doc.allroundLabel || null, disciplines: {} };
           eligibleDiscs.forEach(d => { initial[member.id].disciplines[d.id] = null; });
           (doc.disciplines || []).forEach(entry => {
-            if (initial[member.id].disciplines.hasOwnProperty(entry.disciplineId)) {
+            if (Object.prototype.hasOwnProperty.call(initial[member.id].disciplines, entry.disciplineId)) {
               initial[member.id].disciplines[entry.disciplineId] = entry.label || null;
             }
           });
         }
       }));
 
-      if (!cancelled) {
-        setGrid(initial);
-        setLoading(false);
-      }
+      if (!cancelled) { setGrid(initial); setLoading(false); }
     };
 
     load();
@@ -110,19 +129,13 @@ export default function LabelGrid({ clubId, season, members, uid, disciplines })
   }, [clubId, season?.id, competitiveMembers.length, eligibleDiscs.length]);
 
   const setAllround = useCallback((memberId, value) => {
-    setGrid(prev => ({
-      ...prev,
-      [memberId]: { ...prev[memberId], allround: value },
-    }));
+    setGrid(prev => ({ ...prev, [memberId]: { ...prev[memberId], allround: value } }));
   }, []);
 
   const setDisciplineLabel = useCallback((memberId, discId, value) => {
     setGrid(prev => ({
       ...prev,
-      [memberId]: {
-        ...prev[memberId],
-        disciplines: { ...prev[memberId].disciplines, [discId]: value },
-      },
+      [memberId]: { ...prev[memberId], disciplines: { ...prev[memberId].disciplines, [discId]: value } },
     }));
   }, []);
 
@@ -133,20 +146,15 @@ export default function LabelGrid({ clubId, season, members, uid, disciplines })
       await Promise.all(competitiveMembers.map(async member => {
         const row = grid[member.id];
         if (!row) return;
-
         const discEntries = eligibleDiscs
           .map(d => ({ disciplineId: d.id, label: row.disciplines[d.id] || null }))
           .filter(e => e.label !== null);
-
         const hasAllround = !!row.allround;
         const hasDiscs    = discEntries.length > 0;
-
         if (!hasAllround && !hasDiscs) {
-          // Nothing assigned — delete if exists
           await MemberLabelFactory.delete(clubId, season.id, member.id);
           return;
         }
-
         await MemberLabelFactory.upsert(clubId, season.id, member.id, {
           memberId:      member.id,
           labelType:     hasAllround && !hasDiscs ? 'allround' : 'per_discipline',
@@ -155,7 +163,6 @@ export default function LabelGrid({ clubId, season, members, uid, disciplines })
           updatedBy:     uid,
         });
       }));
-
       setSaveOk(true);
       setTimeout(() => setSaveOk(false), 2500);
     } catch (e) {
@@ -166,122 +173,129 @@ export default function LabelGrid({ clubId, season, members, uid, disciplines })
     }
   };
 
-  if (!season) {
-    return (
-      <div style={emptyState}>
-        <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>
-          Geen actief seizoen gevonden. Maak eerst een seizoen aan.
-        </p>
-      </div>
-    );
-  }
+  if (!season) return (
+    <div style={emptyState}>
+      <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>Geen actief seizoen. Maak eerst een seizoen aan.</p>
+    </div>
+  );
 
-  if (loading) {
-    return (
-      <div style={emptyState}>
-        <RefreshCw size={18} color="#64748b" style={{ animation: 'spin 1s linear infinite', marginBottom: '8px' }} />
-        <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>Labels laden…</p>
-      </div>
-    );
-  }
+  if (loading) return (
+    <div style={emptyState}>
+      <RefreshCw size={18} color="#64748b" style={{ animation: 'spin 1s linear infinite', marginBottom: '8px' }} />
+      <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>Labels laden…</p>
+    </div>
+  );
 
-  if (competitiveMembers.length === 0) {
-    return (
-      <div style={emptyState}>
-        <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>
-          Geen competitieve skippers gevonden. Pas het ledenprofiel aan om skippers als competitief te markeren.
-        </p>
-      </div>
-    );
-  }
-
-  if (eligibleDiscs.length === 0) {
-    return (
-      <div style={emptyState}>
-        <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>
-          Geen disciplines met competitief label gevonden.
-        </p>
-      </div>
-    );
-  }
-
-  // Column widths
-  const nameColW  = '160px';
-  const cellColW  = '64px';
+  if (competitiveMembers.length === 0) return (
+    <div style={emptyState}>
+      <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>
+        Geen competitieve skippers. Pas het lidprofiel aan om skippers als competitief te markeren.
+      </p>
+    </div>
+  );
 
   return (
     <div>
-      {/* Season indicator */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+      {/* Season + filter row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
         <div style={{ fontSize: '13px', color: '#64748b' }}>
           Seizoen: <strong style={{ color: '#f1f5f9' }}>{season.name}</strong>
-          <span style={{ marginLeft: '12px', fontSize: '11px', color: '#475569' }}>
-            {competitiveMembers.length} competitieve skipper{competitiveMembers.length !== 1 ? 's' : ''}
+          <span style={{ marginLeft: '10px', fontSize: '11px', color: '#475569' }}>
+            {filteredMembers.length} van {competitiveMembers.length} skipper{competitiveMembers.length !== 1 ? 's' : ''}
           </span>
         </div>
 
-        {/* Legend */}
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {LABEL_OPTIONS.map(l => (
-            <span key={l} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: '700', color: labelColor(l) }}>
-              <span style={{ width: '16px', height: '16px', borderRadius: '4px', backgroundColor: labelColor(l) + '22', border: `1px solid ${labelColor(l)}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px' }}>{l}</span>
-              {l === 'A' ? 'Nationaal' : l === 'B' ? 'Regionaal' : 'Club'}
-            </span>
-          ))}
-        </div>
+        {/* Group filter */}
+        {(groups || []).length > 0 && (
+          <select
+            value={filterGroupId}
+            onChange={e => setFilterGroupId(e.target.value)}
+            style={{
+              marginLeft: 'auto',
+              padding: '6px 10px', borderRadius: '8px',
+              border: '1px solid #334155', backgroundColor: '#0f172a',
+              color: filterGroupId ? '#f1f5f9' : '#64748b',
+              fontSize: '12px', fontFamily: 'inherit', cursor: 'pointer',
+            }}
+          >
+            <option value="">Alle groepen</option>
+            {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+        )}
       </div>
 
-      {/* Scrollable grid */}
+      {/* Scrollable table */}
       <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #334155', marginBottom: '16px' }}>
-        <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: `calc(${nameColW} + ${eligibleDiscs.length + 1} * ${cellColW})` }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '400px' }}>
           <thead>
             <tr style={{ backgroundColor: '#0f172a' }}>
-              {/* Name column */}
-              <th style={{ ...thStyle, textAlign: 'left', width: nameColW, minWidth: nameColW, paddingLeft: '14px' }}>
+              {/* Member name */}
+              <th style={{ ...th, textAlign: 'left', paddingLeft: '14px', minWidth: '160px' }}>
                 Skipper
               </th>
-              {/* Allround column */}
-              <th style={{ ...thStyle, width: cellColW }}>
-                <div style={{ fontSize: '10px', color: '#a78bfa', fontWeight: '700' }}>Allround</div>
-              </th>
-              {/* Discipline columns */}
+              {/* Discipline columns — Allround last */}
               {eligibleDiscs.map(d => (
-                <th key={d.id} style={{ ...thStyle, width: cellColW }}>
-                  <div style={{ fontSize: '9px', color: '#94a3b8', fontWeight: '700', lineHeight: 1.3, maxWidth: '56px', margin: '0 auto' }}>
+                <th key={d.id} style={{ ...th, width: '58px', minWidth: '58px' }}>
+                  <div style={{
+                    fontSize: '9px', color: '#94a3b8', fontWeight: '700',
+                    lineHeight: 1.3, maxWidth: '54px', margin: '0 auto',
+                    whiteSpace: 'normal', wordBreak: 'break-word', textAlign: 'center',
+                  }}>
                     {d.name}
                   </div>
                 </th>
               ))}
+              {/* Allround — always last */}
+              <th style={{ ...th, width: '58px', minWidth: '58px' }}>
+                <div style={{ fontSize: '9px', color: '#a78bfa', fontWeight: '700', lineHeight: 1.3 }}>
+                  Allround
+                </div>
+              </th>
             </tr>
           </thead>
           <tbody>
-            {competitiveMembers.map((member, idx) => {
-              const row = grid[member.id] || { allround: null, disciplines: {} };
-              const isEven = idx % 2 === 0;
+            {filteredMembers.length === 0 ? (
+              <tr>
+                <td colSpan={eligibleDiscs.length + 2} style={{ padding: '24px', textAlign: 'center', color: '#475569', fontSize: '13px' }}>
+                  Geen skippers in deze groep.
+                </td>
+              </tr>
+            ) : filteredMembers.map((member, idx) => {
+              const row       = grid[member.id] || { allround: null, disciplines: {} };
+              const groupNames = memberGroupNames[member.id] || [];
               return (
-                <tr key={member.id} style={{ backgroundColor: isEven ? '#1e293b' : '#1a2535' }}>
-                  {/* Name */}
-                  <td style={{ ...tdStyle, paddingLeft: '14px', borderRight: '1px solid #334155' }}>
+                <tr key={member.id} style={{ backgroundColor: idx % 2 === 0 ? '#1e293b' : '#1a2535' }}>
+                  {/* Name + group tags */}
+                  <td style={{ ...td, paddingLeft: '14px', borderRight: '1px solid #334155' }}>
                     <div style={{ fontWeight: '600', fontSize: '13px', color: '#f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '150px' }}>
                       {member.firstName} {member.lastName}
                     </div>
+                    {groupNames.length > 0 && (
+                      <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', marginTop: '3px' }}>
+                        {groupNames.map(name => (
+                          <span key={name} style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#3b82f611', border: '1px solid #3b82f633', color: '#60a5fa', fontWeight: '600', whiteSpace: 'nowrap' }}>
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </td>
-                  {/* Allround */}
-                  <td style={{ ...tdStyle, borderRight: '1px solid #1e293b' }}>
-                    <LabelCell
-                      value={row.allround}
-                      onChange={v => setAllround(member.id, v)}
-                    />
-                  </td>
-                  {/* Per discipline */}
+                  {/* Discipline cells */}
                   {eligibleDiscs.map(d => (
-                    <td key={d.id} style={{ ...tdStyle, borderRight: '1px solid #1e293b' }}>
+                    <td key={d.id} style={{ ...td, borderRight: '1px solid #1e293b' }}>
                       <LabelCell
                         value={row.disciplines?.[d.id] || null}
                         onChange={v => setDisciplineLabel(member.id, d.id, v)}
                       />
                     </td>
                   ))}
+                  {/* Allround — last column */}
+                  <td style={{ ...td, borderRight: '1px solid #1e293b' }}>
+                    <LabelCell
+                      value={row.allround}
+                      onChange={v => setAllround(member.id, v)}
+                    />
+                  </td>
                 </tr>
               );
             })}
@@ -305,8 +319,7 @@ export default function LabelGrid({ clubId, season, members, uid, disciplines })
           border: 'none', borderRadius: '10px',
           color: 'white', fontWeight: '700', fontSize: '14px',
           cursor: saving ? 'default' : 'pointer',
-          opacity: saving ? 0.65 : 1,
-          fontFamily: 'inherit',
+          opacity: saving ? 0.65 : 1, fontFamily: 'inherit',
           transition: 'background-color 0.2s',
         }}
       >
@@ -320,25 +333,10 @@ export default function LabelGrid({ clubId, season, members, uid, disciplines })
   );
 }
 
-const thStyle = {
-  padding: '10px 6px',
-  fontSize: '10px',
-  fontWeight: '700',
-  color: '#64748b',
-  textTransform: 'uppercase',
-  letterSpacing: '0.4px',
-  textAlign: 'center',
-  borderBottom: '1px solid #334155',
-  whiteSpace: 'nowrap',
+const th = {
+  padding: '10px 4px', fontSize: '9px', fontWeight: '700',
+  color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px',
+  textAlign: 'center', borderBottom: '1px solid #334155',
 };
-
-const tdStyle = {
-  padding: '8px 4px',
-  verticalAlign: 'middle',
-};
-
-const emptyState = {
-  display: 'flex', flexDirection: 'column',
-  alignItems: 'center', justifyContent: 'center',
-  padding: '40px 20px', textAlign: 'center',
-};
+const td          = { padding: '8px 4px', verticalAlign: 'middle' };
+const emptyState  = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', textAlign: 'center' };
