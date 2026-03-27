@@ -1087,7 +1087,7 @@ export default function AiCounterPage() {
           baseOptions: {
             modelAssetPath:
               'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
-            delegate: 'GPU',
+            delegate: /iPhone|iPad|Android/i.test(navigator.userAgent) ? 'CPU' : 'GPU',
           },
           runningMode: 'VIDEO',
           numPoses: 1,
