@@ -19,7 +19,7 @@
 import { useState, useEffect } from 'react';
 import {
   UserFactory, ClubFactory, ClubJoinRequestFactory,
-  UserMemberLinkFactory, GroupFactory,
+  UserMemberLinkFactory, GroupFactory, MemberLabelFactory, SeasonFactory
 } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
 import { PushSettingsToggle } from '../components/PushPermissionBanner';
@@ -28,8 +28,9 @@ import {
   Save, Send, Trash2, EyeOff,
   CheckCircle2, XCircle, Clock,
   Building2, UserX, AlertCircle,
-  ArrowLeft, ChevronRight,
+  ArrowLeft, ChevronRight, Trophy, ChevronDown
 } from 'lucide-react';
+import { useDisciplines } from '../hooks/useDisciplines';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DEFAULT_ZONES = [
@@ -50,6 +51,7 @@ const TABS = [
   { key: 'algemeen',    label: 'Algemeen',      icon: User   },
   { key: 'meldingen',   label: 'Meldingen',     icon: Bell   },
   { key: 'lidmaatschap',label: 'Lidmaatschap',  icon: Users  },
+  { key: 'labels',      label: 'Niveaulabels',  icon: Trophy },
   { key: 'hartslag',    label: 'Hartslagzones', icon: Heart  },
 ];
 
@@ -508,6 +510,273 @@ function ErrorBanner({ message }) {
   );
 }
 
+const LABEL_COLORS = { A: '#22c55e', B: '#f59e0b', C: '#ef4444' };
+const LABEL_DESCRIPTIONS = {
+  A: 'Nationaal niveau',
+  B: 'Regionaal niveau',
+  C: 'Clubniveau',
+};
+ 
+function LabelBadge({ label }) {
+  if (!label) return <span style={{ fontSize: '12px', color: '#334155' }}>—</span>;
+  const color = LABEL_COLORS[label] || '#64748b';
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: '28px', height: '28px', borderRadius: '7px',
+      backgroundColor: color + '22', border: `1px solid ${color}55`,
+      fontSize: '13px', fontWeight: '800', color,
+    }}>
+      {label}
+    </span>
+  );
+}
+ 
+export function LabelsTab({ uid, currentUser }) {
+  const { disciplines, loading: discsLoading } = useDisciplines();
+  const [memberContext, setMemberContext] = useState(null);
+  const [club,          setClub]          = useState(null);
+  const [seasons,       setSeasons]       = useState([]);
+  const [labelsBySeasonId, setLabelsBySeasonId] = useState({});
+  const [loading,       setLoading]       = useState(true);
+  const [expandedSeason, setExpandedSeason] = useState(null);
+ 
+  const eligibleDiscs = disciplines.filter(d => d.hasCompetitiveLabel && d.isActive !== false);
+ 
+  // Resolve member context
+  useEffect(() => {
+    if (!uid) return;
+    let cancelled = false;
+    const unsub = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
+      const self = profiles.find(p => p.link.relationship === 'self');
+      if (!self || cancelled) { setLoading(false); return; }
+      const ctx = { clubId: self.member.clubId, memberId: self.member.id };
+      setMemberContext(ctx);
+ 
+      // Load club
+      const clubSnap = await ClubFactory.getById(ctx.clubId);
+      if (!cancelled && clubSnap.exists()) setClub({ id: clubSnap.id, ...clubSnap.data() });
+    });
+    return () => { cancelled = true; unsub(); };
+  }, [uid]);
+ 
+  // Load seasons and labels for this member
+  useEffect(() => {
+    if (!memberContext) return;
+    let cancelled = false;
+    const { clubId, memberId } = memberContext;
+ 
+    const unsub = SeasonFactory.getAll(clubId, async (allSeasons) => {
+      if (cancelled) return;
+      const active = allSeasons.filter(s => !s.isAbandoned);
+      setSeasons(active);
+ 
+      // Auto-expand current season
+      const now = Date.now();
+      const current = active.find(s => {
+        const start = s.startDate?.seconds ? s.startDate.seconds * 1000 : null;
+        const end   = s.endDate?.seconds   ? s.endDate.seconds   * 1000 : null;
+        return start && end && start <= now && now <= end;
+      });
+      if (current && !expandedSeason) setExpandedSeason(current.id);
+ 
+      // Load labels for each season
+      const map = {};
+      await Promise.all(active.map(async season => {
+        const labelDoc = await MemberLabelFactory.getForMember(clubId, season.id, memberId);
+        map[season.id] = labelDoc || null;
+      }));
+      if (!cancelled) {
+        setLabelsBySeasonId(map);
+        setLoading(false);
+      }
+    });
+ 
+    return () => { cancelled = true; unsub(); };
+  }, [memberContext]);
+ 
+  const fmtDate = (val) => {
+    if (!val) return '—';
+    const ms = val?.seconds ? val.seconds * 1000 : new Date(val).getTime();
+    if (isNaN(ms)) return '—';
+    return new Date(ms).toLocaleDateString('nl-BE', { month: 'short', year: 'numeric' });
+  };
+ 
+  if (!discsLoading && (currentUser?.skipperType !== 'competitive')) {
+    return (
+      <div style={tabBody}>
+        <SectionHeaderSimple title="Niveaulabels" subtitle="Jouw competitief niveau per seizoen en discipline" />
+        <div style={emptyCard}>
+          <Trophy size={32} color="#334155" style={{ marginBottom: '10px' }} />
+          <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>
+            Niveaulabels zijn alleen van toepassing op competitieve skippers.
+          </p>
+        </div>
+      </div>
+    );
+  }
+ 
+  if (loading) {
+    return (
+      <div style={tabBody}>
+        <SectionHeaderSimple title="Niveaulabels" subtitle="Jouw competitief niveau per seizoen en discipline" />
+        <div style={emptyCard}><span style={{ fontSize: '13px', color: '#64748b' }}>Laden…</span></div>
+      </div>
+    );
+  }
+ 
+  if (seasons.length === 0) {
+    return (
+      <div style={tabBody}>
+        <SectionHeaderSimple title="Niveaulabels" subtitle="Jouw competitief niveau per seizoen en discipline" />
+        <div style={emptyCard}>
+          <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>
+            Nog geen seizoenen aangemaakt voor jouw club.
+          </p>
+        </div>
+      </div>
+    );
+  }
+ 
+  return (
+    <div style={tabBody}>
+      <SectionHeaderSimple title="Niveaulabels" subtitle="Jouw competitief niveau per seizoen en discipline" />
+ 
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
+        {Object.entries(LABEL_DESCRIPTIONS).map(([label, desc]) => (
+          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <LabelBadge label={label} />
+            <span style={{ fontSize: '11px', color: '#64748b' }}>{desc}</span>
+          </div>
+        ))}
+      </div>
+ 
+      {/* Season list */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {seasons.map(season => {
+          const labelDoc   = labelsBySeasonId[season.id];
+          const isExpanded = expandedSeason === season.id;
+          const now        = Date.now();
+          const start      = season.startDate?.seconds ? season.startDate.seconds * 1000 : null;
+          const end        = season.endDate?.seconds   ? season.endDate.seconds   * 1000 : null;
+          const isCurrent  = start && end && start <= now && now <= end;
+ 
+          const hasAnyLabel = labelDoc && (
+            labelDoc.allroundLabel ||
+            (labelDoc.disciplines || []).some(d => d.label)
+          );
+ 
+          return (
+            <div key={season.id} style={{
+              backgroundColor: '#1e293b', borderRadius: '12px',
+              border: `1px solid ${isCurrent ? '#3b82f644' : '#334155'}`,
+              overflow: 'hidden',
+            }}>
+              {/* Season header row */}
+              <button
+                onClick={() => setExpandedSeason(isExpanded ? null : season.id)}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: '12px',
+                  padding: '12px 14px', background: 'none', border: 'none',
+                  cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9' }}>
+                      {season.name}
+                    </span>
+                    {isCurrent && (
+                      <span style={{ fontSize: '9px', fontWeight: '800', color: '#3b82f6', backgroundColor: '#3b82f622', border: '1px solid #3b82f644', borderRadius: '6px', padding: '1px 6px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                        Huidig
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>
+                    {fmtDate(season.startDate)} — {fmtDate(season.endDate)}
+                  </div>
+                </div>
+ 
+                {/* Summary badges when collapsed */}
+                {!isExpanded && hasAnyLabel && (
+                  <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                    {labelDoc.allroundLabel && <LabelBadge label={labelDoc.allroundLabel} />}
+                    {(labelDoc.disciplines || []).slice(0, 3).map((d, i) => (
+                      d.label ? <LabelBadge key={i} label={d.label} /> : null
+                    ))}
+                  </div>
+                )}
+ 
+                {!isExpanded && !hasAnyLabel && (
+                  <span style={{ fontSize: '11px', color: '#334155', flexShrink: 0 }}>Geen labels</span>
+                )}
+ 
+                {isExpanded
+                  ? <ChevronUp size={15} color="#475569" style={{ flexShrink: 0 }} />
+                  : <ChevronDown size={15} color="#475569" style={{ flexShrink: 0 }} />}
+              </button>
+ 
+              {/* Expanded detail */}
+              {isExpanded && (
+                <div style={{ borderTop: '1px solid #334155', padding: '12px 14px' }}>
+                  {!labelDoc ? (
+                    <p style={{ fontSize: '12px', color: '#475569', margin: 0 }}>
+                      Nog geen labels toegewezen voor dit seizoen.
+                    </p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {/* Allround */}
+                      {labelDoc.allroundLabel && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                          <span style={{ fontSize: '12px', color: '#94a3b8', flex: 1 }}>Allround</span>
+                          <LabelBadge label={labelDoc.allroundLabel} />
+                          <span style={{ fontSize: '11px', color: LABEL_COLORS[labelDoc.allroundLabel] || '#64748b' }}>
+                            {LABEL_DESCRIPTIONS[labelDoc.allroundLabel] || ''}
+                          </span>
+                        </div>
+                      )}
+ 
+                      {/* Per discipline */}
+                      {(labelDoc.disciplines || []).map(entry => {
+                        if (!entry.label) return null;
+                        const disc = eligibleDiscs.find(d => d.id === entry.disciplineId);
+                        if (!disc) return null;
+                        return (
+                          <div key={entry.disciplineId} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                            <span style={{ fontSize: '12px', color: '#94a3b8', flex: 1 }}>{disc.name}</span>
+                            <LabelBadge label={entry.label} />
+                            <span style={{ fontSize: '11px', color: LABEL_COLORS[entry.label] || '#64748b' }}>
+                              {LABEL_DESCRIPTIONS[entry.label] || ''}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+ 
+function SectionHeaderSimple({ title, subtitle }) {
+  return (
+    <div style={{ marginBottom: '16px' }}>
+      <div style={{ fontSize: '15px', fontWeight: '700', color: '#f1f5f9', marginBottom: '2px' }}>{title}</div>
+      {subtitle && <div style={{ fontSize: '12px', color: '#64748b' }}>{subtitle}</div>}
+    </div>
+  );
+}
+ 
+const tabBody   = { display: 'flex', flexDirection: 'column', gap: '0' };
+const emptyCard = { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '32px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' };
+
+
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════
@@ -613,6 +882,7 @@ export default function SettingsPage() {
           {activeTab === 'algemeen'     && <AlgemeenTab     uid={uid} currentUser={currentUser} onSaved={handleProfileSaved} />}
           {activeTab === 'meldingen'    && <MeldingenTab    uid={uid} />}
           {activeTab === 'lidmaatschap' && <LidmaatschapTab uid={uid} currentUser={currentUser} />}
+          {activeTab === 'labels'       && <LabelsTab       uid={uid} currentUser={currentUser} />}
           {activeTab === 'hartslag'     && <HartslagTab     uid={uid} currentUser={currentUser} onSaved={handleZonesSaved} />}
         </div>
       </div>
