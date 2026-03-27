@@ -16,15 +16,16 @@ function DisciplineFormModal({ discipline, onSave, onClose }) {
   const isEdit = !!discipline?.id;
 
   const [form, setForm] = useState({
-    name:            discipline?.name            || '',
-    ropeType:        discipline?.ropeType        || 'SR',
-    durationSeconds: discipline?.durationSeconds ?? '',  // empty string = untimed
-    teamSize:        discipline?.teamSize        ?? 1,
-    isIndividual:    discipline?.isIndividual    ?? true,
-    specialRule:     discipline?.specialRule     || 'none',
-    skippersCount:   discipline?.skippersCount   ?? 1,
-    isActive:        discipline?.isActive        ?? true,
-    sortOrder:       discipline?.sortOrder       ?? 999,
+    name:                discipline?.name            || '',
+    ropeType:            discipline?.ropeType        || 'SR',
+    durationSeconds:     discipline?.durationSeconds ?? '',  // empty string = untimed
+    teamSize:            discipline?.teamSize        ?? 1,
+    isIndividual:        discipline?.isIndividual    ?? true,
+    specialRule:         discipline?.specialRule     || 'none',
+    skippersCount:       discipline?.skippersCount   ?? 1,
+    hasCompetitiveLabel: discipline?.hasCompetitiveLabel  ?? false,
+    isActive:            discipline?.isActive        ?? true,
+    sortOrder:           discipline?.sortOrder       ?? 999,
   });
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState('');
@@ -37,17 +38,18 @@ function DisciplineFormModal({ discipline, onSave, onClose }) {
     setSaving(true);
     try {
       const payload = {
-        name:            form.name.trim(),
-        ropeType:        form.ropeType,
-        durationSeconds: form.durationSeconds === '' || form.durationSeconds === null
-                           ? null
-                           : parseInt(form.durationSeconds),
-        teamSize:        parseInt(form.teamSize) || 1,
-        isIndividual:    form.isIndividual,
-        specialRule:     form.specialRule === 'none' ? null : form.specialRule,
-        skippersCount:   parseInt(form.skippersCount) || 1,
-        isActive:        form.isActive,
-        sortOrder:       parseInt(form.sortOrder) || 999,
+        name:                form.name.trim(),
+        ropeType:            form.ropeType,
+        durationSeconds:     form.durationSeconds === '' || form.durationSeconds === null
+                               ? null
+                               : parseInt(form.durationSeconds),
+        teamSize:            parseInt(form.teamSize) || 1,
+        isIndividual:        form.isIndividual,
+        specialRule:         form.specialRule === 'none' ? null : form.specialRule,
+        skippersCount:       parseInt(form.skippersCount) || 1,
+        hasCompetitiveLabel: form.hasCompetitiveLabel,
+        isActive:            form.isActive,
+        sortOrder:           parseInt(form.sortOrder) || 999,
       };
       await onSave(payload);
       onClose();
@@ -192,6 +194,14 @@ function DisciplineFormModal({ discipline, onSave, onClose }) {
             onChange={e => set('sortOrder', e.target.value)}
             placeholder="1"
           />
+        </div>
+
+        {/* Is this a Competitive discipline - used for labels */} 
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+          <input type="checkbox" id="discCompLabel" checked={form.hasCompetitiveLabel} onChange={e => set('hasCompetitiveLabel', e.target.checked)} />
+          <label htmlFor="discCompLabel" style={{ fontSize: '13px', color: '#94a3b8', cursor: 'pointer' }}>
+            Competitief niveaulabel (A/B/C) van toepassing op dit onderdeel
+          </label>
         </div>
 
         {/* Active */}
