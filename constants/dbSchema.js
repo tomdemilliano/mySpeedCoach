@@ -26,6 +26,8 @@ export const SCHEMA = {
       lastName: "string",
       birthDate: "timestamp|null",
       notes: "string",
+      skipperType: "competitive|recreative|null",
+      isStaff:     "boolean",
       createdAt: "timestamp",
       createdBy: "uid",
       sessionHistory: {
@@ -103,6 +105,20 @@ export const SCHEMA = {
       createdAt: "timestamp",
     },
 
+    disciplines: {
+      name:                "string",
+      ropeType:            "SR|DD",
+      durationSeconds:     "number|null",
+      teamSize:            "number",
+      isIndividual:        "boolean",
+      specialRule:         "null|'triple_under'|'relay'",
+      skippersCount:       "number",
+      isActive:            "boolean",
+      hasCompetitiveLabel: "boolean",
+      sortOrder:           "number",
+      createdAt:           "timestamp",
+    },
+
     clubs: {
       name:    "string",
       logoUrl: "string",
@@ -128,6 +144,26 @@ export const SCHEMA = {
       targetDate:     "timestamp|null",
       achievedAt:     "timestamp|null",
       createdAt:      "timestamp",
+    },
+
+    "clubs/{clubId}/seasons/{seasonId}": {
+      name:        "string",
+      startDate:   "timestamp",
+      endDate:     "timestamp",
+      createdAt:   "timestamp",
+      createdBy:   "uid",
+      isAbandoned: "boolean",
+    },
+ 
+    "clubs/{clubId}/seasons/{seasonId}/memberLabels/{memberId}": {
+      memberId:       "string",
+      labelType:      "allround|per_discipline",
+      allroundLabel:  "A|B|C|null",
+      disciplines:    [{ disciplineId: "string", label: "A|B|C" }],
+      updatedAt:      "timestamp",
+      updatedBy:      "uid",
+      seasonStartDay:   "number",   // 1–31
+      seasonStartMonth: "number",   // 1–12
     },
 
     clubJoinRequests: {
@@ -1334,6 +1370,21 @@ export const ClubMemberFactory = {
 
   markGoalAchieved: (clubId, memberId, goalId) =>
     updateDoc(doc(db, `clubs/${clubId}/members/${memberId}/goals`, goalId), { achievedAt: serverTimestamp() }),
+
+  updateMemberType: (clubId, memberId, skipperType, isStaff) =>
+    updateDoc(doc(db, `clubs/${clubId}/members`, memberId), {
+      skipperType: skipperType ?? null,
+      isStaff:     isStaff     ?? false,
+    }),
+ 
+  getCompetitive: (clubId, callback) =>
+    onSnapshot(
+      query(
+        collection(db, `clubs/${clubId}/members`),
+        where('skipperType', '==', 'competitive')
+      ),
+      (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+    ),
 };
 
 // ==========================================
@@ -1585,6 +1636,7 @@ export const DisciplineFactory = {
       skippersCount:   data.skippersCount   ?? 1,
       isActive:        data.isActive        ?? true,
       sortOrder:       data.sortOrder       ?? 999,
+      hasCompetitiveLabel: data.hasCompetitiveLabel ?? false,
       createdAt:       serverTimestamp(),
     }),
 
@@ -1621,15 +1673,16 @@ export const DisciplineFactory = {
     const existingNames = new Set(existing.docs.map(d => d.data().name));
 
     const defaults = [
-      { name: 'Speed Sprint',    ropeType: 'SR', durationSeconds: 30,  teamSize: 1, isIndividual: true,  specialRule: null,         skippersCount: 1, sortOrder: 1 },
-      { name: 'Endurance 2 min', ropeType: 'SR', durationSeconds: 120, teamSize: 1, isIndividual: true,  specialRule: null,         skippersCount: 1, sortOrder: 2 },
-      { name: 'Endurance 3 min', ropeType: 'SR', durationSeconds: 180, teamSize: 1, isIndividual: true,  specialRule: null,         skippersCount: 1, sortOrder: 3 },
-      { name: 'Triple Under',    ropeType: 'SR', durationSeconds: null, teamSize: 1, isIndividual: true,  specialRule: 'triple_under', skippersCount: 1, sortOrder: 4 },
+      { name: 'Speed Sprint',    ropeType: 'SR', durationSeconds: 30,  teamSize: 1, isIndividual: true,  specialRule: null,         skippersCount: 1, sortOrder: 1, hasCompetitiveLabel: true },
+      { name: 'Endurance 2 min', ropeType: 'SR', durationSeconds: 120, teamSize: 1, isIndividual: true,  specialRule: null,         skippersCount: 1, sortOrder: 2, hasCompetitiveLabel: true },
+      { name: 'Endurance 3 min', ropeType: 'SR', durationSeconds: 180, teamSize: 1, isIndividual: true,  specialRule: null,         skippersCount: 1, sortOrder: 3, hasCompetitiveLabel: true },
+      { name: 'Triple Under',    ropeType: 'SR', durationSeconds: null, teamSize: 1, isIndividual: true,  specialRule: 'triple_under', skippersCount: 1, sortOrder: 4, hasCompetitiveLabel: true },
       { name: 'Speed Relay 2',   ropeType: 'SR', durationSeconds: 30,  teamSize: 2, isIndividual: false, specialRule: 'relay',      skippersCount: 2, sortOrder: 5 },
       { name: 'Speed Relay 4',   ropeType: 'SR', durationSeconds: 30,  teamSize: 4, isIndividual: false, specialRule: 'relay',      skippersCount: 4, sortOrder: 6 },
       { name: 'Double Under',    ropeType: 'SR', durationSeconds: 30,  teamSize: 2, isIndividual: false, specialRule: 'relay',      skippersCount: 2, sortOrder: 7 },
       { name: 'DD Speed Relay',  ropeType: 'DD', durationSeconds: 30,  teamSize: 4, isIndividual: false, specialRule: 'relay',      skippersCount: 4, sortOrder: 8 },
       { name: 'DD Speed Sprint', ropeType: 'DD', durationSeconds: 60,  teamSize: 3, isIndividual: false, specialRule: null,         skippersCount: 1, sortOrder: 9 },
+      { name: 'Freestyle',       ropeType: 'SR', durationSeconds: null, teamSize: 1, isIndividual: true, specialRule: null,         skippersCount: 1, sortOrder: 10, hasCompetitiveLabel: true},
     ];
 
     for (const disc of defaults) {
@@ -1639,5 +1692,106 @@ export const DisciplineFactory = {
         });
       }
     }
+  },
+};
+
+// ==========================================
+// 13. SEASON FACTORY
+// ==========================================
+ 
+export const SeasonFactory = {
+  create: (clubId, data) =>
+    addDoc(collection(db, `clubs/${clubId}/seasons`), {
+      name:        data.name        || '',
+      startDate:   data.startDate   || null,
+      endDate:     data.endDate     || null,
+      createdAt:   serverTimestamp(),
+      createdBy:   data.createdBy   || null,
+      isAbandoned: false,
+    }),
+ 
+  update: (clubId, seasonId, data) =>
+    updateDoc(doc(db, `clubs/${clubId}/seasons`, seasonId), data),
+ 
+  delete: (clubId, seasonId) =>
+    deleteDoc(doc(db, `clubs/${clubId}/seasons`, seasonId)),
+ 
+  getAll: (clubId, callback) =>
+    onSnapshot(collection(db, `clubs/${clubId}/seasons`), (snap) => {
+      const sorted = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.startDate?.seconds || 0) - (a.startDate?.seconds || 0));
+      callback(sorted);
+    }),
+ 
+  getById: (clubId, seasonId) =>
+    getDoc(doc(db, `clubs/${clubId}/seasons`, seasonId)),
+ 
+  // Returns the season whose date range covers today, if any
+  getCurrent: async (clubId) => {
+    const snap = await getDocs(collection(db, `clubs/${clubId}/seasons`));
+    const now  = Date.now();
+    const all  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    return all.find(s => {
+      if (s.isAbandoned) return false;
+      const start = s.startDate?.seconds ? s.startDate.seconds * 1000 : null;
+      const end   = s.endDate?.seconds   ? s.endDate.seconds   * 1000 : null;
+      return start && end && start <= now && now <= end;
+    }) || null;
+  },
+};
+
+// ==========================================
+// 14. MEMBERLABEL FACTORY
+// ==========================================
+ 
+export const MemberLabelFactory = {
+  // memberId is used as the document ID for O(1) lookups
+  upsert: (clubId, seasonId, memberId, data) =>
+    setDoc(
+      doc(db, `clubs/${clubId}/seasons/${seasonId}/memberLabels`, memberId),
+      {
+        memberId,
+        labelType:      data.labelType      || 'per_discipline',
+        allroundLabel:  data.allroundLabel  || null,
+        disciplines:    data.disciplines    || [],
+        updatedAt:      serverTimestamp(),
+        updatedBy:      data.updatedBy      || null,
+      },
+      { merge: true }
+    ),
+ 
+  getForMember: async (clubId, seasonId, memberId) => {
+    const snap = await getDoc(
+      doc(db, `clubs/${clubId}/seasons/${seasonId}/memberLabels`, memberId)
+    );
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  },
+ 
+  getForSeason: (clubId, seasonId, callback) =>
+    onSnapshot(
+      collection(db, `clubs/${clubId}/seasons/${seasonId}/memberLabels`),
+      (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    ),
+ 
+  delete: (clubId, seasonId, memberId) =>
+    deleteDoc(
+      doc(db, `clubs/${clubId}/seasons/${seasonId}/memberLabels`, memberId)
+    ),
+ 
+  // Convenience: get labels for a member across all seasons (for history view)
+  getForMemberAllSeasons: async (clubId, memberId) => {
+    const seasonsSnap = await getDocs(collection(db, `clubs/${clubId}/seasons`));
+    const seasons = seasonsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const results = [];
+    await Promise.all(seasons.map(async season => {
+      const labelSnap = await getDoc(
+        doc(db, `clubs/${clubId}/seasons/${season.id}/memberLabels`, memberId)
+      );
+      if (labelSnap.exists()) {
+        results.push({ season, label: { id: labelSnap.id, ...labelSnap.data() } });
+      }
+    }));
+    return results.sort((a, b) => (b.season.startDate?.seconds || 0) - (a.season.startDate?.seconds || 0));
   },
 };
