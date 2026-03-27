@@ -1111,23 +1111,28 @@ export default function AiCounterPage() {
           }
     
           const canvas = canvasRef.current;
-			const runLoop = () => {
-				if (!videoEl.srcObject) return;
-				if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
-					canvas.width  = videoEl.videoWidth;
-					canvas.height = videoEl.videoHeight;
-					const now = performance.now();
-					if (now - lastFrameTimeRef.current >= 33) {
-						lastFrameTimeRef.current = now;
-						// Draw the video frame first, then overlay the skeleton
-						const ctx = canvas.getContext('2d');
-						ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height)
-						const results = poseLandmarker.detectForVideo(videoEl, now);
-						onMpResults(results, now);
-					}
-				}
-				frameRef.current = requestAnimationFrame(runLoop);
-			};
+		  const RENDER_INTERVAL_MS = 0;   // draw video every frame
+		  const INFER_INTERVAL_MS  = 80;  // run pose detection max ~12x/sec
+		  let lastInferTime = 0;
+		  
+		  const runLoop = () => {
+  			if (!videoEl.srcObject) return;
+  			if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+    			canvas.width  = videoEl.videoWidth;
+   			    canvas.height = videoEl.videoHeight;
+    			const now = performance.now();
+    			// Always draw video
+    			const ctx = canvas.getContext('2d');
+   			    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+    			// Only run inference at limited rate
+    			if (now - lastInferTime >= INFER_INTERVAL_MS) {
+            		lastInferTime = now;
+      				const results = poseLandmarker.detectForVideo(videoEl, now);
+      				onMpResults(results, now);
+    			}
+  			}
+  			frameRef.current = requestAnimationFrame(runLoop);
+		  };
           frameRef.current = requestAnimationFrame(runLoop);
         }
     
