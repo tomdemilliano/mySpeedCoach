@@ -1102,7 +1102,7 @@ export default function AiCounterPage() {
         if (isLive) {
           try {
             const stream = await navigator.mediaDevices.getUserMedia({
-              video: { facingMode, width: { ideal: 640 }, height: { ideal: 480 } },
+              video: { facingMode, width: { ideal: isMobile ? 480 : 640 }, height: { ideal: isMobile ? 640 : 480 } },
             });
             videoEl.srcObject = stream;
             await videoEl.play();
@@ -1290,13 +1290,6 @@ export default function AiCounterPage() {
         canvas.height = video.videoHeight;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        // Draw "pick your foot" hint overlay
-        ctx.fillStyle = 'rgba(0,0,0,0.45)';
-        ctx.fillRect(0, canvas.height - 44, canvas.width, 44);
-        ctx.fillStyle = '#facc15';
-        ctx.font = `bold ${Math.max(11, Math.floor(canvas.width / 36))}px system-ui`;
-        ctx.textAlign = 'center';
-        ctx.fillText('👟 Selecteer hieronder de voet om te tellen', canvas.width / 2, canvas.height - 16);
         setVideoPreviewReady(true);
       }
     };
