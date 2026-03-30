@@ -895,6 +895,7 @@ export default function AiCounterPage() {
   const stepsRef            = useRef(0);
   const liveBpmRef          = useRef(0);
   const syncStepsToRtdbRef  = useRef(null);
+  const wakeLockRef 		= useRef(null); //keep screen awake during counting
 
   useEffect(() => { trackedRef.current  = trackedFoot; }, [trackedFoot]);
   useEffect(() => { overlayRef.current  = showOverlay; }, [showOverlay]);
@@ -1164,6 +1165,23 @@ export default function AiCounterPage() {
   const flipCamera = useCallback(() => setFacingMode(p => p === 'environment' ? 'user' : 'environment'), []);
   useEffect(() => { if (mode === 'camera') startCamera(); }, [facingMode]); // eslint-disable-line
 
+  // ── keep screen awake ──────────────────────────────────────────────────────
+  const requestWakeLock = useCallback(async () => {
+	  if (!('wakeLock' in navigator)) return;
+	  try {
+		  wakeLockRef.current = await navigator.wakeLock.request('screen');
+	  } catch (e) {
+		  console.warn('[WakeLock] could not acquire:', e.message);
+	  }
+  }, []);
+
+  const releaseWakeLock = useCallback(() => {
+	  if (wakeLockRef.current) {
+		  WakeLockRef.current.release().catch(() => {});
+		  WakeLockRef.current = null;
+	  }
+  }, []);
+
   // ── Session controls ───────────────────────────────────────────────────────
   const startSession = useCallback(() => {
     detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
@@ -1175,6 +1193,7 @@ export default function AiCounterPage() {
     isRunRef.current = true; setIsRunning(true);
     initRtdbSession();
     elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
+ 	requestWakeLock();
   }, [detCfg, initRtdbSession]);
 
   const stopSession = useCallback(() => {
@@ -1182,8 +1201,20 @@ export default function AiCounterPage() {
     clearInterval(elapsedRef.current); cancelAnimationFrame(frameRef.current);
     setFinalSteps(detectorRef.current.steps); setFinalMisses(detectorRef.current.misses); setSessionDone(true);
     stopRtdbSession();
+	releaseWakeLock();
   }, [stopRtdbSession]);
 
+  // ── Keep screen awake ───────────────────────────────────────────────────────
+  useEffect(() => {
+	  const onVisibilityChange = () => {
+		  if (document.visibilityState === 'visible' && isRunRef.current) {
+			  requestWakeLock();
+		  }
+	  };
+	  document.addEventListener('visibilitychange', onVisibilityChange);
+	  return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [requestWakeLock]);
+	
   // ── Beep detection ─────────────────────────────────────────────────────────
   useEffect(() => { beepModeRef.current  = beepMode;  }, [beepMode]);
   useEffect(() => { beepStateRef.current = beepState; }, [beepState]);
@@ -1210,6 +1241,7 @@ export default function AiCounterPage() {
           sessionStartTimeRef.current = Date.now();
           isRunRef.current = true; setIsRunning(true);
           initRtdbSession();
+		  requestWakeLock();
           elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
         } else if (state === 'counting') {
           beepStateRef.current = 'done';
@@ -1425,10 +1457,11 @@ export default function AiCounterPage() {
   const resetAll = useCallback(() => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
     isRunRef.current = false; stepsRef.current = 0; stopCameraStream(); destroyBeepDetector();
-    stopRtdbSession();
+    stopRtdbSession(); releaseWakeLock();
     if (uploadUrl) { URL.revokeObjectURL(uploadUrl); setUploadUrl(''); }
     setUploadFile(null); setMode('idle'); setIsRunning(false);
     setSessionDone(false); setSteps(0); setMisses(0); setElapsed(0);
+	setFinalSteps(0); setFinalMisses(0);
     setUploadProgress(0); setCodecError(false); setBackendError(''); setSavedOk(false);
     setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
     setVideoMuted(true); setVideoPreviewReady(false);
@@ -1442,6 +1475,7 @@ export default function AiCounterPage() {
   useEffect(() => () => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
     stopCameraStream(); destroyBeepDetector(); if (uploadUrl) URL.revokeObjectURL(uploadUrl);
+	releaseWakeLock();
   }, []); // eslint-disable-line
 
   const currentDisc = getDisc(disciplineId);
@@ -1819,10 +1853,10 @@ export default function AiCounterPage() {
                 if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
                 if (uploadVideoRef.current) { try { uploadVideoRef.current.pause(); uploadVideoRef.current.currentTime = 0; } catch (_) {} }
                 isRunRef.current = false; stepsRef.current = 0; setIsRunning(false); setSessionDone(false);
-                setSteps(0); setMisses(0); setElapsed(0); setSavedOk(false); setUploadProgress(0);
+                setSteps(0); setMisses(0); setElapsed(0); setSavedOk(false); setUploadProgress(0); setFinalSteps(0); setFinalMisses(0);
                 setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
                 detectorRef.current.reset(); setMode('upload'); setVideoPreviewReady(false);
-                stopRtdbSession();
+                stopRtdbSession(); releaseWakeLock();
               }}>
                 <RefreshCw size={14} /> Opnieuw
               </button>
