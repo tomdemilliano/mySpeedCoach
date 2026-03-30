@@ -16,7 +16,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { MemberLabelFactory } from '../constants/dbSchema';
+import { MemberLabelFactory, SeasonFactory } from '../constants/dbSchema';
 import { Save, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 
 const LABEL_OPTIONS = ['A', 'B', 'C'];
@@ -62,11 +62,34 @@ function LabelCell({ value, onChange }) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function LabelGrid({ clubId, season, members, groups, groupMemberMap, uid, disciplines }) {
+export default function LabelGrid({ clubId, season: initialSeason, members, groups, groupMemberMap, uid, disciplines }) {
   const eligibleDiscs = disciplines.filter(d => d.hasCompetitiveLabel && d.isActive !== false);
 
   // Only competitive skippers
   const competitiveMembers = members.filter(m => m.skipperType === 'competitive');
+
+  // ── Season selector ───────────────────────────────────────────────────────
+  const [allSeasons,     setAllSeasons]     = useState([]);
+  const [selectedSeason, setSelectedSeason] = useState(initialSeason || null);
+
+  // Load all seasons for this club
+  useEffect(() => {
+    if (!clubId) return;
+    const unsub = SeasonFactory.getAll(clubId, (seasons) => {
+      const active = seasons.filter(s => !s.isAbandoned);
+      setAllSeasons(active);
+    });
+    return () => unsub();
+  }, [clubId]);
+
+  // When the externally-provided current season changes (initial load), set it
+  useEffect(() => {
+    if (initialSeason && !selectedSeason) {
+      setSelectedSeason(initialSeason);
+    }
+  }, [initialSeason?.id]);
+
+  const season = selectedSeason;
 
   // Group filter state
   const [filterGroupId, setFilterGroupId] = useState('');
@@ -173,9 +196,12 @@ export default function LabelGrid({ clubId, season, members, groups, groupMember
     }
   };
 
+
   if (!season) return (
     <div style={emptyState}>
-      <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>Geen actief seizoen. Maak eerst een seizoen aan.</p>
+      <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>
+        Kies een seizoen hierboven om de labels te bekijken.
+      </p>
     </div>
   );
 
@@ -197,32 +223,63 @@ export default function LabelGrid({ clubId, season, members, groups, groupMember
   return (
     <div>
       {/* Season + filter row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: '13px', color: '#64748b' }}>
-          Seizoen: <strong style={{ color: '#f1f5f9' }}>{season.name}</strong>
-          <span style={{ marginLeft: '10px', fontSize: '11px', color: '#475569' }}>
-            {filteredMembers.length} van {competitiveMembers.length} skipper{competitiveMembers.length !== 1 ? 's' : ''}
-          </span>
-        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
 
-        {/* Group filter */}
-        {(groups || []).length > 0 && (
+          {/* Season selector */}
           <select
-            value={filterGroupId}
-            onChange={e => setFilterGroupId(e.target.value)}
+            value={selectedSeason?.id || ''}
+            onChange={e => {
+              const s = allSeasons.find(s => s.id === e.target.value);
+              setSelectedSeason(s || null);
+            }}
             style={{
-              marginLeft: 'auto',
               padding: '6px 10px', borderRadius: '8px',
-              border: '1px solid #334155', backgroundColor: '#0f172a',
-              color: filterGroupId ? '#f1f5f9' : '#64748b',
+              border: `1px solid ${selectedSeason ? '#3b82f666' : '#334155'}`,
+              backgroundColor: '#0f172a',
+              color: selectedSeason ? '#f1f5f9' : '#64748b',
               fontSize: '12px', fontFamily: 'inherit', cursor: 'pointer',
             }}
           >
-            <option value="">Alle groepen</option>
-            {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            <option value="">— Kies seizoen —</option>
+            {allSeasons.map(s => {
+              const now   = Date.now();
+              const start = s.startDate?.seconds ? s.startDate.seconds * 1000 : null;
+              const end   = s.endDate?.seconds   ? s.endDate.seconds   * 1000 : null;
+              const isCur = start && end && start <= now && now <= end;
+              return (
+                <option key={s.id} value={s.id}>
+                  {s.name}{isCur ? ' (huidig)' : ''}
+                </option>
+              );
+            })}
           </select>
-        )}
-      </div>
+
+          {selectedSeason && (
+            <div style={{ fontSize: '13px', color: '#64748b' }}>
+              <span style={{ marginLeft: '4px', fontSize: '11px', color: '#475569' }}>
+                {filteredMembers.length} van {competitiveMembers.length} skipper{competitiveMembers.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          )}
+
+          {/* Group filter */}
+          {(groups || []).length > 0 && (
+            <select
+              value={filterGroupId}
+              onChange={e => setFilterGroupId(e.target.value)}
+              style={{
+                marginLeft: 'auto',
+                padding: '6px 10px', borderRadius: '8px',
+                border: '1px solid #334155', backgroundColor: '#0f172a',
+                color: filterGroupId ? '#f1f5f9' : '#64748b',
+                fontSize: '12px', fontFamily: 'inherit', cursor: 'pointer',
+              }}
+            >
+              <option value="">Alle groepen</option>
+                {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          )}
+        </div>
 
       {/* Scrollable table */}
       <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #334155', marginBottom: '16px' }}>
