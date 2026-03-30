@@ -886,6 +886,7 @@ export default function AiCounterPage() {
   const isRunRef       = useRef(false);
   const trackedRef     = useRef(trackedFoot);
   const overlayRef     = useRef(showOverlay);
+  const modeRef        = useRef(mode);
   const mpPoseRef      = useRef(null);
   const mpCamRef            = useRef(null);
   const offscreenRef        = useRef(null);  // downscale canvas for pose inference
@@ -897,6 +898,7 @@ export default function AiCounterPage() {
 
   useEffect(() => { trackedRef.current  = trackedFoot; }, [trackedFoot]);
   useEffect(() => { overlayRef.current  = showOverlay; }, [showOverlay]);
+  useEffect(() => { modeRef.current     = mode; }, [mode]);
   useEffect(() => { detectorRef.current.updateConfig(detCfg); }, [detCfg]);
 
   useEffect(() => {
@@ -996,12 +998,12 @@ export default function AiCounterPage() {
         clearTimeout(missTimerRef.current); missTimerRef.current = setTimeout(() => setShowMiss(false), 600);
       }
     }
-    if (isRunRef.current) {
-      const cnt = detectorRef.current.steps;
-      ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.roundRect(12, 12, 110, 50, 10); ctx.fill();
-      ctx.fillStyle = '#60a5fa'; ctx.font = 'bold 30px monospace'; ctx.fillText(cnt, 20, 48);
-      ctx.fillStyle = '#94a3b8'; ctx.font = '10px system-ui'; ctx.fillText('STAPPEN', 20, 60);
-    }
+	if (isRunRef.current && modeRef.current === 'camera') {
+		const cnt = detectorRef.current.steps;
+		ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.roundRect(12, 12, 110, 50, 10); ctx.fill();
+		ctx.fillStyle = '#60a5fa'; ctx.font = 'bold 30px monospace'; ctx.fillText(cnt, 20, 48);
+		ctx.fillStyle = '#94a3b8'; ctx.font = '10px system-ui'; ctx.fillText('STAPPEN', 20, 60);
+	}
   }, []);
 
  
