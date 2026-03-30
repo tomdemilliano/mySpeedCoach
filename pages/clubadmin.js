@@ -1252,7 +1252,7 @@ export default function ClubAdmin() {
               clubId={activeClub.id}
               season={currentSeason}
               members={clubMemberProfiles}
-              groupMembers={groupMembersMap}
+              groupMembersMap={groupMembersMap}
               groups={groups}
               uid={uid}
               disciplines={disciplines}
