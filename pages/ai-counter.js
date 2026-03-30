@@ -818,7 +818,7 @@ export default function AiCounterPage() {
   const paramLastName     = urlParams.get('lastName')     || '';
   const paramRtdbUid      = urlParams.get('rtdbUid')      || '';
   const paramClubId       = urlParams.get('clubId')       || '';
-  
+  const paramMode 		  = urlParams.get('mode') || ''; // 'camera' | 'upload' | ''
 
   // Skipper passed from counter page — pre-filled, not editable on this page
   const passedSkipper = paramMemberId
@@ -912,6 +912,27 @@ export default function AiCounterPage() {
     UserFactory.get(uid).then(s => { if (s.exists()) setCounterUser({ id: uid, ...s.data() }); });
   }, []);
 
+  // Jump straight to upload mode when arriving from /live "Video uploaden" card
+  useEffect(() => {
+    if (paramMode === 'upload') {
+      // Trigger the file picker immediately — same as clicking "Video uploaden" button
+      // We set mode to 'idle' first (default), then open the file input
+      // The file input is shown once mode === 'idle', so we just auto-click it after mount
+      const timer = setTimeout(() => {
+        if (fileInputRef.current) fileInputRef.current.click();
+      }, 300); // slight delay so the component is fully mounted
+      return () => clearTimeout(timer);
+    }
+    if (paramMode === 'camera') {
+      // Auto-start camera
+      const timer = setTimeout(() => {
+        startCamera();
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount only
+	
   // ── Subscribe to skipper's live BPM from RTDB ────────────────────────────
   useEffect(() => {
     const rtdbUid = selSkipper?.rtdbUid || paramRtdbUid;
@@ -1495,7 +1516,7 @@ export default function AiCounterPage() {
       <style>{pageCSS}</style>
 
       <header style={s.header}>
-        <a href="/counter" style={s.backBtn}><ArrowLeft size={16} /><span>Teller</span></a>
+        <a href="/live" style={s.backBtn}><ArrowLeft size={16} /><span>Live</span></a>
         <div style={s.headerCenter}>
           <div style={s.betaChip}><Zap size={10} color="#f59e0b" /><span>AI BETA</span></div>
           <span style={s.headerTitle}>AI Stapteller</span>
