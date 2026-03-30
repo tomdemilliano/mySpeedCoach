@@ -45,16 +45,6 @@ const DEFAULT_CONFIG = {
   exitFactor:        1.0,
 };
 
-// ─── AI Model registry ────────────────────────────────────────────────────────
-const AI_MODELS = {
-  blazepose: {
-    id:          'blazepose',
-    label:       'MediaPipe BlazePose Landmarker',
-    sublabel:    'Snel op mobiel en desktop',
-    recommended: 'both',
-  },
-};
-
 // ─── Ankle Kalman Filter ──────────────────────────────────────────────────────
 class AnkleKalmanFilter {
   constructor() { this.reset(); }
@@ -65,11 +55,8 @@ class AnkleKalmanFilter {
   }
   update(rawY, confidence, t, Q = 0.01) {
     if (this._x === null) { this._x = rawY; this._v = 0; this._lastT = t; return rawY; }
-    // Use actual measured frame interval instead of assuming 30fps (33ms).
-    // On mobile the gap between processed frames may be 80-150ms — hardcoding 33 made dt balloon to 4x clamp constantly.
-    const rawDt = Math.min(t - this._lastT, 200); // ignore gaps > 200ms (app was backgrounded)
-    const dt = rawDt / 33.0;                       // normalise to 30fps baseline, no upper clamp needed
-    
+    const rawDt = Math.min(t - this._lastT, 200);
+    const dt = rawDt / 33.0;
     this._lastT = t;
     const xPred = this._x + this._v * dt;
     const vPred = this._v;
@@ -109,17 +96,10 @@ class StepDetector {
     if (!this.sessionStart) this.sessionStart = t;
     this.signal.push({ y, t });
     if (this.signal.length > 90) this.signal.shift();
-    const ev = this._detect(y, t);
-    return ev;
+    return this._detect(y, t);
   }
   get debugState() {
-    return {
-      valleyY:  this.valleyY,
-      peakY:    this.peakY,
-      peakEntryY: this.peakEntryY,
-      inPeak:   this.inPeak,
-      lastStepTime: this.lastStepTime,
-    };
+    return { valleyY: this.valleyY, peakY: this.peakY, peakEntryY: this.peakEntryY, inPeak: this.inPeak, lastStepTime: this.lastStepTime };
   }
   _detect(y, t) {
     const { peakMinProminence: P, peakMinIntervalMs: I, missGapMs: M, peakMinAmplitude: A = 0.015, exitFactor: EF = 1.0 } = this.config;
@@ -127,8 +107,7 @@ class StepDetector {
     const avgY = this.signal.slice(-5).reduce((s, p) => s + p.y, 0) / 5;
     if (this.valleyY === null) { this.valleyY = avgY; return null; }
     if (!this.inPeak && (this.valleyY - avgY) > P) {
-      this.inPeak = true; this.peakY = avgY;
-      this.peakEntryY = avgY;
+      this.inPeak = true; this.peakY = avgY; this.peakEntryY = avgY;
     }
     if (this.inPeak) {
       if (avgY < this.peakY) this.peakY = avgY;
@@ -183,16 +162,12 @@ function drawSignalToCanvas(ctx, w, h, signalHistory, stepTimestamps, config, pl
     ctx.beginPath(); ctx.moveTo(0, (h / 4) * i); ctx.lineTo(w, (h / 4) * i); ctx.stroke();
   }
   if (!signalHistory || signalHistory.length < 2) {
-    ctx.fillStyle = 'rgba(100,116,139,0.7)';
-    ctx.font = '9px system-ui'; ctx.textAlign = 'center';
-    ctx.fillText('wacht op signaal…', w / 2, h / 2 + 3);
-    return;
+    ctx.fillStyle = 'rgba(100,116,139,0.7)'; ctx.font = '9px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText('wacht op signaal…', w / 2, h / 2 + 3); return;
   }
   const vals = signalHistory.map(p => p.y);
   const mn = Math.min(...vals), mx = Math.max(...vals), rng = mx - mn || 0.01;
-  const tMin = signalHistory[0].t;
-  const tMax = signalHistory[signalHistory.length - 1].t;
-  const tRange = tMax - tMin || 1;
+  const tMin = signalHistory[0].t, tMax = signalHistory[signalHistory.length - 1].t, tRange = tMax - tMin || 1;
   const toY = v => h - ((v - mn) / rng) * h * 0.82 - h * 0.09;
   const toX = t => ((t - tMin) / tRange) * w;
   const ty = h - ((config.peakMinProminence / (rng + config.peakMinProminence)) * h * 0.75 + h * 0.09);
@@ -202,42 +177,27 @@ function drawSignalToCanvas(ctx, w, h, signalHistory, stepTimestamps, config, pl
   if (hasRaw) {
     ctx.strokeStyle = 'rgba(71,85,105,0.7)'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
     ctx.beginPath();
-    signalHistory.forEach((p, i) => {
-      const x = toX(p.t);
-      i === 0 ? ctx.moveTo(x, toY(p.raw ?? p.y)) : ctx.lineTo(x, toY(p.raw ?? p.y));
-    });
+    signalHistory.forEach((p, i) => { const x = toX(p.t); i === 0 ? ctx.moveTo(x, toY(p.raw ?? p.y)) : ctx.lineTo(x, toY(p.raw ?? p.y)); });
     ctx.stroke(); ctx.setLineDash([]);
   }
   ctx.strokeStyle = config.kalmanEnabled ? '#00d4aa' : '#60a5fa'; ctx.lineWidth = 2;
   ctx.beginPath();
-  signalHistory.forEach((p, i) => {
-    const x = toX(p.t);
-    i === 0 ? ctx.moveTo(x, toY(p.y)) : ctx.lineTo(x, toY(p.y));
-  });
+  signalHistory.forEach((p, i) => { const x = toX(p.t); i === 0 ? ctx.moveTo(x, toY(p.y)) : ctx.lineTo(x, toY(p.y)); });
   ctx.stroke();
   if (stepTimestamps && stepTimestamps.length > 0) {
     stepTimestamps.forEach(entry => {
       const st = entry?.t ?? entry;
       if (st < tMin - 50 || st > tMax + 50) return;
       const x = toX(st);
-      ctx.strokeStyle = 'rgba(250,204,21,0.7)';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(250,204,21,0.7)'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-      if (entry?.n != null) {
-        ctx.fillStyle = '#facc15';
-        ctx.font = 'bold 8px system-ui';
-        ctx.textAlign = 'center';
-        ctx.fillText(entry.n, x, 9);
-      }
+      if (entry?.n != null) { ctx.fillStyle = '#facc15'; ctx.font = 'bold 8px system-ui'; ctx.textAlign = 'center'; ctx.fillText(entry.n, x, 9); }
     });
   }
   if (playheadT !== null) {
     const px = toX(playheadT);
-    ctx.strokeStyle = '#f472b6';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([4, 3]);
-    ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, h); ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.strokeStyle = '#f472b6'; ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, h); ctx.stroke(); ctx.setLineDash([]);
     ctx.beginPath(); ctx.arc(px, h / 2, 4, 0, Math.PI * 2);
     ctx.fillStyle = '#f472b6'; ctx.fill();
   }
@@ -255,18 +215,11 @@ function LiveSignalOverlay({ signalHistory, stepTimestamps, config, visible }) {
   if (!visible) return null;
   return (
     <div style={{ backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #334155', padding: '8px 10px' }}>
-      <canvas ref={gRef} width={300} height={54}
-        style={{ width: '100%', height: '54px', borderRadius: '6px', display: 'block', border: '1px solid rgba(51,65,85,0.5)' }} />
+      <canvas ref={gRef} width={300} height={54} style={{ width: '100%', height: '54px', borderRadius: '6px', display: 'block', border: '1px solid rgba(51,65,85,0.5)' }} />
       <div style={{ display: 'flex', gap: '12px', marginTop: '3px', paddingLeft: '2px', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '9px', color: '#00d4aa', display: 'flex', alignItems: 'center', gap: '3px' }}>
-          <span style={{ width: '10px', height: '2px', backgroundColor: '#00d4aa', display: 'inline-block' }} />enkel
-        </span>
-        <span style={{ fontSize: '9px', color: 'rgba(245,158,11,0.8)', display: 'flex', alignItems: 'center', gap: '3px' }}>
-          <span style={{ width: '10px', height: '0px', borderTop: '1px dashed rgba(245,158,11,0.7)', display: 'inline-block' }} />drempel
-        </span>
-        <span style={{ fontSize: '9px', color: '#facc15', display: 'flex', alignItems: 'center', gap: '3px' }}>
-          <span style={{ width: '0', height: '0', borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '6px solid #facc15', display: 'inline-block' }} />stap
-        </span>
+        <span style={{ fontSize: '9px', color: '#00d4aa', display: 'flex', alignItems: 'center', gap: '3px' }}><span style={{ width: '10px', height: '2px', backgroundColor: '#00d4aa', display: 'inline-block' }} />enkel</span>
+        <span style={{ fontSize: '9px', color: 'rgba(245,158,11,0.8)', display: 'flex', alignItems: 'center', gap: '3px' }}><span style={{ width: '10px', height: '0px', borderTop: '1px dashed rgba(245,158,11,0.7)', display: 'inline-block' }} />drempel</span>
+        <span style={{ fontSize: '9px', color: '#facc15', display: 'flex', alignItems: 'center', gap: '3px' }}><span style={{ width: '0', height: '0', borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '6px solid #facc15', display: 'inline-block' }} />stap</span>
       </div>
     </div>
   );
@@ -274,10 +227,10 @@ function LiveSignalOverlay({ signalHistory, stepTimestamps, config, visible }) {
 
 // ─── Post-Session Review Timeline ─────────────────────────────────────────────
 function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTime, uploadVideoRef, hasUploadVideo }) {
-  const canvasRef   = useRef(null);
-  const isDragging  = useRef(false);
-  const [playheadT,  setPlayheadT]  = useState(null);
-  const [hoverInfo,  setHoverInfo]  = useState(null);
+  const canvasRef  = useRef(null);
+  const isDragging = useRef(false);
+  const [playheadT, setPlayheadT] = useState(null);
+  const [hoverInfo, setHoverInfo] = useState(null);
 
   const PX_PER_SAMPLE = 2.5;
   const canvasW = Math.max(600, (signalHistory?.length || 0) * PX_PER_SAMPLE);
@@ -285,8 +238,7 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
 
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    drawSignalToCanvas(ctx, canvasW, canvasH, signalHistory, stepTimestamps, config, playheadT);
+    drawSignalToCanvas(canvas.getContext('2d'), canvasW, canvasH, signalHistory, stepTimestamps, config, playheadT);
   }, [signalHistory, stepTimestamps, config, playheadT, canvasW]);
 
   const seekToX = useCallback((clientX) => {
@@ -295,28 +247,18 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
     const rect = canvas.getBoundingClientRect();
     const canvasX = ((clientX - rect.left) / rect.width) * canvasW;
     const ratio = Math.max(0, Math.min(1, canvasX / canvasW));
-    const tMin = signalHistory[0].t;
-    const tMax = signalHistory[signalHistory.length - 1].t;
+    const tMin = signalHistory[0].t, tMax = signalHistory[signalHistory.length - 1].t;
     const targetT = tMin + ratio * (tMax - tMin);
     setPlayheadT(targetT);
-    const nearest = signalHistory.reduce((best, p) =>
-      Math.abs(p.t - targetT) < Math.abs(best.t - targetT) ? p : best
-    , signalHistory[0]);
+    const nearest = signalHistory.reduce((best, p) => Math.abs(p.t - targetT) < Math.abs(best.t - targetT) ? p : best, signalHistory[0]);
     const stepsUpTo = stepTimestamps ? stepTimestamps.filter(s => (s?.t ?? s) <= targetT).length : 0;
     const elapsedMs = targetT - tMin;
     const idx = signalHistory.indexOf(nearest);
     const window5 = signalHistory.slice(Math.max(0, idx - 4), idx + 1);
     const avgY = window5.reduce((sum, p) => sum + p.y, 0) / window5.length;
-    const valleyY = nearest.valleyY ?? null;
-    const peakY   = nearest.peakY   ?? null;
-    const inPeak  = nearest.inPeak  ?? false;
-    const P = config.peakMinProminence;
-    const I = config.peakMinIntervalMs;
-    const nearestStepEntry = stepTimestamps?.reduce((best, s) => {
-      const st = s?.t ?? s;
-      if (!best) return s;
-      return Math.abs(st - targetT) < Math.abs((best?.t ?? best) - targetT) ? s : best;
-    }, null);
+    const valleyY = nearest.valleyY ?? null, peakY = nearest.peakY ?? null, inPeak = nearest.inPeak ?? false;
+    const P = config.peakMinProminence, I = config.peakMinIntervalMs;
+    const nearestStepEntry = stepTimestamps?.reduce((best, s) => { if (!best) return s; return Math.abs((s?.t ?? s) - targetT) < Math.abs((best?.t ?? best) - targetT) ? s : best; }, null);
     const nearestStepT = nearestStepEntry ? (nearestStepEntry?.t ?? nearestStepEntry) : null;
     const nearestStepDt = nearestStepT != null ? Math.abs(nearestStepT - targetT) : Infinity;
     const isAtStep = nearestStepDt < 300;
@@ -333,7 +275,7 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
         const dip = valleyY - avgY;
         if (dip > P) {
           explanationLines.push({ type: 'info', text: `Dip gedetecteerd: bodem (${avgY.toFixed(3)}) ligt ${dip.toFixed(3)} onder dal (${valleyY.toFixed(3)}).` });
-          explanationLines.push({ type: 'ok',   text: `Drempel ${P.toFixed(3)} overschreden → detector gaat piek-fase in.` });
+          explanationLines.push({ type: 'ok', text: `Drempel ${P.toFixed(3)} overschreden → detector gaat piek-fase in.` });
         } else {
           explanationLines.push({ type: 'neutral', text: `Rust-fase: geen piek actief. Dal=${valleyY?.toFixed(3)}, huidig gem.=${avgY.toFixed(3)}.` });
           explanationLines.push({ type: 'warn', text: `Dip ${dip.toFixed(3)} < drempel ${P.toFixed(3)} → nog geen beweging herkend.` });
@@ -341,53 +283,30 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
       }
     }
     if (isAtStep) {
-      const stepEntry = nearestStepEntry;
-      const stepN = stepEntry?.n;
+      const stepN = nearestStepEntry?.n;
       explanationLines.push({ type: 'ok', text: `✓ Stap #${stepN ?? '?'} geteld ${nearestStepDt < 10 ? 'hier' : `${Math.round(nearestStepDt)} ms geleden`}.` });
       const prevStep = stepTimestamps?.filter(s => (s?.t ?? s) < (nearestStepT ?? 0)).slice(-1)[0];
       if (prevStep) {
         const dt = nearestStepT - (prevStep?.t ?? prevStep);
-        if (dt < I) {
-          explanationLines.push({ type: 'warn', text: `Interval ${dt} ms < minimum ${I} ms → deze stap had geblokkeerd kunnen worden.` });
-        } else {
-          explanationLines.push({ type: 'ok', text: `Interval ${dt} ms ≥ minimum ${I} ms → doorgelaten.` });
-        }
+        if (dt < I) { explanationLines.push({ type: 'warn', text: `Interval ${dt} ms < minimum ${I} ms → deze stap had geblokkeerd kunnen worden.` }); }
+        else { explanationLines.push({ type: 'ok', text: `Interval ${dt} ms ≥ minimum ${I} ms → doorgelaten.` }); }
       }
     } else {
-      if (!inPeak && valleyY !== null) {
-        const dip = valleyY - avgY;
-        if (dip <= P) {
-          explanationLines.push({ type: 'warn', text: `Geen stap: beweging ${dip.toFixed(3)} te klein (min ${P.toFixed(3)}).` });
-        }
-      }
+      if (!inPeak && valleyY !== null) { const dip = valleyY - avgY; if (dip <= P) { explanationLines.push({ type: 'warn', text: `Geen stap: beweging ${dip.toFixed(3)} te klein (min ${P.toFixed(3)}).` }); } }
       const lastStep = stepTimestamps?.filter(s => (s?.t ?? s) <= targetT).slice(-1)[0];
-      if (lastStep) {
-        const dtSince = targetT - (lastStep?.t ?? lastStep);
-        if (dtSince < I) {
-          explanationLines.push({ type: 'warn', text: `Interval-blokkade: slechts ${Math.round(dtSince)} ms na laatste stap (min ${I} ms).` });
-        }
-      }
+      if (lastStep) { const dtSince = targetT - (lastStep?.t ?? lastStep); if (dtSince < I) { explanationLines.push({ type: 'warn', text: `Interval-blokkade: slechts ${Math.round(dtSince)} ms na laatste stap (min ${I} ms).` }); } }
     }
     setHoverInfo({ elapsedMs, ankleY: nearest.y, rawY: nearest.raw ?? nearest.y, avgY, valleyY, peakY, inPeak, stepsUpTo, isAtStep, nearestStepDt: isAtStep ? nearestStepDt : null, explanationLines });
     if (hasUploadVideo && uploadVideoRef?.current && sessionStartTime) {
       const videoSec = (targetT - sessionStartTime) / 1000;
       const vid = uploadVideoRef.current;
-      try {
-        if (vid.readyState >= 1 && isFinite(videoSec) && videoSec >= 0) {
-          vid.pause();
-          vid.currentTime = Math.min(videoSec, vid.duration || videoSec);
-        }
-      } catch (e) { console.warn('[ReviewTimeline] seek failed:', e?.message); }
+      try { if (vid.readyState >= 1 && isFinite(videoSec) && videoSec >= 0) { vid.pause(); vid.currentTime = Math.min(videoSec, vid.duration || videoSec); } } catch (e) { console.warn('[ReviewTimeline] seek failed:', e?.message); }
     }
   }, [signalHistory, stepTimestamps, canvasW, hasUploadVideo, uploadVideoRef, sessionStartTime]);
 
-  const onPointerDown = useCallback((e) => {
-    isDragging.current = true;
-    canvasRef.current?.setPointerCapture?.(e.pointerId);
-    seekToX(e.clientX);
-  }, [seekToX]);
+  const onPointerDown = useCallback((e) => { isDragging.current = true; canvasRef.current?.setPointerCapture?.(e.pointerId); seekToX(e.clientX); }, [seekToX]);
   const onPointerMove = useCallback((e) => { if (!isDragging.current) return; seekToX(e.clientX); }, [seekToX]);
-  const onPointerUp = useCallback(() => { isDragging.current = false; }, []);
+  const onPointerUp   = useCallback(() => { isDragging.current = false; }, []);
 
   if (!signalHistory || signalHistory.length < 5) return null;
   const stepCount = stepTimestamps?.length || 0;
@@ -395,33 +314,14 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
   return (
     <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-        <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          📊 Signaalreview
-        </div>
+        <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📊 Signaalreview</div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '10px', color: '#facc15', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <span style={{ width: '1.5px', height: '10px', backgroundColor: '#facc15', display: 'inline-block' }} />
-            {stepCount} stappen gemarkeerd
-          </span>
-          {hasUploadVideo && (
-            <span style={{ fontSize: '10px', color: '#f472b6', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ width: '12px', height: '2px', backgroundColor: '#f472b6', display: 'inline-block' }} />
-              klik om te scrubben
-            </span>
-          )}
+          <span style={{ fontSize: '10px', color: '#facc15', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: '1.5px', height: '10px', backgroundColor: '#facc15', display: 'inline-block' }} />{stepCount} stappen gemarkeerd</span>
+          {hasUploadVideo && <span style={{ fontSize: '10px', color: '#f472b6', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: '12px', height: '2px', backgroundColor: '#f472b6', display: 'inline-block' }} />klik om te scrubben</span>}
         </div>
       </div>
       <div style={{ overflowX: 'auto', overflowY: 'hidden', borderRadius: '8px', border: '1px solid #0f172a', cursor: 'crosshair', WebkitOverflowScrolling: 'touch' }}>
-        <canvas
-          ref={canvasRef}
-          width={canvasW}
-          height={canvasH}
-          style={{ display: 'block', height: `${canvasH}px`, width: `${canvasW}px`, userSelect: 'none' }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerLeave={onPointerUp}
-        />
+        <canvas ref={canvasRef} width={canvasW} height={canvasH} style={{ display: 'block', height: `${canvasH}px`, width: `${canvasW}px`, userSelect: 'none' }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp} />
       </div>
       {hoverInfo && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -452,10 +352,7 @@ function ReviewTimeline({ signalHistory, stepTimestamps, config, sessionStartTim
               <p style={{ margin: 0 }}>De detector volgt continu de <strong style={{ color: '#64748b' }}>enkelhoogte Y</strong>. Een stap wordt geteld als een volledige <em>piek-cyclus</em> is afgerond met voldoende grootte.</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 {[['#60a5fa','①','Dal-referentie','het lopende hoogste Y-punt. Past zich langzaam aan als de enkel omhoog gaat.'],['#a78bfa','②','Piek-fase',`wordt geactiveerd zodra het gemiddelde Y meer dan drempel (${config.peakMinProminence.toFixed(3)}) daalt t.o.v. het dal.`],['#22c55e','③','Stap tellen',`wanneer de enkel vanuit de piek weer genoeg terugzakt. Min. sprong-hoogte: ${config.peakMinAmplitude?.toFixed(3) ?? '0.015'}, min. interval: ${config.peakMinIntervalMs} ms.`],['#ef4444','④','Mist',`als er langer dan ${config.missGapMs} ms × 2 geen stap wordt gedetecteerd.`]].map(([color, num, title, desc]) => (
-                  <div key={num} style={{ display: 'flex', gap: '7px' }}>
-                    <span style={{ color, flexShrink: 0 }}>{num}</span>
-                    <span><strong style={{ color }}>{title}</strong> — {desc}</span>
-                  </div>
+                  <div key={num} style={{ display: 'flex', gap: '7px' }}><span style={{ color, flexShrink: 0 }}>{num}</span><span><strong style={{ color }}>{title}</strong> — {desc}</span></div>
                 ))}
               </div>
               <p style={{ margin: 0, color: '#334155', fontSize: '10px' }}>💡 Als stappen worden gemist, verlaag de <em>Pieksensitiviteit</em>. Bij dubbeltelling, verhoog het <em>Min. interval</em>.</p>
@@ -485,7 +382,7 @@ const metricLabel = { fontSize: '9px', color: '#334155', fontWeight: '600', text
 // ─── Beep Detector ────────────────────────────────────────────────────────────
 class BeepDetector {
   constructor(onBeep, opts = {}) {
-    this.onBeep  = onBeep;
+    this.onBeep = onBeep;
     this.opts = { fftSize: 2048, smoothing: 0.15, minFreq: 500, maxFreq: 5000, tonalityThreshold: 22, absThreshold: -48, minDurationMs: 60, maxDurationMs: 600, cooldownMs: 1200, ...opts };
     this._ctx = null; this._analyser = null; this._source = null;
     this._freqBuf = null; this._rafId = null; this._noiseFloor = -60;
@@ -593,7 +490,7 @@ function exportCsv(signalHistory, stepTimestamps, detCfg, disciplineId, sessionT
   const cols = ['elapsed_ms','timestamp_ms','ankle_y_filtered','ankle_y_raw','valley_y','peak_y','in_peak','step_counted','step_number'];
   const rows = signalHistory.map(p => {
     const closest = [...stepTimes].reduce((best, st) => Math.abs(st - p.t) < Math.abs(best - p.t) ? st : best, Infinity);
-    const isStep = isFinite(closest) && Math.abs(closest - p.t) < 50;
+    const isStep  = isFinite(closest) && Math.abs(closest - p.t) < 50;
     return [p.t - tMin, p.t, p.y.toFixed(5), (p.raw ?? p.y).toFixed(5), p.valleyY != null ? p.valleyY.toFixed(5) : '', p.peakY != null ? p.peakY.toFixed(5) : '', p.inPeak != null ? (p.inPeak ? '1' : '0') : '', isStep ? '1' : '0', isStep ? (stepByT[closest] ?? '') : ''].join(',');
   });
   const meta = [
@@ -684,7 +581,7 @@ function DetectionTuningPanel({ config, onChange }) {
   );
 }
 
-// ─── Skipper Picker ────────────────────────────────────────────────────────────
+// ─── Skipper Picker ───────────────────────────────────────────────────────────
 const lSt  = { fontSize: '10px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' };
 const cSt  = { padding: '5px 12px', borderRadius: '14px', border: '1px solid #334155', background: 'transparent', color: '#64748b', fontSize: '12px', fontWeight: '500', cursor: 'pointer', fontFamily: 'inherit' };
 const cAct = { borderColor: '#3b82f6', backgroundColor: '#3b82f622', color: '#60a5fa', fontWeight: '700' };
@@ -693,11 +590,11 @@ const scA  = { borderColor: '#3b82f6', backgroundColor: '#1e3a5f' };
 const avSt = { width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: 'white', flexShrink: 0 };
 
 function SkipperPicker({ counterUser, onSelect, selectedSkipper }) {
-  const [clubs, setClubs] = useState([]);
-  const [groups, setGroups] = useState([]);
+  const [clubs, setClubs]     = useState([]);
+  const [groups, setGroups]   = useState([]);
   const [skippers, setSkippers] = useState([]);
   const [members, setMembers] = useState([]);
-  const [clubId, setClubId] = useState('');
+  const [clubId, setClubId]   = useState('');
   const [groupId, setGroupId] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -807,9 +704,9 @@ function SkipperPicker({ counterUser, onSelect, selectedSkipper }) {
   );
 }
 
-// ─── Main Page ─────────────────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AiCounterPage() {
-  // ── Read selection passed from counter.js via URL params ─────────────────
+  // ── Read URL params (set by /skipper-select or /live) ─────────────────────
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
   const paramDisciplineId = urlParams.get('disciplineId') || '';
   const paramSessionType  = urlParams.get('sessionType')  || 'Training';
@@ -818,16 +715,16 @@ export default function AiCounterPage() {
   const paramLastName     = urlParams.get('lastName')     || '';
   const paramRtdbUid      = urlParams.get('rtdbUid')      || '';
   const paramClubId       = urlParams.get('clubId')       || '';
-  const paramMode 		  = urlParams.get('mode') || ''; // 'camera' | 'upload' | ''
+  const paramGroupId      = urlParams.get('groupId')      || ''; // needed for handleOpnieuw prev
+  const paramMode         = urlParams.get('mode')         || ''; // 'camera' | 'upload' | ''
 
-  // Skipper passed from counter page — pre-filled, not editable on this page
+  // Skipper pre-filled from /skipper-select — not editable here
   const passedSkipper = paramMemberId
     ? { memberId: paramMemberId, clubId: paramClubId, firstName: paramFirstName, lastName: paramLastName, rtdbUid: paramRtdbUid }
     : null;
 
   const [backendLoading, setBackendLoading] = useState(false);
   const [backendError,   setBackendError]   = useState('');
-
   const [mode,           setMode]           = useState('idle');
   const [facingMode,     setFacingMode]     = useState('environment');
   const [showOverlay,    setShowOverlay]    = useState(true);
@@ -844,13 +741,11 @@ export default function AiCounterPage() {
   const [finalMisses,    setFinalMisses]    = useState(0);
   const [uploadProgress, setUploadProgress] = useState(0);
 
-  // disciplineId and sessionType come from URL params — not editable here
   const disciplineId = paramDisciplineId;
   const sessionType  = paramSessionType;
 
   const [trackedFoot,    setTrackedFoot]    = useState('left');
   const [counterUser,    setCounterUser]    = useState(null);
-  // selSkipper is pre-filled from URL params; can still be overridden via the SkipperPicker
   const [selSkipper,     setSelSkipper]     = useState(passedSkipper);
   const [saving,         setSaving]         = useState(false);
   const [savedOk,        setSavedOk]        = useState(false);
@@ -866,11 +761,7 @@ export default function AiCounterPage() {
   const beepDetectorRef  = useRef(null);
   const beepModeRef      = useRef(false);
   const beepStateRef     = useRef('waiting_start');
-
-  // ── Live BPM from skipper's RTDB node ────────────────────────────────────
-  const [liveBpm, setLiveBpm] = useState(0);
-
-  // ── Preview state ─────────────────────────────────────────────────────────
+  const [liveBpm,        setLiveBpm]        = useState(0);
   const [videoPreviewReady, setVideoPreviewReady] = useState(false);
 
   const videoRef       = useRef(null);
@@ -888,18 +779,17 @@ export default function AiCounterPage() {
   const overlayRef     = useRef(showOverlay);
   const modeRef        = useRef(mode);
   const mpPoseRef      = useRef(null);
-  const mpCamRef            = useRef(null);
-  const offscreenRef        = useRef(null);  // downscale canvas for pose inference
-  const lastFrameTimeRef    = useRef(0);     // throttle: skip frames on slow devices
-  // Refs to keep processAnkle (empty-deps callback) up-to-date without re-creating it
-  const stepsRef            = useRef(0);
-  const liveBpmRef          = useRef(0);
-  const syncStepsToRtdbRef  = useRef(null);
-  const wakeLockRef 		= useRef(null); //keep screen awake during counting
+  const mpCamRef       = useRef(null);
+  const offscreenRef   = useRef(null);
+  const lastFrameTimeRef   = useRef(0);
+  const stepsRef           = useRef(0);
+  const liveBpmRef         = useRef(0);
+  const syncStepsToRtdbRef = useRef(null);
+  const wakeLockRef        = useRef(null);
 
-  useEffect(() => { trackedRef.current  = trackedFoot; }, [trackedFoot]);
-  useEffect(() => { overlayRef.current  = showOverlay; }, [showOverlay]);
-  useEffect(() => { modeRef.current     = mode; }, [mode]);
+  useEffect(() => { trackedRef.current = trackedFoot; }, [trackedFoot]);
+  useEffect(() => { overlayRef.current = showOverlay; }, [showOverlay]);
+  useEffect(() => { modeRef.current    = mode; }, [mode]);
   useEffect(() => { detectorRef.current.updateConfig(detCfg); }, [detCfg]);
 
   useEffect(() => {
@@ -907,33 +797,26 @@ export default function AiCounterPage() {
   }, [videoMuted]);
 
   const { disciplines, getDisc } = useDisciplines();
+
   useEffect(() => {
     const uid = getCookie(); if (!uid) return;
     UserFactory.get(uid).then(s => { if (s.exists()) setCounterUser({ id: uid, ...s.data() }); });
   }, []);
 
-  // Jump straight to upload mode when arriving from /live "Video uploaden" card
+  // ── Auto-start based on mode param ───────────────────────────────────────
   useEffect(() => {
     if (paramMode === 'upload') {
-      // Trigger the file picker immediately — same as clicking "Video uploaden" button
-      // We set mode to 'idle' first (default), then open the file input
-      // The file input is shown once mode === 'idle', so we just auto-click it after mount
-      const timer = setTimeout(() => {
-        if (fileInputRef.current) fileInputRef.current.click();
-      }, 300); // slight delay so the component is fully mounted
-      return () => clearTimeout(timer);
+      const t = setTimeout(() => { if (fileInputRef.current) fileInputRef.current.click(); }, 300);
+      return () => clearTimeout(t);
     }
     if (paramMode === 'camera') {
-      // Auto-start camera
-      const timer = setTimeout(() => {
-        startCamera();
-      }, 300);
-      return () => clearTimeout(timer);
+      const t = setTimeout(() => { startCamera(); }, 300);
+      return () => clearTimeout(t);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // run once on mount only
-	
-  // ── Subscribe to skipper's live BPM from RTDB ────────────────────────────
+  }, []);
+
+  // ── Live BPM from RTDB ────────────────────────────────────────────────────
   useEffect(() => {
     const rtdbUid = selSkipper?.rtdbUid || paramRtdbUid;
     if (!rtdbUid) return;
@@ -943,7 +826,7 @@ export default function AiCounterPage() {
     return () => unsub();
   }, [selSkipper?.rtdbUid, paramRtdbUid]);
 
-  // ── Sync AI step count to RTDB (mirrors manual counter) ──────────────────
+  // ── Sync AI steps to RTDB ─────────────────────────────────────────────────
   const syncStepsToRtdb = useCallback((stepCount, bpm) => {
     const rtdbUid = selSkipper?.rtdbUid || paramRtdbUid;
     if (!rtdbUid || !disciplineId) return;
@@ -952,17 +835,14 @@ export default function AiCounterPage() {
     LiveSessionFactory.incrementSteps(rtdbUid, bpm || 0, firstTap).catch(() => {});
   }, [selSkipper?.rtdbUid, paramRtdbUid, disciplineId]);
 
-  // Keep the ref current so processAnkle (empty deps) can always call latest version
   useEffect(() => { syncStepsToRtdbRef.current = syncStepsToRtdb; }, [syncStepsToRtdb]);
 
-  // ── Init RTDB session slot when AI counting starts ────────────────────────
   const initRtdbSession = useCallback(() => {
     const rtdbUid = selSkipper?.rtdbUid || paramRtdbUid;
     if (!rtdbUid || !disciplineId) return;
     LiveSessionFactory.startCounter(rtdbUid, disciplineId, sessionType).catch(() => {});
   }, [selSkipper?.rtdbUid, paramRtdbUid, disciplineId, sessionType]);
 
-  // ── Stop RTDB session when AI counting ends ───────────────────────────────
   const stopRtdbSession = useCallback(() => {
     const rtdbUid = selSkipper?.rtdbUid || paramRtdbUid;
     if (!rtdbUid) return;
@@ -975,44 +855,28 @@ export default function AiCounterPage() {
     if (!canvas || canvas.width === 0) return;
     const ctx = canvas.getContext('2d');
     if (image) { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(image, 0, 0, canvas.width, canvas.height); }
-
     const cfg = detectorRef.current.config;
-    const filteredY = cfg.kalmanEnabled
-      ? kalmanRef.current.update(ankleY, confidence, Date.now(), cfg.kalmanProcessNoise)
-      : ankleY;
-
-    const ax = ankleX * canvas.width;
-    const ay = filteredY * canvas.height;
+    const filteredY = cfg.kalmanEnabled ? kalmanRef.current.update(ankleY, confidence, Date.now(), cfg.kalmanProcessNoise) : ankleY;
+    const ax = ankleX * canvas.width, ay = filteredY * canvas.height;
     ctx.beginPath(); ctx.arc(ax, ay, 18, 0, Math.PI * 2); ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 3; ctx.stroke();
-    ctx.beginPath(); ctx.arc(ax, ay, 8,  0, Math.PI * 2); ctx.fillStyle   = '#f59e0b'; ctx.fill();
-
+    ctx.beginPath(); ctx.arc(ax, ay, 8, 0, Math.PI * 2); ctx.fillStyle = '#f59e0b'; ctx.fill();
     if (cfg.kalmanEnabled && Math.abs(ankleY - filteredY) > 0.002) {
       const rawAy = ankleY * canvas.height;
-      ctx.beginPath(); ctx.arc(ax, rawAy, 5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(148,163,184,0.5)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(ax, rawAy, 5, 0, Math.PI * 2); ctx.fillStyle = 'rgba(148,163,184,0.5)'; ctx.fill();
     }
-
     if (isRunRef.current) {
       const now = Date.now();
       const ev = detectorRef.current.push(filteredY, now);
-
       const MAX_SIGNAL_MS = 120_000;
       const dbg = detectorRef.current.debugState;
-      signalBufRef.current.push({ y: filteredY, raw: ankleY, t: now,
-        valleyY: dbg.valleyY, peakY: dbg.peakY, inPeak: dbg.inPeak, lastStepTime: dbg.lastStepTime,
-      });
+      signalBufRef.current.push({ y: filteredY, raw: ankleY, t: now, valleyY: dbg.valleyY, peakY: dbg.peakY, inPeak: dbg.inPeak, lastStepTime: dbg.lastStepTime });
       const cutoff = now - MAX_SIGNAL_MS;
-      while (signalBufRef.current.length > 1 && signalBufRef.current[0].t < cutoff) {
-        signalBufRef.current.shift();
-      }
+      while (signalBufRef.current.length > 1 && signalBufRef.current[0].t < cutoff) signalBufRef.current.shift();
       setSignalHist([...signalBufRef.current]);
-
       if (ev === 'step') {
         const stepNum = detectorRef.current.steps;
-        stepsRef.current = stepNum;
-        setSteps(stepNum);
+        stepsRef.current = stepNum; setSteps(stepNum);
         setStepTimestamps(prev => [...prev, { t: now, n: stepNum }]);
-        // Sync to RTDB via ref so this stable callback always calls the latest version
         syncStepsToRtdbRef.current?.(stepNum, liveBpmRef.current);
       }
       if (ev === 'miss') {
@@ -1020,229 +884,147 @@ export default function AiCounterPage() {
         clearTimeout(missTimerRef.current); missTimerRef.current = setTimeout(() => setShowMiss(false), 600);
       }
     }
-	if (isRunRef.current && modeRef.current === 'camera') {
-		const cnt = detectorRef.current.steps;
-		ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.roundRect(12, 12, 110, 50, 10); ctx.fill();
-		ctx.fillStyle = '#60a5fa'; ctx.font = 'bold 30px monospace'; ctx.fillText(cnt, 20, 48);
-		ctx.fillStyle = '#94a3b8'; ctx.font = '10px system-ui'; ctx.fillText('STAPPEN', 20, 60);
-	}
+    if (isRunRef.current && modeRef.current === 'camera') {
+      const cnt = detectorRef.current.steps;
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.roundRect(12, 12, 110, 50, 10); ctx.fill();
+      ctx.fillStyle = '#60a5fa'; ctx.font = 'bold 30px monospace'; ctx.fillText(cnt, 20, 48);
+      ctx.fillStyle = '#94a3b8'; ctx.font = '10px system-ui'; ctx.fillText('STAPPEN', 20, 60);
+    }
   }, []);
 
- 
-  // ── MediaPipe results callback ─────────────────────────────────────────────
-	const onMpResults = useCallback((results, timestampMs) => {
-      const canvas = canvasRef.current;
-      if (!canvas || canvas.width === 0) return;
-      const ctx = canvas.getContext('2d');
-    
-      if (!results.landmarks?.[0]) return;
-      const lms = results.landmarks[0];
-    
-      if (overlayRef.current) {
-        // Draw connections
-        ctx.globalAlpha = 0.6;
-        ctx.strokeStyle = '#00d4aa';
-        ctx.lineWidth = 2;
-        const CONNECTIONS = [
-          [0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],
-          [9,10],[11,12],[11,13],[13,15],[15,17],[15,19],[17,19],
-          [12,14],[14,16],[16,18],[16,20],[18,20],
-          [11,23],[12,24],[23,24],[23,25],[24,26],[25,27],[26,28],[27,29],[28,30],[29,31],[30,32],
-        ];
-        CONNECTIONS.forEach(([a, b]) => {
-          const lA = lms[a], lB = lms[b];
-          if ((lA.visibility ?? 0) < 0.25 || (lB.visibility ?? 0) < 0.25) return;
-          ctx.beginPath();
-          ctx.moveTo(lA.x * canvas.width, lA.y * canvas.height);
-          ctx.lineTo(lB.x * canvas.width, lB.y * canvas.height);
-          ctx.stroke();
-        });
-        // Draw landmarks
-        lms.forEach(lm => {
-          if ((lm.visibility ?? 0) < 0.25) return;
-          ctx.beginPath();
-          ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 3, 0, Math.PI * 2);
-          ctx.fillStyle = '#00d4aa';
-          ctx.globalAlpha = 1;
-          ctx.fill();
-        });
-        ctx.globalAlpha = 1;
-      }
-    
-      const idx = trackedRef.current === 'left' ? 27 : 28;
-      const ank = lms[idx];
-      if (ank && (ank.visibility ?? 0) > 0.25) {
-        lastAnkleYRef.current = ank.y;
-        processAnkle(ank.y, ank.x, ank.visibility ?? 1, null);
-      } else {
-        processAnkle(lastAnkleYRef.current, 0.5, 0, null);
-      }
-    }, [processAnkle]);
+  // ── MediaPipe results callback ────────────────────────────────────────────
+  const onMpResults = useCallback((results, timestampMs) => {
+    const canvas = canvasRef.current;
+    if (!canvas || canvas.width === 0) return;
+    const ctx = canvas.getContext('2d');
+    if (!results.landmarks?.[0]) return;
+    const lms = results.landmarks[0];
+    if (overlayRef.current) {
+      ctx.globalAlpha = 0.6; ctx.strokeStyle = '#00d4aa'; ctx.lineWidth = 2;
+      const CONNECTIONS = [[0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[9,10],[11,12],[11,13],[13,15],[15,17],[15,19],[17,19],[12,14],[14,16],[16,18],[16,20],[18,20],[11,23],[12,24],[23,24],[23,25],[24,26],[25,27],[26,28],[27,29],[28,30],[29,31],[30,32]];
+      CONNECTIONS.forEach(([a, b]) => {
+        const lA = lms[a], lB = lms[b];
+        if ((lA.visibility ?? 0) < 0.25 || (lB.visibility ?? 0) < 0.25) return;
+        ctx.beginPath(); ctx.moveTo(lA.x * canvas.width, lA.y * canvas.height); ctx.lineTo(lB.x * canvas.width, lB.y * canvas.height); ctx.stroke();
+      });
+      lms.forEach(lm => {
+        if ((lm.visibility ?? 0) < 0.25) return;
+        ctx.beginPath(); ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#00d4aa'; ctx.globalAlpha = 1; ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+    }
+    const idx = trackedRef.current === 'left' ? 27 : 28;
+    const ank = lms[idx];
+    if (ank && (ank.visibility ?? 0) > 0.25) { lastAnkleYRef.current = ank.y; processAnkle(ank.y, ank.x, ank.visibility ?? 1, null); }
+    else { processAnkle(lastAnkleYRef.current, 0.5, 0, null); }
+  }, [processAnkle]);
 
-  // ── Init AI-model backend ─────────────────────────────────────────────────
-
-    const initBackend = useCallback(async (videoEl, isLive) => {
-      setBackendError(''); setBackendLoading(true);
-    
-      if (mpPoseRef.current) {
-        try { mpPoseRef.current.close(); } catch (_) {}
-        mpPoseRef.current = null;
-      }
-      if (mpCamRef.current) {
-        try { mpCamRef.current.stop(); } catch (_) {}
-        mpCamRef.current = null;
-      }
-    
-      try {
-        // Use Function() to prevent Next.js bundler from trying to resolve this import at build time
-        const mpUrl = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm';
-        const vision = await Function('u', 'return import(u)')(mpUrl);
-    
-        const PoseLandmarker  = vision.PoseLandmarker  ?? vision.default?.PoseLandmarker;
-        const FilesetResolver = vision.FilesetResolver ?? vision.default?.FilesetResolver;
-    
-        if (!PoseLandmarker || !FilesetResolver) {
-          throw new Error('PoseLandmarker of FilesetResolver niet gevonden in module. Keys: ' + Object.keys(vision).join(', '));
-        }
-    
-        const filesetResolver = await FilesetResolver.forVisionTasks(MP_TASKS_VISION_URL);
-    
-        const poseLandmarker = await PoseLandmarker.createFromOptions(filesetResolver, {
-          baseOptions: {
-            modelAssetPath:
-              'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
-            delegate: /iPhone|iPad|Android/i.test(navigator.userAgent) ? 'CPU' : 'GPU',
-          },
-          runningMode: 'VIDEO',
-          numPoses: 1,
-          minPoseDetectionConfidence: 0.5,
-          minPosePresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
-    
-        mpPoseRef.current = poseLandmarker;
-        setBackendLoading(false);
-    
-        if (isLive) {
-          try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-              video: { facingMode, width: { ideal: isMobile ? 480 : 640 }, height: { ideal: isMobile ? 640 : 480 } },
-            });
-            videoEl.srcObject = stream;
-            await videoEl.play();
-          } catch (e) {
-            setBackendError(`Camera toegang mislukt: ${e.message}`); return false;
+  // ── Init AI backend ───────────────────────────────────────────────────────
+  const initBackend = useCallback(async (videoEl, isLive) => {
+    setBackendError(''); setBackendLoading(true);
+    if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
+    if (mpCamRef.current)  { try { mpCamRef.current.stop(); }  catch (_) {} mpCamRef.current = null; }
+    try {
+      const mpUrl = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm';
+      const vision = await Function('u', 'return import(u)')(mpUrl);
+      const PoseLandmarker  = vision.PoseLandmarker  ?? vision.default?.PoseLandmarker;
+      const FilesetResolver = vision.FilesetResolver ?? vision.default?.FilesetResolver;
+      if (!PoseLandmarker || !FilesetResolver) throw new Error('PoseLandmarker of FilesetResolver niet gevonden in module. Keys: ' + Object.keys(vision).join(', '));
+      const filesetResolver = await FilesetResolver.forVisionTasks(MP_TASKS_VISION_URL);
+      const poseLandmarker  = await PoseLandmarker.createFromOptions(filesetResolver, {
+        baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task', delegate: /iPhone|iPad|Android/i.test(navigator.userAgent) ? 'CPU' : 'GPU' },
+        runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
+      });
+      mpPoseRef.current = poseLandmarker;
+      setBackendLoading(false);
+      if (isLive) {
+        try {
+          const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode, width: { ideal: isMobile ? 480 : 640 }, height: { ideal: isMobile ? 640 : 480 } } });
+          videoEl.srcObject = stream; await videoEl.play();
+        } catch (e) { setBackendError(`Camera toegang mislukt: ${e.message}`); return false; }
+        const canvas = canvasRef.current;
+        const INFER_INTERVAL_MS = 80; let lastInferTime = 0;
+        const runLoop = () => {
+          if (!videoEl.srcObject) return;
+          if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+            canvas.width = videoEl.videoWidth; canvas.height = videoEl.videoHeight;
+            const now = performance.now();
+            canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+            if (now - lastInferTime >= INFER_INTERVAL_MS) {
+              lastInferTime = now;
+              const results = poseLandmarker.detectForVideo(videoEl, now);
+              onMpResults(results, now);
+            }
           }
-    
-          const canvas = canvasRef.current;
-		  const RENDER_INTERVAL_MS = 0;   // draw video every frame
-		  const INFER_INTERVAL_MS  = 80;  // run pose detection max ~12x/sec
-		  let lastInferTime = 0;
-		  
-		  const runLoop = () => {
-  			if (!videoEl.srcObject) return;
-  			if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
-    			canvas.width  = videoEl.videoWidth;
-   			    canvas.height = videoEl.videoHeight;
-    			const now = performance.now();
-    			// Always draw video
-    			const ctx = canvas.getContext('2d');
-   			    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-    			// Only run inference at limited rate
-    			if (now - lastInferTime >= INFER_INTERVAL_MS) {
-            		lastInferTime = now;
-      				const results = poseLandmarker.detectForVideo(videoEl, now);
-      				onMpResults(results, now);
-    			}
-  			}
-  			frameRef.current = requestAnimationFrame(runLoop);
-		  };
           frameRef.current = requestAnimationFrame(runLoop);
-        }
-    
-        return true;
-      } catch (e) {
-        setBackendError(`Model laden mislukt: ${e.message}`);
-        setBackendLoading(false);
-        return false;
+        };
+        frameRef.current = requestAnimationFrame(runLoop);
       }
-    }, [onMpResults, facingMode]);
-	
-  // ── Camera start ───────────────────────────────────────────────────────────
+      return true;
+    } catch (e) { setBackendError(`Model laden mislukt: ${e.message}`); setBackendLoading(false); return false; }
+  }, [onMpResults, facingMode]);
+
+  // ── Camera start ──────────────────────────────────────────────────────────
   const startCamera = useCallback(async () => {
     const video = videoRef.current; if (!video) return;
     const ok = await initBackend(video, true); if (!ok) return;
     setMode('camera');
   }, [initBackend]);
 
-	const stopCameraStream = useCallback(() => {
-		cancelAnimationFrame(frameRef.current);
-		if (mpCamRef.current) { try { mpCamRef.current.stop(); } catch (_) {} mpCamRef.current = null; }
-		if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
-		const v = videoRef.current;
-		if (v?.srcObject) { v.srcObject.getTracks().forEach(t => t.stop()); v.srcObject = null; }
-	}, []);
+  const stopCameraStream = useCallback(() => {
+    cancelAnimationFrame(frameRef.current);
+    if (mpCamRef.current) { try { mpCamRef.current.stop(); } catch (_) {} mpCamRef.current = null; }
+    if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
+    const v = videoRef.current;
+    if (v?.srcObject) { v.srcObject.getTracks().forEach(t => t.stop()); v.srcObject = null; }
+  }, []);
 
   const flipCamera = useCallback(() => setFacingMode(p => p === 'environment' ? 'user' : 'environment'), []);
   useEffect(() => { if (mode === 'camera') startCamera(); }, [facingMode]); // eslint-disable-line
 
-  // ── keep screen awake ──────────────────────────────────────────────────────
+  // ── Wake lock ─────────────────────────────────────────────────────────────
   const requestWakeLock = useCallback(async () => {
-	  if (!('wakeLock' in navigator)) return;
-	  try {
-		  wakeLockRef.current = await navigator.wakeLock.request('screen');
-	  } catch (e) {
-		  console.warn('[WakeLock] could not acquire:', e.message);
-	  }
+    if (!('wakeLock' in navigator)) return;
+    try { wakeLockRef.current = await navigator.wakeLock.request('screen'); } catch (e) { console.warn('[WakeLock] could not acquire:', e.message); }
   }, []);
 
   const releaseWakeLock = useCallback(() => {
-	  if (wakeLockRef.current) {
-		  WakeLockRef.current.release().catch(() => {});
-		  WakeLockRef.current = null;
-	  }
+    if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); wakeLockRef.current = null; }
   }, []);
 
-  // ── Session controls ───────────────────────────────────────────────────────
+  // ── Session controls ──────────────────────────────────────────────────────
   const startSession = useCallback(() => {
     detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
-    kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
-    stepsRef.current = 0;
+    kalmanRef.current.reset(); lastAnkleYRef.current = 0.8; stepsRef.current = 0;
     setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false); setSavedOk(false);
     setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
     sessionStartTimeRef.current = Date.now();
     isRunRef.current = true; setIsRunning(true);
     initRtdbSession();
     elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
- 	requestWakeLock();
-  }, [detCfg, initRtdbSession]);
+    requestWakeLock();
+  }, [detCfg, initRtdbSession, requestWakeLock]);
 
   const stopSession = useCallback(() => {
     isRunRef.current = false; setIsRunning(false);
     clearInterval(elapsedRef.current); cancelAnimationFrame(frameRef.current);
     setFinalSteps(detectorRef.current.steps); setFinalMisses(detectorRef.current.misses); setSessionDone(true);
-    stopRtdbSession();
-	releaseWakeLock();
-  }, [stopRtdbSession]);
+    stopRtdbSession(); releaseWakeLock();
+  }, [stopRtdbSession, releaseWakeLock]);
 
-  // ── Keep screen awake ───────────────────────────────────────────────────────
   useEffect(() => {
-	  const onVisibilityChange = () => {
-		  if (document.visibilityState === 'visible' && isRunRef.current) {
-			  requestWakeLock();
-		  }
-	  };
-	  document.addEventListener('visibilitychange', onVisibilityChange);
-	  return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+    const onVisibilityChange = () => { if (document.visibilityState === 'visible' && isRunRef.current) requestWakeLock(); };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [requestWakeLock]);
-	
-  // ── Beep detection ─────────────────────────────────────────────────────────
+
+  // ── Beep detection ────────────────────────────────────────────────────────
   useEffect(() => { beepModeRef.current  = beepMode;  }, [beepMode]);
   useEffect(() => { beepStateRef.current = beepState; }, [beepState]);
 
-  const stopBeepDetector = useCallback(() => {
-    if (beepDetectorRef.current) beepDetectorRef.current.stopPolling();
-  }, []);
+  const stopBeepDetector = useCallback(() => { if (beepDetectorRef.current) beepDetectorRef.current.stopPolling(); }, []);
 
   const attachBeepDetector = useCallback((videoEl) => {
     if (!beepDetectorRef.current) {
@@ -1251,34 +1033,28 @@ export default function AiCounterPage() {
         const state = beepStateRef.current;
         setBeepsDetected(n => n + 1);
         if (state === 'waiting_start') {
-          beepStateRef.current = 'counting';
-          setBeepState('counting');
+          beepStateRef.current = 'counting'; setBeepState('counting');
           clearInterval(elapsedRef.current);
           detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
-          kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
-          stepsRef.current = 0;
+          kalmanRef.current.reset(); lastAnkleYRef.current = 0.8; stepsRef.current = 0;
           setSteps(0); setMisses(0); setElapsed(0);
           setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
           sessionStartTimeRef.current = Date.now();
           isRunRef.current = true; setIsRunning(true);
-          initRtdbSession();
-		  requestWakeLock();
+          initRtdbSession(); requestWakeLock();
           elapsedRef.current = setInterval(() => setElapsed(detectorRef.current.elapsedMs), 500);
         } else if (state === 'counting') {
-          beepStateRef.current = 'done';
-          setBeepState('done');
+          beepStateRef.current = 'done'; setBeepState('done');
           isRunRef.current = false; setIsRunning(false);
           clearInterval(elapsedRef.current);
-          setFinalSteps(detectorRef.current.steps);
-          setFinalMisses(detectorRef.current.misses);
-          setSessionDone(true);
+          setFinalSteps(detectorRef.current.steps); setFinalMisses(detectorRef.current.misses); setSessionDone(true);
           stopRtdbSession();
         }
       });
     }
     beepDetectorRef.current.attachVideo(videoEl);
     beepDetectorRef.current.startPolling();
-  }, [detCfg, initRtdbSession, stopRtdbSession]);
+  }, [detCfg, initRtdbSession, stopRtdbSession, requestWakeLock]);
 
   const destroyBeepDetector = useCallback(() => {
     if (beepDetectorRef.current) { beepDetectorRef.current.destroy(); beepDetectorRef.current = null; }
@@ -1286,15 +1062,9 @@ export default function AiCounterPage() {
 
   const toggleBeepMode = useCallback(() => {
     setBeepMode(prev => {
-      const next = !prev;
-      beepModeRef.current = next;
-      if (!next) {
-        stopBeepDetector();
-        if (uploadVideoRef.current) uploadVideoRef.current.muted = videoMuted;
-      } else {
-        setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
-        setBeepsDetected(0);
-      }
+      const next = !prev; beepModeRef.current = next;
+      if (!next) { stopBeepDetector(); if (uploadVideoRef.current) uploadVideoRef.current.muted = videoMuted; }
+      else { setBeepState('waiting_start'); beepStateRef.current = 'waiting_start'; setBeepsDetected(0); }
       return next;
     });
   }, [stopBeepDetector, videoMuted]);
@@ -1302,160 +1072,95 @@ export default function AiCounterPage() {
   const cancelBeepMode = useCallback(() => {
     stopBeepDetector();
     setBeepMode(false); beepModeRef.current = false;
-    setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
-    setBeepsDetected(0);
-    if (isRunRef.current) {
-      isRunRef.current = false; setIsRunning(false);
-      clearInterval(elapsedRef.current);
-    }
+    setBeepState('waiting_start'); beepStateRef.current = 'waiting_start'; setBeepsDetected(0);
+    if (isRunRef.current) { isRunRef.current = false; setIsRunning(false); clearInterval(elapsedRef.current); }
   }, [stopBeepDetector]);
 
-  // ── File select — immediately show preview frame ───────────────────────────
+  // ── File select ───────────────────────────────────────────────────────────
   const handleFileSelect = useCallback((e) => {
     const file = e.target.files?.[0]; if (!file || !file.type.startsWith('video/')) return;
     setCodecError(false); setBackendError(''); setUploadProgress(0); setSessionDone(false); setSavedOk(false);
     setVideoPreviewReady(false);
     if (uploadUrl) URL.revokeObjectURL(uploadUrl);
     destroyBeepDetector();
-    setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
-    setBeepsDetected(0);
+    setBeepState('waiting_start'); beepStateRef.current = 'waiting_start'; setBeepsDetected(0);
     const url = URL.createObjectURL(file);
-    setUploadFile(file); setUploadUrl(url); setMode('upload');
-    setVideoMuted(true);
+    setUploadFile(file); setUploadUrl(url); setMode('upload'); setVideoMuted(true);
   }, [uploadUrl, destroyBeepDetector]);
 
-  // ── Draw first frame of upload into canvas as preview ─────────────────────
+  // ── Draw first frame as preview ───────────────────────────────────────────
   useEffect(() => {
     if (mode !== 'upload' || !uploadUrl || isRunning || sessionDone) return;
-    const video = uploadVideoRef.current;
-    const canvas = canvasRef.current;
+    const video = uploadVideoRef.current, canvas = canvasRef.current;
     if (!video || !canvas) return;
-
-    setVideoPreviewReady(false);
-    video.muted = true;
-    video.src = uploadUrl;
-    video.load();
-
-    const onReady = () => {
-      video.currentTime = 0.05; // seek slightly in to avoid blank frame
-    };
-    const onSeeked = () => {
-      if (video.videoWidth > 0) {
-        canvas.width  = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        setVideoPreviewReady(true);
-      }
-    };
-
+    setVideoPreviewReady(false); video.muted = true; video.src = uploadUrl; video.load();
+    const onReady  = () => { video.currentTime = 0.05; };
+    const onSeeked = () => { if (video.videoWidth > 0) { canvas.width = video.videoWidth; canvas.height = video.videoHeight; canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height); setVideoPreviewReady(true); } };
     video.addEventListener('loadeddata', onReady);
     video.addEventListener('seeked', onSeeked);
-    return () => {
-      video.removeEventListener('loadeddata', onReady);
-      video.removeEventListener('seeked', onSeeked);
-    };
+    return () => { video.removeEventListener('loadeddata', onReady); video.removeEventListener('seeked', onSeeked); };
   }, [mode, uploadUrl, isRunning, sessionDone]);
 
-  // ── Process video ──────────────────────────────────────────────────────────
+  // ── Process video ─────────────────────────────────────────────────────────
   const processVideo = useCallback(async () => {
     const video = uploadVideoRef.current, canvas = canvasRef.current;
     if (!video || !canvas) return;
     setBackendError(''); setCodecError(false); setUploadProgress(0);
-    video.muted = beepModeRef.current ? false : videoMuted;
-    video.load();
+    video.muted = beepModeRef.current ? false : videoMuted; video.load();
     try { await waitForVideoReady(video, 12000); } catch { setCodecError(true); return; }
     if (!video.videoWidth) { setCodecError(true); return; }
     canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-
     const ok = await initBackend(video, false); if (!ok) return;
     detectorRef.current.reset(); detectorRef.current.updateConfig(detCfg);
     kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
     setSteps(0); setMisses(0); setElapsed(0); setSessionDone(false);
     setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
-
     const usingBeepMode = beepModeRef.current;
-    if (usingBeepMode) {
-      setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
-      setBeepsDetected(0);
-      sessionStartTimeRef.current = null;
-      isRunRef.current = false; setIsRunning(false);
-    } else {
-      sessionStartTimeRef.current = Date.now();
-      isRunRef.current = true; setIsRunning(true);
-    }
+    if (usingBeepMode) { setBeepState('waiting_start'); beepStateRef.current = 'waiting_start'; setBeepsDetected(0); sessionStartTimeRef.current = null; isRunRef.current = false; setIsRunning(false); }
+    else { sessionStartTimeRef.current = Date.now(); isRunRef.current = true; setIsRunning(true); }
     setMode('running');
-
     const dur = video.duration || 0; let aborted = false;
     elapsedRef.current = setInterval(() => {
       if (!usingBeepMode) setElapsed(video.currentTime * 1000);
       if (dur > 0) setUploadProgress(Math.round((video.currentTime / dur) * 100));
     }, 300);
-
     const finish = () => {
       clearInterval(elapsedRef.current); setUploadProgress(100); aborted = true;
       stopBeepDetector();
-      if (beepModeRef.current && beepStateRef.current === 'counting') {
-        beepStateRef.current = 'done'; setBeepState('done');
-      }
+      if (beepModeRef.current && beepStateRef.current === 'counting') { beepStateRef.current = 'done'; setBeepState('done'); }
       stopSession();
     };
-
     const pose = mpPoseRef.current;
-    const INFER_INTERVAL_MS = 0;
-	const loop = async () => {
-		if (aborted) return;
-		if (video.readyState >= 2 && video.videoWidth > 0 && !video.paused && !video.ended) {
-			if (canvas.width !== video.videoWidth) { canvas.width = video.videoWidth; canvas.height = video.videoHeight; }
-			
-			const now = performance.now();
-			const elapsed = now - lastFrameTimeRef.current;
-			if (elapsed < INFER_INTERVAL_MS) {
-				frameRef.current = requestAnimationFrame(loop);
-				return;
-			}
-			lastFrameTimeRef.current = now;
-			
-			if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
-			const scale = Math.min(1, 480 / video.videoWidth);
-			offscreenRef.current.width  = Math.round(video.videoWidth  * scale);
-			offscreenRef.current.height = Math.round(video.videoHeight * scale);
-			offscreenRef.current.getContext('2d').drawImage(video, 0, 0, offscreenRef.current.width, offscreenRef.current.height);
-			
-			// Draw the actual video frame to the visible canvas before skeleton overlay
-			const ctx = canvas.getContext('2d');
-			ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-			
-			const poseLandmarker = mpPoseRef.current;
-			if (!poseLandmarker) { finish(); return; }
-			try {
-				const now2 = performance.now();
-				const results = poseLandmarker.detectForVideo(offscreenRef.current, now2);
-				onMpResults(results, now2);
-			} catch (e) {
-				console.warn('[AI Counter] detectForVideo error:', e?.message);
-				finish(); return;
-			}
-		}
-		if (video.ended) { finish(); return; }
-		frameRef.current = requestAnimationFrame(loop);
-	};
-	video.currentTime = 0; await new Promise(r => { video.onseeked = r; });
+    const loop = async () => {
+      if (aborted) return;
+      if (video.readyState >= 2 && video.videoWidth > 0 && !video.paused && !video.ended) {
+        if (canvas.width !== video.videoWidth) { canvas.width = video.videoWidth; canvas.height = video.videoHeight; }
+        if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
+        const scale = Math.min(1, 480 / video.videoWidth);
+        offscreenRef.current.width = Math.round(video.videoWidth * scale);
+        offscreenRef.current.height = Math.round(video.videoHeight * scale);
+        offscreenRef.current.getContext('2d').drawImage(video, 0, 0, offscreenRef.current.width, offscreenRef.current.height);
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        const poseLandmarker = mpPoseRef.current;
+        if (!poseLandmarker) { finish(); return; }
+        try { const now2 = performance.now(); const results = poseLandmarker.detectForVideo(offscreenRef.current, now2); onMpResults(results, now2); }
+        catch (e) { console.warn('[AI Counter] detectForVideo error:', e?.message); finish(); return; }
+      }
+      if (video.ended) { finish(); return; }
+      frameRef.current = requestAnimationFrame(loop);
+    };
+    video.currentTime = 0; await new Promise(r => { video.onseeked = r; });
     try { await video.play(); } catch (e) { setBackendError('Video afspelen mislukt: ' + e.message); clearInterval(elapsedRef.current); isRunRef.current = false; setIsRunning(false); return; }
     if (usingBeepMode) attachBeepDetector(video);
     frameRef.current = requestAnimationFrame(loop);
-  }, [detCfg, initBackend, onMpResults, stopSession, videoMuted, attachBeepDetector]);
+  }, [detCfg, initBackend, onMpResults, stopSession, videoMuted, attachBeepDetector, stopBeepDetector]);
 
-  // ── Toggle audio ───────────────────────────────────────────────────────────
+  // ── Audio toggle ──────────────────────────────────────────────────────────
   const toggleVideoAudio = useCallback(() => {
-    setVideoMuted(prev => {
-      const next = !prev;
-      if (uploadVideoRef.current) uploadVideoRef.current.muted = next;
-      return next;
-    });
+    setVideoMuted(prev => { const next = !prev; if (uploadVideoRef.current) uploadVideoRef.current.muted = next; return next; });
   }, []);
 
-  // ── Save ───────────────────────────────────────────────────────────────────
+  // ── Save ──────────────────────────────────────────────────────────────────
   const saveSession = useCallback(async () => {
     if (!selSkipper || !disciplineId) return;
     setSaving(true);
@@ -1464,7 +1169,7 @@ export default function AiCounterPage() {
       await ClubMemberFactory.saveSessionHistory(selSkipper.clubId, selSkipper.memberId, {
         discipline: disciplineId, disciplineName: disc?.name || disciplineId, ropeType: disc?.ropeType || 'SR',
         sessionType, score: finalSteps, avgBpm: 0, maxBpm: 0, sessionStart: null, telemetry: [],
-        countedBy:     counterUser?.id   || null,
+        countedBy: counterUser?.id || null,
         countedByName: counterUser ? `${counterUser.firstName} ${counterUser.lastName} (AI)` : 'AI',
         countingMethod: 'AI',
         aiConfig: { backend: 'tasks-vision', backendLabel: 'MediaPipe Pose Landmarker', ...detCfg, trackedFoot },
@@ -1474,29 +1179,59 @@ export default function AiCounterPage() {
     finally { setSaving(false); }
   }, [selSkipper, disciplineId, sessionType, finalSteps, counterUser, getDisc, detCfg, trackedFoot]);
 
-  // ── Reset all ──────────────────────────────────────────────────────────────
+  // ── Reset all ─────────────────────────────────────────────────────────────
   const resetAll = useCallback(() => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
     isRunRef.current = false; stepsRef.current = 0; stopCameraStream(); destroyBeepDetector();
     stopRtdbSession(); releaseWakeLock();
     if (uploadUrl) { URL.revokeObjectURL(uploadUrl); setUploadUrl(''); }
-    setUploadFile(null); setMode('idle'); setIsRunning(false);
-    setSessionDone(false); setSteps(0); setMisses(0); setElapsed(0);
-	setFinalSteps(0); setFinalMisses(0);
+    setUploadFile(null); setMode('idle'); setIsRunning(false); setSessionDone(false);
+    setSteps(0); setMisses(0); setElapsed(0); setFinalSteps(0); setFinalMisses(0);
     setUploadProgress(0); setCodecError(false); setBackendError(''); setSavedOk(false);
     setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
     setVideoMuted(true); setVideoPreviewReady(false);
     setBeepMode(false); beepModeRef.current = false;
-    setBeepState('waiting_start'); beepStateRef.current = 'waiting_start';
-    setBeepsDetected(0);
+    setBeepState('waiting_start'); beepStateRef.current = 'waiting_start'; setBeepsDetected(0);
     detectorRef.current.reset(); kalmanRef.current.reset(); lastAnkleYRef.current = 0.8;
     sessionStartTimeRef.current = null;
-  }, [uploadUrl, stopCameraStream, stopRtdbSession]);
+  }, [uploadUrl, stopCameraStream, stopRtdbSession, releaseWakeLock, destroyBeepDetector]);
+
+  // ── "Opnieuw" handler — extracted from inline JSX ────────────────────────
+  // Camera mode → return to skipper-select with previous selection pre-filled.
+  // Upload mode → just reset inline back to file picker.
+  const handleOpnieuw = useCallback(() => {
+    cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current);
+    if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
+    if (uploadVideoRef.current) { try { uploadVideoRef.current.pause(); uploadVideoRef.current.currentTime = 0; } catch (_) {} }
+    isRunRef.current = false; stepsRef.current = 0;
+    setIsRunning(false); setSessionDone(false);
+    setSteps(0); setMisses(0); setElapsed(0); setSavedOk(false);
+    setUploadProgress(0); setFinalSteps(0); setFinalMisses(0);
+    setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
+    detectorRef.current.reset();
+    stopRtdbSession(); releaseWakeLock();
+
+    if (paramMode === 'camera') {
+      // Navigate back to skipper-select with the previous selection pre-filled
+      const prev = encodeURIComponent(JSON.stringify({
+        disciplineId:    paramDisciplineId,
+        sessionType:     paramSessionType,
+        clubId:          paramClubId,
+        groupId:         paramGroupId,
+        selectedSkipper: passedSkipper,
+      }));
+      window.location.href = `/skipper-select?mode=camera&return=/ai-counter&prev=${prev}`;
+    } else {
+      // Upload mode — reset to file picker inline
+      setMode('upload');
+      setVideoPreviewReady(false);
+    }
+  }, [paramMode, paramDisciplineId, paramSessionType, paramClubId, paramGroupId, passedSkipper, stopRtdbSession, releaseWakeLock]);
 
   useEffect(() => () => {
     cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current); clearTimeout(missTimerRef.current);
     stopCameraStream(); destroyBeepDetector(); if (uploadUrl) URL.revokeObjectURL(uploadUrl);
-	releaseWakeLock();
+    releaseWakeLock();
   }, []); // eslint-disable-line
 
   const currentDisc = getDisc(disciplineId);
@@ -1507,9 +1242,7 @@ export default function AiCounterPage() {
   const showSettingsSummary = isRunning || sessionDone;
   const showLiveGraph       = isRunning && (mode === 'camera' || mode === 'running');
   const showAudioToggle     = (mode === 'upload' || mode === 'running') && !sessionDone;
-
-  // Canvas should be visible during preview, running, or done
-  const showCanvas = mode === 'camera' || mode === 'running' || sessionDone || (mode === 'upload' && videoPreviewReady);
+  const showCanvas          = mode === 'camera' || mode === 'running' || sessionDone || (mode === 'upload' && videoPreviewReady);
 
   return (
     <div style={s.page}>
@@ -1528,16 +1261,14 @@ export default function AiCounterPage() {
 
       <div style={s.body}>
 
-        {/* ── Skipper info bar — shown when skipper was passed from counter ── */}
+        {/* ── Skipper info bar ─────────────────────────────────────────────── */}
         {(selSkipper || passedSkipper) && (() => {
           const sk = selSkipper || passedSkipper;
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '10px 14px', flexWrap: 'wrap' }}>
-              {/* Avatar */}
               <div style={{ width: '34px', height: '34px', borderRadius: '50%', backgroundColor: '#3b82f622', border: '1px solid #3b82f644', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '700', color: '#60a5fa', flexShrink: 0 }}>
                 {(sk.firstName?.[0] || '?')}{(sk.lastName?.[0] || '')}
               </div>
-              {/* Name + context */}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: '14px', fontWeight: '700', color: '#f1f5f9' }}>{sk.firstName} {sk.lastName}</div>
                 <div style={{ fontSize: '11px', color: '#64748b', display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '1px' }}>
@@ -1546,7 +1277,6 @@ export default function AiCounterPage() {
                   <span style={{ padding: '1px 7px', borderRadius: '8px', fontSize: '10px', fontWeight: '700', backgroundColor: sessionType === 'Wedstrijd' ? '#ef444422' : '#3b82f622', color: sessionType === 'Wedstrijd' ? '#ef4444' : '#60a5fa', border: `1px solid ${sessionType === 'Wedstrijd' ? '#ef444440' : '#3b82f640'}` }}>{sessionType}</span>
                 </div>
               </div>
-              {/* Live BPM */}
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
                 <div style={{ fontSize: '22px', fontWeight: '900', color: liveBpm > 0 ? '#ef4444' : '#334155', lineHeight: 1, display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <Heart size={14} color={liveBpm > 0 ? '#ef4444' : '#334155'} style={{ flexShrink: 0 }} />
@@ -1558,26 +1288,15 @@ export default function AiCounterPage() {
           );
         })()}
 
-        {/* Video area */}
+        {/* ── Video area ───────────────────────────────────────────────────── */}
         <div style={s.videoWrap}>
           <video ref={videoRef} style={s.hiddenVideo} playsInline muted />
           {uploadUrl && (
-            <video
-              ref={uploadVideoRef}
-              src={uploadUrl}
-              style={s.hiddenVideo}
-              playsInline
-              muted={videoMuted}
-              preload="auto"
-              onError={() => setCodecError(true)}
+            <video ref={uploadVideoRef} src={uploadUrl} style={s.hiddenVideo} playsInline muted={videoMuted} preload="auto" onError={() => setCodecError(true)}
               onSeeked={() => {
                 if (sessionDone && canvasRef.current && uploadVideoRef.current) {
-                  const vid = uploadVideoRef.current;
-                  const cvs = canvasRef.current;
-                  if (vid.videoWidth > 0) {
-                    cvs.width = vid.videoWidth; cvs.height = vid.videoHeight;
-                    cvs.getContext('2d').drawImage(vid, 0, 0, cvs.width, cvs.height);
-                  }
+                  const vid = uploadVideoRef.current, cvs = canvasRef.current;
+                  if (vid.videoWidth > 0) { cvs.width = vid.videoWidth; cvs.height = vid.videoHeight; cvs.getContext('2d').drawImage(vid, 0, 0, cvs.width, cvs.height); }
                 }
               }}
             />
@@ -1586,29 +1305,12 @@ export default function AiCounterPage() {
             <canvas ref={canvasRef} style={{ ...s.canvas, display: showCanvas ? 'block' : 'none' }} />
           </div>
           <MissFlash visible={showMiss} />
+          <BeepStatusBadge beepMode={beepMode && (mode === 'running')} beepState={beepState} beepsDetected={beepsDetected} onCancel={cancelBeepMode} />
 
-          <BeepStatusBadge
-            beepMode={beepMode && (mode === 'running')}
-            beepState={beepState}
-            beepsDetected={beepsDetected}
-            onCancel={cancelBeepMode}
-          />
-
-          {/* Audio toggle */}
           {showAudioToggle && (
-            <button
-              onClick={beepMode ? undefined : toggleVideoAudio}
+            <button onClick={beepMode ? undefined : toggleVideoAudio}
               title={beepMode ? 'Geluid vereist voor beep-detectie' : (videoMuted ? 'Geluid aan' : 'Geluid uit')}
-              style={{
-                position: 'absolute', top: '10px', right: '10px', zIndex: 18,
-                width: '36px', height: '36px', borderRadius: '10px',
-                backgroundColor: beepMode ? 'rgba(245,158,11,0.7)' : videoMuted ? 'rgba(0,0,0,0.55)' : 'rgba(59,130,246,0.8)',
-                border: `1px solid ${beepMode ? 'rgba(245,158,11,0.5)' : videoMuted ? 'rgba(255,255,255,0.15)' : 'rgba(96,165,250,0.5)'}`,
-                color: 'white', cursor: beepMode ? 'default' : 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                backdropFilter: 'blur(4px)', transition: 'background-color 0.15s',
-              }}
-            >
+              style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 18, width: '36px', height: '36px', borderRadius: '10px', backgroundColor: beepMode ? 'rgba(245,158,11,0.7)' : videoMuted ? 'rgba(0,0,0,0.55)' : 'rgba(59,130,246,0.8)', border: `1px solid ${beepMode ? 'rgba(245,158,11,0.5)' : videoMuted ? 'rgba(255,255,255,0.15)' : 'rgba(96,165,250,0.5)'}`, color: 'white', cursor: beepMode ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)', transition: 'background-color 0.15s' }}>
               {beepMode ? <span style={{ fontSize: '14px' }}>🔔</span> : videoMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
             </button>
           )}
@@ -1622,36 +1324,25 @@ export default function AiCounterPage() {
               {backendError && <div style={s.errorBanner}><AlertTriangle size={14} style={{ flexShrink: 0 }} />{backendError}</div>}
               <div style={s.idleBtns}>
                 <button style={s.primaryBtn} disabled={backendLoading} onClick={startCamera}>
-                  {backendLoading
-                    ? <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Laden…</>
-                    : <><Camera size={16} /> Live camera</>}
+                  {backendLoading ? <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Laden…</> : <><Camera size={16} /> Live camera</>}
                 </button>
-                <button style={s.secondaryBtn} onClick={() => fileInputRef.current?.click()}>
-                  <Upload size={16} /> Video uploaden
-                </button>
+                <button style={s.secondaryBtn} onClick={() => fileInputRef.current?.click()}><Upload size={16} /> Video uploaden</button>
                 <input ref={fileInputRef} type="file" accept="video/*" style={{ display: 'none' }} onChange={handleFileSelect} />
               </div>
-              <div style={s.infoBox}>
-                <Info size={12} color="#64748b" style={{ flexShrink: 0, marginTop: 1 }} />
-                <span>Alles draait op je apparaat — geen data verstuurd. Model wordt eenmalig geladen (~5 MB).</span>
-              </div>
+              <div style={s.infoBox}><Info size={12} color="#64748b" style={{ flexShrink: 0, marginTop: 1 }} /><span>Alles draait op je apparaat — geen data verstuurd. Model wordt eenmalig geladen (~5 MB).</span></div>
             </div>
           )}
 
-          {/* Upload ready: show nothing over the preview canvas — controls are below */}
           {mode === 'upload' && !isRunning && !sessionDone && codecError && (
             <div style={s.centeredOverlay}>
               <AlertTriangle size={36} color="#f59e0b" style={{ marginBottom: 12 }} />
               <p style={{ color: '#f1f5f9', fontWeight: '700', marginBottom: 4, textAlign: 'center' }}>Video kan niet worden gelezen</p>
-              <p style={{ color: '#64748b', fontSize: '12px', marginBottom: 16, textAlign: 'center', lineHeight: 1.5, maxWidth: '280px' }}>
-                <strong>.MOV-bestanden</strong> werken alleen in Safari. Converteer naar <strong>MP4 (H.264)</strong>.
-              </p>
+              <p style={{ color: '#64748b', fontSize: '12px', marginBottom: 16, textAlign: 'center', lineHeight: 1.5, maxWidth: '280px' }}><strong>.MOV-bestanden</strong> werken alleen in Safari. Converteer naar <strong>MP4 (H.264)</strong>.</p>
               <button style={s.secondaryBtn} onClick={() => fileInputRef.current?.click()}><Upload size={14} /> Andere video</button>
               <input ref={fileInputRef} type="file" accept="video/*" style={{ display: 'none' }} onChange={handleFileSelect} />
             </div>
           )}
 
-          {/* Loading spinner while preview frame is rendering */}
           {mode === 'upload' && !isRunning && !sessionDone && !codecError && !videoPreviewReady && (
             <div style={s.centeredOverlay}>
               <RefreshCw size={28} color="#64748b" style={{ animation: 'spin 1s linear infinite', marginBottom: 10 }} />
@@ -1659,11 +1350,7 @@ export default function AiCounterPage() {
             </div>
           )}
 
-          {mode === 'camera' && (
-            <div style={s.cameraHud}>
-              <button style={s.hudBtn} onClick={flipCamera}><FlipHorizontal size={16} /></button>
-            </div>
-          )}
+          {mode === 'camera' && <div style={s.cameraHud}><button style={s.hudBtn} onClick={flipCamera}><FlipHorizontal size={16} /></button></div>}
 
           {(mode === 'camera' || mode === 'running') && (isRunning || sessionDone) && (
             <div style={s.statsOverlay}>
@@ -1689,87 +1376,48 @@ export default function AiCounterPage() {
           {mode === 'camera' && isRunning && durationSec && <div style={s.progressBar}><div style={{ ...s.progressFill, width: `${progress * 100}%`, backgroundColor: progress > 0.8 ? '#ef4444' : '#3b82f6' }} /></div>}
         </div>
 
-        {/* ── Foot selector — always shown below video when not running/done ── */}
+        {/* ── Foot selector ────────────────────────────────────────────────── */}
         {!isRunning && !sessionDone && (mode === 'camera' || mode === 'upload' || mode === 'idle') && (
           <div style={{ backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #334155', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span style={{ fontSize: '10px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', flexShrink: 0 }}>Voet volgen</span>
             <div style={{ display: 'flex', gap: '6px' }}>
               {[['left', '👟 Links'], ['right', '👟 Rechts']].map(([v, l]) => (
-                <button key={v} onClick={() => setTrackedFoot(v)}
-                  style={{ padding: '6px 14px', borderRadius: '8px', border: `1.5px solid ${trackedFoot === v ? '#22c55e' : '#334155'}`, backgroundColor: trackedFoot === v ? '#22c55e22' : 'transparent', color: trackedFoot === v ? '#22c55e' : '#64748b', fontWeight: trackedFoot === v ? '700' : '500', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.12s' }}>
-                  {l}
-                </button>
+                <button key={v} onClick={() => setTrackedFoot(v)} style={{ padding: '6px 14px', borderRadius: '8px', border: `1.5px solid ${trackedFoot === v ? '#22c55e' : '#334155'}`, backgroundColor: trackedFoot === v ? '#22c55e22' : 'transparent', color: trackedFoot === v ? '#22c55e' : '#64748b', fontWeight: trackedFoot === v ? '700' : '500', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.12s' }}>{l}</button>
               ))}
             </div>
-            <span style={{ fontSize: '10px', color: '#334155', marginLeft: 'auto' }}>
-              Kies de meest zichtbare enkel
-            </span>
+            <span style={{ fontSize: '10px', color: '#334155', marginLeft: 'auto' }}>Kies de meest zichtbare enkel</span>
           </div>
         )}
+
+        {/* ── Upload controls ───────────────────────────────────────────────── */}
         {mode === 'upload' && !isRunning && !sessionDone && !codecError && videoPreviewReady && (
           <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-
-            {/* File name + model credit */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <Video size={15} color="#60a5fa" style={{ flexShrink: 0 }} />
               <span style={{ fontSize: '13px', fontWeight: '600', color: '#f1f5f9', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{uploadFile?.name}</span>
-              <span style={{ fontSize: '10px', color: '#3b82f6', backgroundColor: '#3b82f618', border: '1px solid #3b82f633', borderRadius: '6px', padding: '2px 8px', fontWeight: '700', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                MediaPipe Pose Landmarker
-              </span>
+              <span style={{ fontSize: '10px', color: '#3b82f6', backgroundColor: '#3b82f618', border: '1px solid #3b82f633', borderRadius: '6px', padding: '2px 8px', fontWeight: '700', whiteSpace: 'nowrap', flexShrink: 0 }}>MediaPipe Pose Landmarker</span>
             </div>
-
-            {/* Beep-mode toggle */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <button
-                onClick={toggleBeepMode}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '7px',
-                  padding: '7px 14px', borderRadius: '8px', fontFamily: 'inherit', cursor: 'pointer',
-                  fontSize: '12px', fontWeight: '700',
-                  backgroundColor: beepMode ? '#f59e0b22' : 'transparent',
-                  border: `1.5px solid ${beepMode ? '#f59e0b' : '#334155'}`,
-                  color: beepMode ? '#f59e0b' : '#64748b', transition: 'all 0.15s',
-                }}
-              >
+              <button onClick={toggleBeepMode} style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '7px 14px', borderRadius: '8px', fontFamily: 'inherit', cursor: 'pointer', fontSize: '12px', fontWeight: '700', backgroundColor: beepMode ? '#f59e0b22' : 'transparent', border: `1.5px solid ${beepMode ? '#f59e0b' : '#334155'}`, color: beepMode ? '#f59e0b' : '#64748b', transition: 'all 0.15s' }}>
                 <span style={{ fontSize: '14px' }}>🔔</span>
                 Beep-detectie
-                <span style={{ fontSize: '9px', fontWeight: '700', backgroundColor: beepMode ? '#f59e0b33' : '#0f172a', color: beepMode ? '#f59e0b' : '#475569', borderRadius: '4px', padding: '1px 5px' }}>
-                  {beepMode ? 'AAN' : 'UIT'}
-                </span>
+                <span style={{ fontSize: '9px', fontWeight: '700', backgroundColor: beepMode ? '#f59e0b33' : '#0f172a', color: beepMode ? '#f59e0b' : '#475569', borderRadius: '4px', padding: '1px 5px' }}>{beepMode ? 'AAN' : 'UIT'}</span>
               </button>
-              {beepMode && (
-                <span style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.5, flex: 1 }}>
-                  Detecteert start/stopbeep automatisch.
-                </span>
-              )}
+              {beepMode && <span style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.5, flex: 1 }}>Detecteert start/stopbeep automatisch.</span>}
             </div>
-
             {backendError && <div style={s.errorBanner}><AlertTriangle size={14} />{backendError}</div>}
-
-            {/* Analyse button */}
             <button style={{ ...s.primaryBtn, justifyContent: 'center', width: '100%' }} disabled={backendLoading} onClick={processVideo}>
-              {backendLoading
-                ? <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Model laden…</>
-                : <><Play size={16} fill="white" /> {beepMode ? 'Start video (wacht op beep)' : 'Analyseer video'}</>}
+              {backendLoading ? <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Model laden…</> : <><Play size={16} fill="white" /> {beepMode ? 'Start video (wacht op beep)' : 'Analyseer video'}</>}
             </button>
-
-            {/* Change file */}
-            <button style={{ ...s.ghostBtn, justifyContent: 'center', fontSize: '12px' }} onClick={() => fileInputRef.current?.click()}>
-              <Upload size={13} /> Andere video kiezen
-            </button>
+            <button style={{ ...s.ghostBtn, justifyContent: 'center', fontSize: '12px' }} onClick={() => fileInputRef.current?.click()}><Upload size={13} /> Andere video kiezen</button>
             <input ref={fileInputRef} type="file" accept="video/*" style={{ display: 'none' }} onChange={handleFileSelect} />
           </div>
         )}
 
-        {/* Live signal graph */}
-        <LiveSignalOverlay
-          signalHistory={signalHist}
-          stepTimestamps={stepTimestamps}
-          config={detCfg}
-          visible={showLiveGraph}
-        />
+        {/* ── Live signal graph ─────────────────────────────────────────────── */}
+        <LiveSignalOverlay signalHistory={signalHist} stepTimestamps={stepTimestamps} config={detCfg} visible={showLiveGraph} />
 
-        {/* Controls */}
+        {/* ── Controls ──────────────────────────────────────────────────────── */}
         <div style={s.controls}>
           {mode === 'camera' && !isRunning && !sessionDone && <button style={s.startBtn} onClick={startSession}><Play size={20} fill="white" /> START TELLEN</button>}
           {mode === 'camera' && isRunning && <button style={s.stopBtn} onClick={stopSession}><Square size={18} fill="white" /> STOP</button>}
@@ -1777,7 +1425,7 @@ export default function AiCounterPage() {
           {(mode === 'camera' || isVideoMode) && !isRunning && !sessionDone && mode !== 'upload' && <button style={s.ghostBtn} onClick={resetAll}><ArrowLeft size={14} /> Terug</button>}
         </div>
 
-        {/* Settings summary pill */}
+        {/* ── Settings summary pill ─────────────────────────────────────────── */}
         {showSettingsSummary && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b', padding: '7px 12px' }}>
             <span style={{ fontSize: '9px', fontWeight: '700', color: '#334155', textTransform: 'uppercase', letterSpacing: '0.5px', marginRight: '2px' }}>Config</span>
@@ -1785,31 +1433,22 @@ export default function AiCounterPage() {
             <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>sens {detCfg.peakMinProminence.toFixed(3)}</span>
             <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>ampl {detCfg.peakMinAmplitude?.toFixed(3) ?? '0.015'}</span>
             <span style={{ fontSize: '10px', color: '#475569', backgroundColor: '#1e293b', borderRadius: '5px', padding: '1px 7px' }}>int {detCfg.peakMinIntervalMs} ms</span>
-            <span style={{ fontSize: '10px', color: '#22c55e', backgroundColor: '#22c55e18', borderRadius: '5px', padding: '1px 7px' }}>
-              {trackedFoot === 'left' ? '👟 links' : '👟 rechts'}
-            </span>
+            <span style={{ fontSize: '10px', color: '#22c55e', backgroundColor: '#22c55e18', borderRadius: '5px', padding: '1px 7px' }}>{trackedFoot === 'left' ? '👟 links' : '👟 rechts'}</span>
             {detCfg.kalmanEnabled && <span style={{ fontSize: '10px', color: '#3b82f6', backgroundColor: '#3b82f618', borderRadius: '5px', padding: '1px 7px' }}>kalman ✓</span>}
             {beepMode && <span style={{ fontSize: '10px', color: '#f59e0b', backgroundColor: '#f59e0b18', borderRadius: '5px', padding: '1px 7px', display: 'flex', alignItems: 'center', gap: '3px' }}>🔔 beep</span>}
           </div>
         )}
 
-         {/* Model detection selector */}
-		{showSettingsPanels && (
-		  <DetectionTuningPanel
-		    config={detCfg}
-  		  onChange={p => setDetCfg(prev => ({ ...prev, ...p }))}
-		  />
-		)}
+        {/* ── Detection tuning ─────────────────────────────────────────────── */}
+        {showSettingsPanels && <DetectionTuningPanel config={detCfg} onChange={p => setDetCfg(prev => ({ ...prev, ...p }))} />}
 
-        {/* Results */}
+        {/* ── Results ──────────────────────────────────────────────────────── */}
         {sessionDone && (
           <div style={s.resultsPanel}>
             <div style={s.resultsHeader}>
               <CheckCircle2 size={22} color="#22c55e" />
               <span style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9' }}>Sessie voltooid</span>
-              <span style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: '700', color: '#3b82f6', backgroundColor: '#3b82f618', borderRadius: '6px', padding: '2px 8px' }}>
-                MediaPipe Pose Landmarker
-              </span>
+              <span style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: '700', color: '#3b82f6', backgroundColor: '#3b82f618', borderRadius: '6px', padding: '2px 8px' }}>MediaPipe Pose Landmarker</span>
             </div>
             <div style={s.resultGrid}>
               <div style={s.resultCard}>
@@ -1826,18 +1465,10 @@ export default function AiCounterPage() {
               </div>
             </div>
 
-            <ReviewTimeline
-              signalHistory={signalHist}
-              stepTimestamps={stepTimestamps}
-              config={detCfg}
-              sessionStartTime={sessionStartTimeRef.current}
-              uploadVideoRef={uploadVideoRef}
-              hasUploadVideo={!!uploadUrl && !!(uploadVideoRef.current)}
-            />
+            <ReviewTimeline signalHistory={signalHist} stepTimestamps={stepTimestamps} config={detCfg} sessionStartTime={sessionStartTimeRef.current} uploadVideoRef={uploadVideoRef} hasUploadVideo={!!uploadUrl && !!(uploadVideoRef.current)} />
 
             {/* ── Save section ── */}
             {passedSkipper ? (
-              /* Skipper was pre-filled from counter.js — show compact confirmation */
               <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #22c55e33', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#22c55e22', border: '1px solid #22c55e44', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700', color: '#22c55e', flexShrink: 0 }}>
                   {passedSkipper.firstName?.[0]}{passedSkipper.lastName?.[0]}
@@ -1849,7 +1480,6 @@ export default function AiCounterPage() {
                 <CheckCircle2 size={14} color="#22c55e" />
               </div>
             ) : (
-              /* No skipper in URL — show the full picker */
               <div style={{ backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #1e293b', padding: '12px 14px' }}>
                 <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Users size={11} /> Sla op bij skipper
@@ -1869,25 +1499,15 @@ export default function AiCounterPage() {
                   <CheckCircle2 size={14} /> Opgeslagen!
                 </div>
               )}
-              <button style={{ ...s.ghostBtn, flexShrink: 0 }} onClick={() => {
-                cancelAnimationFrame(frameRef.current); clearInterval(elapsedRef.current);
-                if (mpPoseRef.current) { try { mpPoseRef.current.close(); } catch (_) {} mpPoseRef.current = null; }
-                if (uploadVideoRef.current) { try { uploadVideoRef.current.pause(); uploadVideoRef.current.currentTime = 0; } catch (_) {} }
-                isRunRef.current = false; stepsRef.current = 0; setIsRunning(false); setSessionDone(false);
-                setSteps(0); setMisses(0); setElapsed(0); setSavedOk(false); setUploadProgress(0); setFinalSteps(0); setFinalMisses(0);
-                setSignalHist([]); setStepTimestamps([]); signalBufRef.current = [];
-                detectorRef.current.reset(); setMode('upload'); setVideoPreviewReady(false);
-                stopRtdbSession(); releaseWakeLock();
-              }}>
+              {/* "Opnieuw" — extracted to handleOpnieuw */}
+              <button style={{ ...s.ghostBtn, flexShrink: 0 }} onClick={handleOpnieuw}>
                 <RefreshCw size={14} /> Opnieuw
               </button>
             </div>
 
             {signalHist.length > 0 && (
-              <button
-                style={{ ...s.ghostBtn, width: '100%', justifyContent: 'center', borderColor: '#1e3a5f', color: '#60a5fa', gap: '7px' }}
-                onClick={() => exportCsv(signalHist, stepTimestamps, detCfg, disciplineId, sessionType, trackedFoot, sessionStartTimeRef.current)}
-              >
+              <button style={{ ...s.ghostBtn, width: '100%', justifyContent: 'center', borderColor: '#1e3a5f', color: '#60a5fa', gap: '7px' }}
+                onClick={() => exportCsv(signalHist, stepTimestamps, detCfg, disciplineId, sessionType, trackedFoot, sessionStartTimeRef.current)}>
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
                   <path d="M7 1v8M4 6l3 3 3-3M2 11h10" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
@@ -1931,42 +1551,42 @@ const pageCSS = `
 `;
 
 const s = {
-  page:         { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif', display: 'flex', flexDirection: 'column' },
-  header:       { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 100, gap: '8px' },
-  backBtn:      { display: 'flex', alignItems: 'center', gap: '6px', color: '#64748b', textDecoration: 'none', fontSize: '13px', fontWeight: '600', minWidth: 60 },
-  headerCenter: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', flex: 1 },
-  betaChip:     { display: 'inline-flex', alignItems: 'center', gap: '4px', backgroundColor: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: '10px', padding: '2px 8px', fontSize: '9px', fontWeight: '800', color: '#f59e0b', letterSpacing: '0.6px' },
-  headerTitle:  { fontSize: '15px', fontWeight: '800', color: '#f1f5f9' },
-  overlayToggle:{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center', minWidth: 28 },
-  body:         { flex: 1, display: 'flex', flexDirection: 'column', maxWidth: '640px', width: '100%', margin: '0 auto', padding: '12px 12px 32px', gap: '12px' },
-  videoWrap:    { position: 'relative', width: '100%', aspectRatio: '4/3', backgroundColor: '#0a0f1a', borderRadius: '16px', border: '1px solid #1e293b', overflow: 'hidden' },
+  page:            { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif', display: 'flex', flexDirection: 'column' },
+  header:          { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 100, gap: '8px' },
+  backBtn:         { display: 'flex', alignItems: 'center', gap: '6px', color: '#64748b', textDecoration: 'none', fontSize: '13px', fontWeight: '600', minWidth: 60 },
+  headerCenter:    { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', flex: 1 },
+  betaChip:        { display: 'inline-flex', alignItems: 'center', gap: '4px', backgroundColor: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: '10px', padding: '2px 8px', fontSize: '9px', fontWeight: '800', color: '#f59e0b', letterSpacing: '0.6px' },
+  headerTitle:     { fontSize: '15px', fontWeight: '800', color: '#f1f5f9' },
+  overlayToggle:   { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center', minWidth: 28 },
+  body:            { flex: 1, display: 'flex', flexDirection: 'column', maxWidth: '640px', width: '100%', margin: '0 auto', padding: '12px 12px 32px', gap: '12px' },
+  videoWrap:       { position: 'relative', width: '100%', aspectRatio: '4/3', backgroundColor: '#0a0f1a', borderRadius: '16px', border: '1px solid #1e293b', overflow: 'hidden' },
   canvasLetterbox: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
-  canvas:       { maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', display: 'block' },
-  hiddenVideo:  { position: 'absolute', opacity: 0, pointerEvents: 'none', width: 1, height: 1 },
+  canvas:          { maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', display: 'block' },
+  hiddenVideo:     { position: 'absolute', opacity: 0, pointerEvents: 'none', width: 1, height: 1 },
   centeredOverlay: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', textAlign: 'center', gap: '10px' },
-  idleIcon:     { width: '80px', height: '80px', borderRadius: '20px', backgroundColor: '#1e293b', border: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '4px' },
-  idleTitle:    { fontSize: '18px', fontWeight: '800', color: '#f1f5f9', margin: 0 },
-  idleSubtitle: { fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.5, maxWidth: '280px' },
-  idleBtns:     { display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '4px' },
-  infoBox:      { display: 'flex', gap: '6px', alignItems: 'flex-start', backgroundColor: '#1e293b', borderRadius: '8px', padding: '8px 10px', fontSize: '11px', color: '#64748b', lineHeight: 1.5, maxWidth: '320px', textAlign: 'left', marginTop: '4px' },
-  errorBanner:  { display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#ef444422', border: '1px solid #ef444444', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#ef4444', maxWidth: '320px', textAlign: 'left' },
-  cameraHud:    { position: 'absolute', top: '10px', right: '10px', display: 'flex', flexDirection: 'column', gap: '6px', zIndex: 10 },
-  hudBtn:       { width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.15)', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  statsOverlay: { position: 'absolute', top: '10px', left: '10px', display: 'flex', flexDirection: 'column', gap: '6px', zIndex: 15 },
-  statPill:     { backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', padding: '6px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '60px' },
-  progressBar:  { position: 'absolute', bottom: 0, left: 0, right: 0, height: '4px', backgroundColor: 'rgba(0,0,0,0.4)' },
-  progressFill: { height: '100%', transition: 'width 0.3s linear', borderRadius: '0 2px 2px 0' },
-  controls:     { display: 'flex', gap: '10px', justifyContent: 'center', alignItems: 'center' },
-  resultsPanel: { backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #22c55e33', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', animation: 'fadeUp 0.35s ease-out' },
-  resultsHeader:{ display: 'flex', alignItems: 'center', gap: '8px' },
-  resultGrid:   { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' },
-  resultCard:   { backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #1e293b', padding: '12px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' },
-  tipsSection:  { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '14px 16px' },
-  tipsTitle:    { fontSize: '12px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 8px' },
-  tipsList:     { margin: 0, padding: '0 0 0 4px', listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 },
-  primaryBtn:   { display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '11px 18px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' },
-  secondaryBtn: { display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '11px 18px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '10px', color: '#94a3b8', fontWeight: '600', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' },
-  ghostBtn:     { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '10px 14px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '10px', color: '#64748b', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
-  startBtn:     { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '14px 28px', backgroundColor: '#22c55e', border: 'none', borderRadius: '12px', color: 'white', fontWeight: '800', fontSize: '15px', cursor: 'pointer', fontFamily: 'inherit' },
-  stopBtn:      { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '14px 28px', backgroundColor: '#ef4444', border: 'none', borderRadius: '12px', color: 'white', fontWeight: '800', fontSize: '15px', cursor: 'pointer', fontFamily: 'inherit' },
+  idleIcon:        { width: '80px', height: '80px', borderRadius: '20px', backgroundColor: '#1e293b', border: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '4px' },
+  idleTitle:       { fontSize: '18px', fontWeight: '800', color: '#f1f5f9', margin: 0 },
+  idleSubtitle:    { fontSize: '13px', color: '#64748b', margin: 0, lineHeight: 1.5, maxWidth: '280px' },
+  idleBtns:        { display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '4px' },
+  infoBox:         { display: 'flex', gap: '6px', alignItems: 'flex-start', backgroundColor: '#1e293b', borderRadius: '8px', padding: '8px 10px', fontSize: '11px', color: '#64748b', lineHeight: 1.5, maxWidth: '320px', textAlign: 'left', marginTop: '4px' },
+  errorBanner:     { display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#ef444422', border: '1px solid #ef444444', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#ef4444', maxWidth: '320px', textAlign: 'left' },
+  cameraHud:       { position: 'absolute', top: '10px', right: '10px', display: 'flex', flexDirection: 'column', gap: '6px', zIndex: 10 },
+  hudBtn:          { width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.15)', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  statsOverlay:    { position: 'absolute', top: '10px', left: '10px', display: 'flex', flexDirection: 'column', gap: '6px', zIndex: 15 },
+  statPill:        { backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', padding: '6px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '60px' },
+  progressBar:     { position: 'absolute', bottom: 0, left: 0, right: 0, height: '4px', backgroundColor: 'rgba(0,0,0,0.4)' },
+  progressFill:    { height: '100%', transition: 'width 0.3s linear', borderRadius: '0 2px 2px 0' },
+  controls:        { display: 'flex', gap: '10px', justifyContent: 'center', alignItems: 'center' },
+  resultsPanel:    { backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #22c55e33', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', animation: 'fadeUp 0.35s ease-out' },
+  resultsHeader:   { display: 'flex', alignItems: 'center', gap: '8px' },
+  resultGrid:      { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' },
+  resultCard:      { backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #1e293b', padding: '12px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' },
+  tipsSection:     { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '14px 16px' },
+  tipsTitle:       { fontSize: '12px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 8px' },
+  tipsList:        { margin: 0, padding: '0 0 0 4px', listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 },
+  primaryBtn:      { display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '11px 18px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' },
+  secondaryBtn:    { display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '11px 18px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '10px', color: '#94a3b8', fontWeight: '600', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' },
+  ghostBtn:        { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '10px 14px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '10px', color: '#64748b', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' },
+  startBtn:        { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '14px 28px', backgroundColor: '#22c55e', border: 'none', borderRadius: '12px', color: 'white', fontWeight: '800', fontSize: '15px', cursor: 'pointer', fontFamily: 'inherit' },
+  stopBtn:         { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '14px 28px', backgroundColor: '#ef4444', border: 'none', borderRadius: '12px', color: 'white', fontWeight: '800', fontSize: '15px', cursor: 'pointer', fontFamily: 'inherit' },
 };
