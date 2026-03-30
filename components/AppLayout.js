@@ -8,18 +8,13 @@ import {
 } from 'lucide-react';
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
-// NOTE: regular members with isCoach:true on their group doc are handled via
-// the `coachView` prop passed down from _app.js — AppLayout doesn't need to
-// re-derive it from the role string alone.
 const isSuperAdmin = (role) => role === 'superadmin';
 const isAdminRole  = (role) => role === 'clubadmin' || role === 'superadmin';
 
 // ─── Bottom nav ───────────────────────────────────────────────────────────────
-// 5 slots: Home · secondary · PRIMARY (big) · Berichten · Meer
-// The PRIMARY slot changes per role — it should be the action the user takes most.
+// 5 slots: Home · Berichten · LIVE (big primary) · Meer · (role slot)
+// Live is the primary action for everyone.
 const getBottomNav = (role, isCoach) => {
-  const hasAdminAccess = isAdminRole(role) || isCoach;
-
   return [
     {
       href:  '/',
@@ -27,25 +22,26 @@ const getBottomNav = (role, isCoach) => {
       icon:  Home,
       color: '#3b82f6',
     },
-
-    // Slot 2: role-specific secondary
-    hasAdminAccess
-      ? { href: '/counter',      label: 'Tellen',    icon: Hash,   color: '#22c55e' }
-      : { href: '/counter',      label: 'Tellen',    icon: Hash,   color: '#22c55e' },
-
-    // Slot 3: PRIMARY (large rounded button)
-    hasAdminAccess
-      ? { href: '/dashboard',    label: 'Dashboard',  icon: LayoutDashboard, color: '#f59e0b', isPrimary: true }
-      : { href: '/achievements', label: 'Prestaties', icon: Trophy,          color: '#f59e0b', isPrimary: true },
-
-    // Slot 4: Berichten (same page for everyone, tab content differs by role)
     {
       href:  '/announcements',
       label: 'Berichten',
       icon:  Megaphone,
       color: '#a78bfa',
     },
-
+    // Slot 3: PRIMARY (large rounded button) — Live for everyone
+    {
+      href:      '/live',
+      label:     'Live',
+      icon:      Zap,
+      color:     '#22c55e',
+      isPrimary: true,
+    },
+    {
+      href:  '/achievements',
+      label: 'Prestaties',
+      icon:  Trophy,
+      color: '#f59e0b',
+    },
     // Slot 5: Meer drawer trigger
     {
       key:   'more',
@@ -57,29 +53,28 @@ const getBottomNav = (role, isCoach) => {
 };
 
 // ─── Sidebar / Meer drawer items ──────────────────────────────────────────────
-// These are SECONDARY pages — not duplicating anything already in the bottom nav.
 const getSidebarItems = (role, isCoach) => {
   const hasAdminAccess = isAdminRole(role) || isCoach;
   const items = [];
 
   // Everyone
-  items.push({ href: '/badges',   label: 'Badge leaderboard', icon: Medal,   description: 'Club klassement',      color: '#f59e0b' });
-  items.push({ href: '/history',  label: 'Geschiedenis',      icon: History, description: 'Sessies & AI analyse', color: '#60a5fa' });
+  items.push({ href: '/badges',   label: 'Badge leaderboard', icon: Medal,         description: 'Club klassement',      color: '#f59e0b' });
+  items.push({ href: '/history',  label: 'Geschiedenis',      icon: History,       description: 'Sessies & AI analyse', color: '#60a5fa' });
 
-  // Coaches + admins: achievements tab and badge awarding
+  // Coaches + admins
   if (hasAdminAccess) {
-    items.push({ href: '/achievements', label: 'Prestaties',   icon: Trophy, description: 'Badges & records',     color: '#f59e0b' });
-    items.push({ href: '/badge-beheer', label: 'Badge beheer', icon: Award,  description: 'Aanmaken & uitreiken', color: '#a78bfa' });
+    items.push({ href: '/badge-beheer', label: 'Badge beheer', icon: Award,         description: 'Aanmaken & uitreiken', color: '#a78bfa' });
+    items.push({ href: '/dashboard',    label: 'Dashboard',    icon: LayoutDashboard, description: 'Live monitoring',    color: '#22c55e' });
   }
 
   // Admins only
   if (isAdminRole(role)) {
-    items.push({ href: '/clubadmin', label: 'Clubbeheer', icon: Building2, description: 'Groepen & leden', color: '#22c55e' });
+    items.push({ href: '/clubadmin', label: 'Clubbeheer', icon: Building2, description: 'Groepen & leden', color: '#3b82f6' });
   }
 
   // SuperAdmin only
   if (isSuperAdmin(role)) {
-    items.push({ href: '/superadmin',   label: 'SuperAdmin',      icon: ShieldAlert, description: 'Clubs & gebruikers',   color: '#ef4444' });
+    items.push({ href: '/superadmin', label: 'SuperAdmin', icon: ShieldAlert, description: 'Clubs & gebruikers', color: '#ef4444' });
   }
 
   return items;
@@ -409,17 +404,11 @@ function DesktopSidebar({ currentPath, userRole, isCoach, announcementCount }) {
 }
 
 // ─── Main layout wrapper ──────────────────────────────────────────────────────
-// Props:
-//   userRole         : 'user' | 'clubadmin' | 'superadmin'
-//   coachView        : boolean — true when a regular member has isCoach:true in a group
-//                      (set by _app.js, which has access to group membership data)
-//   announcementCount: number — unread active announcements badge
 export default function AppLayout({ children, userRole, coachView, announcementCount = 0 }) {
   const router = useRouter();
   const currentPath = router.pathname;
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // isCoach is true for any user with elevated access, regardless of how they got it
   const isCoach = !!(coachView || isAdminRole(userRole));
 
   useEffect(() => {
@@ -430,7 +419,6 @@ export default function AppLayout({ children, userRole, coachView, announcementC
     <>
       <style>{layoutCSS}</style>
 
-      {/* Mobile: slide-in drawer (opened by "Meer" button) */}
       <SidebarDrawer
         currentPath={currentPath}
         open={drawerOpen}
@@ -439,7 +427,6 @@ export default function AppLayout({ children, userRole, coachView, announcementC
         isCoach={isCoach}
       />
 
-      {/* Desktop: always-visible sidebar */}
       <DesktopSidebar
         currentPath={currentPath}
         userRole={userRole}
@@ -447,7 +434,6 @@ export default function AppLayout({ children, userRole, coachView, announcementC
         announcementCount={announcementCount}
       />
 
-      {/* Mobile: bottom nav */}
       <div className="mobile-bottom-nav">
         <BottomNav
           currentPath={currentPath}
