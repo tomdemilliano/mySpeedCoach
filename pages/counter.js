@@ -485,6 +485,22 @@ function SessionActionButtons({ canStart, onManual, aiHref }) {
 export default function CounterPage() {
   const { disciplines, getDisc, getDuration, getLabel } = useDisciplines();
 
+// Read params passed from /live hub (skipper + discipline pre-selected)
+  const _urlParams = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search)
+    : new URLSearchParams();
+  const _paramDisciplineId = _urlParams.get('disciplineId') || '';
+  const _paramSessionType  = _urlParams.get('sessionType')  || 'Training';
+  const _paramMemberId     = _urlParams.get('memberId')     || '';
+  const _paramFirstName    = _urlParams.get('firstName')    || '';
+  const _paramLastName     = _urlParams.get('lastName')     || '';
+  const _paramRtdbUid      = _urlParams.get('rtdbUid')      || '';
+  const _paramClubId       = _urlParams.get('clubId')       || '';
+  const _paramGroupId      = _urlParams.get('groupId')      || '';
+  const _hasLiveParams     = !!(
+    _paramDisciplineId && _paramClubId && _paramGroupId && _paramMemberId
+  );
+
   const [counterUser,   setCounterUser]   = useState(null);
   const isSuperAdminRef = useRef(false);
   const isClubAdminRef  = useRef(false);
@@ -547,6 +563,24 @@ export default function CounterPage() {
   useEffect(() => {
     if (disciplines.length > 0 && !disciplineId) setDisciplineId(disciplines[0].id);
   }, [disciplines]);
+
+  // Auto-skip setup when /live hub has already collected skipper + discipline
+  useEffect(() => {
+    if (!_hasLiveParams || !bootstrapDone) return;
+    setDisciplineId(_paramDisciplineId);
+    setSessionType(_paramSessionType);
+    setSelectedClubId(_paramClubId);
+    setSelectedGroupId(_paramGroupId);
+    setSelectedSkipper({
+      memberId:  _paramMemberId,
+      clubId:    _paramClubId,
+      firstName: _paramFirstName,
+      lastName:  _paramLastName,
+      rtdbUid:   _paramRtdbUid,
+    });
+    setSetupDone(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootstrapDone]);
 
   useEffect(() => {
     const uid = getCookie();
@@ -1010,9 +1044,14 @@ export default function CounterPage() {
     return (
       <div style={st.container}>
         <div style={st.header}>
-          <h1 style={{ fontSize: '18px', fontWeight: '800', color: '#f1f5f9', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Hash size={20} color="#3b82f6" /> Nieuwe sessie
-          </h1>
+         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+           <a href="/live" style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#64748b', textDecoration: 'none', fontSize: '13px', fontWeight: '600' }}>
+             <ArrowLeft size={15} /> Live
+           </a>
+           <h1 style={{ fontSize: '18px', fontWeight: '800', color: '#f1f5f9', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+             <Hash size={20} color="#3b82f6" /> Nieuwe sessie
+           </h1>
+         </div>
         </div>
 
         <div style={{ width: '100%', maxWidth: '500px', display: 'flex', flexDirection: 'column', gap: '0' }}>
