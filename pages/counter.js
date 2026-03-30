@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, memo, useCallback } from 'react';
 import {
-  LiveSessionFactory, GroupFactory, ClubFactory, UserFactory,
+  LiveSessionFactory, GroupFactory, UserFactory,
   BadgeFactory, CounterBadgeFactory, ClubMemberFactory, UserMemberLinkFactory,
 } from '../constants/dbSchema';
 import { useDisciplines } from '../hooks/useDisciplines';
@@ -12,6 +12,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { Sparkles } from 'lucide-react';
+import { useSkipperSelection } from '../hooks/useSkipperSelection';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const AUTO_STOP_IDLE_MS  = 15000;
@@ -218,14 +219,14 @@ function RelayTeamBuilder({ skippers, clubMembers, value, onChange, required = 2
   const isFull      = value.length >= required;
   const isDone      = value.length === required;
 
-  const getProfile = (memberId) => clubMembers.find(m => m.id === memberId);
+//  const getProfile = (memberId) => clubMembers.find(m => m.id === memberId);
 
   const handleToggle = (memberId) => {
     if (selectedIds.has(memberId)) {
       onChange(value.filter(v => v.memberId !== memberId));
     } else {
       if (isFull) return;
-      const profile = getProfile(memberId);
+      const profile = getMember(memberId);
       onChange([...value, {
         memberId,
         name: profile ? `${profile.firstName} ${profile.lastName}` : memberId,
@@ -257,7 +258,7 @@ function RelayTeamBuilder({ skippers, clubMembers, value, onChange, required = 2
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: value.length > 0 ? '14px' : '0' }}>
         {skippers.map(s => {
           const memberId  = s.memberId || s.id;
-          const profile   = getProfile(memberId);
+          const profile   = getMember(memberId);
           const firstName = profile?.firstName || '?';
           const lastName  = profile?.lastName  || '';
           const initials  = `${firstName[0] || '?'}${lastName[0] || ''}`.toUpperCase();
@@ -283,7 +284,7 @@ function RelayTeamBuilder({ skippers, clubMembers, value, onChange, required = 2
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
             {value.map((item, idx) => {
-              const profile   = getProfile(item.memberId);
+              const profile   = getMember(item.memberId);
               const initials  = `${profile?.firstName?.[0] || '?'}${profile?.lastName?.[0] || ''}`.toUpperCase();
               const isDraggedOver = dragOver === idx;
               return (
@@ -501,18 +502,33 @@ export default function CounterPage() {
     _paramDisciplineId && _paramClubId && _paramGroupId && _paramMemberId
   );
 
-  const [counterUser,   setCounterUser]   = useState(null);
-  const isSuperAdminRef = useRef(false);
-  const isClubAdminRef  = useRef(false);
+  const {
+    bootstrapDone,
+    memberClubs, memberGroups,
+    skippers, clubMembers,
+    selectedClubId, selectedGroupId,
+    setSelectedClubId, setSelectedGroupId,
+    getMember,
+    resolveSkipper,
+  } = useSkipperSelection();
 
-  const [memberClubs,   setMemberClubs]   = useState([]);
-  const [memberGroups,  setMemberGroups]  = useState([]);
-  const [bootstrapDone, setBootstrapDone] = useState(false);
-  const [selectedClubId,  setSelectedClubId]  = useState('');
-  const [selectedGroupId, setSelectedGroupId] = useState('');
+  const _urlParams = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search)
+    : new URLSearchParams();
+  const _paramDisciplineId = _urlParams.get('disciplineId') || '';
+  const _paramSessionType  = _urlParams.get('sessionType')  || 'Training';
+  const _paramMemberId     = _urlParams.get('memberId')     || '';
+  const _paramFirstName    = _urlParams.get('firstName')    || '';
+  const _paramLastName     = _urlParams.get('lastName')     || '';
+  const _paramRtdbUid      = _urlParams.get('rtdbUid')      || '';
+  const _paramClubId       = _urlParams.get('clubId')       || '';
+  const _paramGroupId      = _urlParams.get('groupId')      || '';
+  const _hasLiveParams     = !!(
+    _paramDisciplineId && _paramClubId && _paramGroupId && _paramMemberId
+  );
 
-  const [skippers,    setSkippers]    = useState([]);
-  const [clubMembers, setClubMembers] = useState([]);
+  const [counterUser, setCounterUser] = useState(null);
+
   const [selectedSkipper, setSelectedSkipper] = useState(null);
 
   const [setupDone,         setSetupDone]         = useState(false);
@@ -564,6 +580,23 @@ export default function CounterPage() {
     if (disciplines.length > 0 && !disciplineId) setDisciplineId(disciplines[0].id);
   }, [disciplines]);
 
+  useEffect(() => {
+    if (!_hasLiveParams || !bootstrapDone) return;
+    setDisciplineId(_paramDisciplineId);
+    setSessionType(_paramSessionType);
+    setSelectedClubId(_paramClubId);
+    setSelectedGroupId(_paramGroupId);
+    setSelectedSkipper({
+      memberId:  _paramMemberId,
+      clubId:    _paramClubId,
+      firstName: _paramFirstName,
+      lastName:  _paramLastName,
+      rtdbUid:   _paramRtdbUid,
+    });
+    setSetupDone(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootstrapDone]);
+  
   // Auto-skip setup when /live hub has already collected skipper + discipline
   useEffect(() => {
     if (!_hasLiveParams || !bootstrapDone) return;
@@ -582,105 +615,15 @@ export default function CounterPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bootstrapDone]);
 
-  useEffect(() => {
-    const uid = getCookie();
-    if (!uid) { setBootstrapDone(true); return; }
-    let unsubClubs = () => {};
-    let cancelled  = false;
-
-    const bootstrap = async () => {
-      const snap = await UserFactory.get(uid);
-      if (!snap.exists() || cancelled) { setBootstrapDone(true); return; }
-      const user = { id: uid, ...snap.data() };
-      setCounterUser(user);
-
-      if (user.role === 'superadmin') {
-        isSuperAdminRef.current = true;
-        unsubClubs = ClubFactory.getAll((clubs) => {
-          if (cancelled || clubs.length === 0) return;
-          setMemberClubs(clubs);
-          setBootstrapDone(true);
-        });
-        return;
-      }
-      if (user.role === 'clubadmin') {
-        isClubAdminRef.current = true;
-        unsubClubs = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
-          if (cancelled) return;
-          if (profiles.length === 0) { setBootstrapDone(true); return; }
-          const clubIdSet = new Set(profiles.map(p => p.member.clubId));
-          const allClubSnaps = await Promise.all([...clubIdSet].map(id => ClubFactory.getById(id)));
-          if (cancelled) return;
-          setMemberClubs(allClubSnaps.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() })));
-          setBootstrapDone(true);
-        });
-        return;
-      }
-      unsubClubs = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
-        if (cancelled) return;
-        if (profiles.length === 0) { setBootstrapDone(true); return; }
-        const clubIdSet    = new Set(profiles.map(p => p.member.clubId));
-        const allClubSnaps = await Promise.all([...clubIdSet].map(id => ClubFactory.getById(id)));
-        if (cancelled) return;
-        setMemberClubs(allClubSnaps.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() })));
-        setBootstrapDone(true);
-      });
-    };
-
-    bootstrap();
-    return () => { cancelled = true; unsubClubs(); };
-  }, []);
+   useEffect(() => {
+     const uid = getCookie(); if (!uid) return;
+     UserFactory.get(uid).then(s => { if (s.exists()) setCounterUser({ id: uid, ...s.data() }); });
+   }, []);
 
   useEffect(() => {
     if (!bootstrapDone || memberClubs.length === 0) return;
     if (memberClubs.length === 1) setSelectedClubId(memberClubs[0].id);
   }, [bootstrapDone, memberClubs]);
-
-  useEffect(() => {
-    if (!selectedClubId) return;
-    setSelectedGroupId(''); setMemberGroups([]); setSkippers([]); setClubMembers([]);
-    const uid = getCookie(); if (!uid) return;
-    let cancelled = false;
-
-    const load = async () => {
-      try {
-        const allGroups = await GroupFactory.getGroupsByClubOnce(selectedClubId);
-        const groupMembersCache = {};
-        await Promise.all(allGroups.map(async group => {
-          const members = await GroupFactory.getMembersByGroupOnce(selectedClubId, group.id);
-          groupMembersCache[group.id] = members;
-        }));
-        if (cancelled) return;
-
-        if (isSuperAdminRef.current || isClubAdminRef.current) {
-          const filtered = allGroups.filter(g => groupMembersCache[g.id]?.some(m => m.isSkipper === true));
-          setMemberGroups(filtered);
-          if (filtered.length === 1) setSelectedGroupId(filtered[0].id);
-          return;
-        }
-
-        const links = await UserMemberLinkFactory.getForUserInClub(uid, selectedClubId);
-        if (links.length === 0) return;
-        const myMemberIds = new Set(links.map(l => l.memberId).filter(Boolean));
-        const memberGroupIds = new Set();
-        allGroups.forEach(group => {
-          if (groupMembersCache[group.id]?.some(d => myMemberIds.has(d.memberId || d.id))) memberGroupIds.add(group.id);
-        });
-        const filtered = allGroups.filter(g => memberGroupIds.has(g.id)).filter(g => groupMembersCache[g.id]?.some(m => m.isSkipper === true));
-        setMemberGroups(filtered);
-        if (filtered.length === 1) setSelectedGroupId(filtered[0].id);
-      } catch (e) { console.error('[Counter] Failed to load member groups:', e); }
-    };
-    load();
-    return () => { cancelled = true; };
-  }, [selectedClubId]);
-
-  useEffect(() => {
-    if (!selectedClubId || !selectedGroupId) return;
-    const u1 = GroupFactory.getSkippersByGroup(selectedClubId, selectedGroupId, setSkippers);
-    const u2 = ClubMemberFactory.getAll(selectedClubId, setClubMembers);
-    return () => { u1(); u2(); };
-  }, [selectedClubId, selectedGroupId]);
 
   useEffect(() => {
     if (!selectedSkipper?.rtdbUid || sessionMode !== 'individual') return;
@@ -774,16 +717,6 @@ export default function CounterPage() {
     }, 1000);
     return () => clearInterval(tuCountdownRef.current);
   }, [tuMissCountdown]);
-
-  // ─────────────────────────────────────────────────────────────────────────
-  const resolveSkipperProfile = async (groupMember) => {
-    const memberId  = groupMember.memberId || groupMember.id;
-    const profile   = clubMembers.find(m => m.id === memberId);
-    const firstName = profile?.firstName || '?';
-    const lastName  = profile?.lastName  || '';
-    const rtdbUid   = await UserMemberLinkFactory.getUidForMember(selectedClubId, memberId);
-    return { memberId, clubId: selectedClubId, firstName, lastName, rtdbUid };
-  };
 
   // ─────────────────────────────────────────────────────────────────────────
   // SESSION HANDLERS
@@ -1147,7 +1080,7 @@ export default function CounterPage() {
                     return (
                       <button key={memberId}
                         style={{ ...st.card, borderColor: isChosen ? '#3b82f6' : '#334155', backgroundColor: isChosen ? '#1e3a5f' : '#1e293b' }}
-                        onClick={async () => { const resolved = await resolveSkipperProfile(s); setSelectedSkipper(resolved); }}
+                        onClick={async () => { const resolved = await resolveSkipper(s); setSelectedSkipper(resolved); }}
                       >
                         <div style={{ ...st.avatar, backgroundColor: isChosen ? '#3b82f6' : '#334155', width: '44px', height: '44px', fontSize: '15px' }}>{initials}</div>
                         <div style={{ marginTop: '8px', fontSize: '13px', fontWeight: isChosen ? '700' : '500', color: isChosen ? '#f1f5f9' : '#94a3b8', textAlign: 'center' }}>{firstName} {lastName}</div>
