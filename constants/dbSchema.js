@@ -211,6 +211,103 @@ export const SCHEMA = {
       createdAt:  "timestamp",
       updatedAt:  "timestamp",
     },
+    locations: {
+      clubId:       "string",
+      name:         "string",
+      address:      "string",
+      city:         "string",
+      postalCode:   "string",
+      contactName:  "string|null",
+      contactPhone: "string|null",
+      notes:        "string",
+      isActive:     "boolean",
+      createdAt:    "timestamp",
+      createdBy:    "uid",
+    },
+ 
+    "clubs/{clubId}/eventTemplates/{templateId}": {
+      type:         "training|club_event|competition",
+      title:        "string",
+      groupIds:     ["string"],
+      locationId:   "string|null",
+      defaultCoachMemberIds: ["string"],
+      recurrence: {
+        frequency:   "none|weekly|biweekly|monthly",
+        daysOfWeek:  ["number"],   // 0=ma … 6=zo
+        startDate:   "string",     // YYYY-MM-DD
+        endDate:     "string|null",
+        startTime:   "string",     // HH:MM
+        durationMin: "number",
+      },
+      color:        "string|null",
+      isActive:     "boolean",
+      createdAt:    "timestamp",
+      createdBy:    "uid",
+      updatedAt:    "timestamp",
+    },
+ 
+    "clubs/{clubId}/calendarEvents/{eventId}": {
+      templateId:      "string|null",
+      type:            "training|club_event|competition",
+      title:           "string",
+      groupIds:        ["string"],
+      locationId:      "string|null",
+      locationNote:    "string",
+      startAt:         "timestamp",
+      endAt:           "timestamp",
+      status:          "scheduled|cancelled|modified",
+      cancelReason:    "string",
+      isSpecial:       "boolean",
+      specialLabel:    "string",
+      coachMemberIds:  ["string"],
+      substituteNotes: "string",
+      notes:           "string",      // intern, coach/admin only
+      memberNotes:     "string",      // visible to members
+      prepId:          "string|null",
+      competitionDetails: {
+        level:           "nationaal|regionaal|club",
+        registrationUrl: "string|null",
+        requiredLabels:  ["A|B|C"],
+        disciplines:     ["string"],
+        location:        "string",
+      },
+      createdAt:       "timestamp",
+      createdBy:       "uid",
+      updatedAt:       "timestamp",
+    },
+ 
+    "clubs/{clubId}/calendarEvents/{eventId}/attendance/{memberId}": {
+      memberId:      "string",
+      status:        "present|absent|excused|registered_absent",
+      absentReason:  "string",
+      checkedInAt:   "timestamp|null",
+      checkedInBy:   "uid|null",
+      selfCheckedIn: "boolean",
+      updatedAt:     "timestamp",
+    },
+    "clubs/{clubId}/trainingPreps/{prepId}": {
+      title:           "string",
+      ageGroup:        "u12|u16|senior|mixed",
+      level:           "beginner|intermediate|advanced",
+      totalMin:        "number",
+      focus:           ["speed|endurance|freestyle|technique"],
+      generatedByAI:   "boolean",
+      aiPromptSummary: "string",
+      blocks: [{
+        id:          "string",
+        phase:       "warmup|main|cooldown",
+        title:       "string",
+        durationMin: "number",
+        description: "string",
+        discipline:  "string|null",
+        intensity:   "low|medium|high",
+      }],
+      usedInEventIds:  ["string"],
+      createdAt:       "timestamp",
+      createdBy:       "uid",
+      updatedAt:       "timestamp",
+    },
+    
   },
   rtdb: {
     live_sessions: {
@@ -1798,5 +1895,405 @@ export const MemberLabelFactory = {
       }
     }));
     return results.sort((a, b) => (b.season.startDate?.seconds || 0) - (a.season.startDate?.seconds || 0));
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 15. LOCATION FACTORY
+// ─────────────────────────────────────────────────────────────────────────────
+ 
+export const LocationFactory = {
+  create: (clubId, data, createdByUid) =>
+    addDoc(collection(db, 'locations'), {
+      clubId,
+      name:         data.name         || '',
+      address:      data.address       || '',
+      city:         data.city          || '',
+      postalCode:   data.postalCode    || '',
+      contactName:  data.contactName   || null,
+      contactPhone: data.contactPhone  || null,
+      notes:        data.notes         || '',
+      isActive:     true,
+      createdAt:    serverTimestamp(),
+      createdBy:    createdByUid || null,
+    }),
+ 
+  getAll: (clubId, callback) =>
+    onSnapshot(
+      query(
+        collection(db, 'locations'),
+        where('clubId',   '==', clubId),
+        where('isActive', '==', true)
+      ),
+      (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+    ),
+ 
+  getAllOnce: async (clubId) => {
+    const snap = await getDocs(
+      query(
+        collection(db, 'locations'),
+        where('clubId',   '==', clubId),
+        where('isActive', '==', true)
+      )
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+ 
+  getById: (locationId) =>
+    getDoc(doc(db, 'locations', locationId)),
+ 
+  update: (locationId, data) =>
+    updateDoc(doc(db, 'locations', locationId), data),
+ 
+  deactivate: (locationId) =>
+    updateDoc(doc(db, 'locations', locationId), { isActive: false }),
+};
+ 
+// ─────────────────────────────────────────────────────────────────────────────
+// 16. EVENT TEMPLATE FACTORY
+// ─────────────────────────────────────────────────────────────────────────────
+ 
+export const EventTemplateFactory = {
+  create: (clubId, data, createdByUid) =>
+    addDoc(collection(db, `clubs/${clubId}/eventTemplates`), {
+      type:                  data.type                  || 'training',
+      title:                 data.title                 || '',
+      groupIds:              data.groupIds              || [],
+      locationId:            data.locationId            || null,
+      defaultCoachMemberIds: data.defaultCoachMemberIds || [],
+      recurrence: {
+        frequency:   data.recurrence?.frequency   || 'weekly',
+        daysOfWeek:  data.recurrence?.daysOfWeek  || [],
+        startDate:   data.recurrence?.startDate   || '',
+        endDate:     data.recurrence?.endDate     || null,
+        startTime:   data.recurrence?.startTime   || '19:00',
+        durationMin: data.recurrence?.durationMin || 90,
+      },
+      color:        data.color    || null,
+      isActive:     true,
+      createdAt:    serverTimestamp(),
+      createdBy:    createdByUid || null,
+      updatedAt:    serverTimestamp(),
+    }),
+ 
+  getAll: (clubId, callback) =>
+    onSnapshot(
+      query(
+        collection(db, `clubs/${clubId}/eventTemplates`),
+        where('isActive', '==', true)
+      ),
+      (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+    ),
+ 
+  // One-shot fetch — used by calendar view to generate virtual events
+  getAllOnce: async (clubId) => {
+    const snap = await getDocs(
+      query(
+        collection(db, `clubs/${clubId}/eventTemplates`),
+        where('isActive', '==', true)
+      )
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+ 
+  getById: (clubId, templateId) =>
+    getDoc(doc(db, `clubs/${clubId}/eventTemplates`, templateId)),
+ 
+  update: (clubId, templateId, data) =>
+    updateDoc(doc(db, `clubs/${clubId}/eventTemplates`, templateId), {
+      ...data,
+      updatedAt: serverTimestamp(),
+    }),
+ 
+  deactivate: (clubId, templateId) =>
+    updateDoc(doc(db, `clubs/${clubId}/eventTemplates`, templateId), {
+      isActive:  false,
+      updatedAt: serverTimestamp(),
+    }),
+};
+ 
+// ─────────────────────────────────────────────────────────────────────────────
+// 17. CALENDAR EVENT FACTORY
+// ─────────────────────────────────────────────────────────────────────────────
+ 
+export const CalendarEventFactory = {
+  // Create a standalone event OR materialise a virtual event (exception)
+  create: (clubId, data, createdByUid) =>
+    addDoc(collection(db, `clubs/${clubId}/calendarEvents`), {
+      templateId:      data.templateId      || null,
+      type:            data.type            || 'training',
+      title:           data.title           || '',
+      groupIds:        data.groupIds        || [],
+      locationId:      data.locationId      || null,
+      locationNote:    data.locationNote    || '',
+      startAt:         data.startAt,
+      endAt:           data.endAt,
+      status:          data.status          || 'scheduled',
+      cancelReason:    data.cancelReason    || '',
+      isSpecial:       data.isSpecial       || false,
+      specialLabel:    data.specialLabel    || '',
+      coachMemberIds:  data.coachMemberIds  || [],
+      substituteNotes: data.substituteNotes || '',
+      notes:           data.notes           || '',
+      memberNotes:     data.memberNotes     || '',
+      prepId:          data.prepId          || null,
+      competitionDetails: data.competitionDetails || null,
+      createdAt:       serverTimestamp(),
+      createdBy:       createdByUid || null,
+      updatedAt:       serverTimestamp(),
+    }),
+ 
+  // Materialise a virtual recurring event with a known deterministic ID.
+  // Used when a write is needed (check-in, attendance, exception, prep link).
+  materializeVirtual: (clubId, virtualEvent, overrides = {}, createdByUid = null) => {
+    const data = {
+      templateId:      virtualEvent.templateId,
+      type:            virtualEvent.type,
+      title:           virtualEvent.title,
+      groupIds:        virtualEvent.groupIds,
+      locationId:      virtualEvent.locationId,
+      locationNote:    virtualEvent.locationNote    || '',
+      startAt:         virtualEvent.startAt,
+      endAt:           virtualEvent.endAt,
+      status:          'scheduled',
+      cancelReason:    '',
+      isSpecial:       virtualEvent.isSpecial       || false,
+      specialLabel:    virtualEvent.specialLabel    || '',
+      coachMemberIds:  virtualEvent.coachMemberIds  || [],
+      substituteNotes: virtualEvent.substituteNotes || '',
+      notes:           virtualEvent.notes           || '',
+      memberNotes:     virtualEvent.memberNotes     || '',
+      prepId:          null,
+      competitionDetails: null,
+      ...overrides,
+      createdAt:  serverTimestamp(),
+      createdBy:  createdByUid,
+      updatedAt:  serverTimestamp(),
+    };
+    // Use the deterministic ID so exceptions always match virtual events
+    return setDoc(
+      doc(db, `clubs/${clubId}/calendarEvents`, virtualEvent.id),
+      data
+    );
+  },
+ 
+  // Get or materialise — returns the doc data (as plain object)
+  getOrMaterialize: async (clubId, virtualEvent, createdByUid = null) => {
+    const docRef  = doc(db, `clubs/${clubId}/calendarEvents`, virtualEvent.id);
+    const snap    = await getDoc(docRef);
+    if (snap.exists()) return { id: snap.id, ...snap.data() };
+    await CalendarEventFactory.materializeVirtual(clubId, virtualEvent, {}, createdByUid);
+    const snap2 = await getDoc(docRef);
+    return snap2.exists() ? { id: snap2.id, ...snap2.data() } : null;
+  },
+ 
+  getById: (clubId, eventId) =>
+    getDoc(doc(db, `clubs/${clubId}/calendarEvents`, eventId)),
+ 
+  update: (clubId, eventId, data) =>
+    updateDoc(doc(db, `clubs/${clubId}/calendarEvents`, eventId), {
+      ...data,
+      updatedAt: serverTimestamp(),
+    }),
+ 
+  cancel: (clubId, eventId, reason) =>
+    updateDoc(doc(db, `clubs/${clubId}/calendarEvents`, eventId), {
+      status:       'cancelled',
+      cancelReason: reason || '',
+      updatedAt:    serverTimestamp(),
+    }),
+ 
+  // Real-time subscription to events within a timestamp range.
+  // NOTE: Firestore requires a composite index on (startAt, endAt)
+  // or just startAt. We query by startAt only (simplest index).
+  getEventsInRange: (clubId, startTs, endTs, callback) =>
+    onSnapshot(
+      query(
+        collection(db, `clubs/${clubId}/calendarEvents`),
+        where('startAt', '>=', startTs),
+        where('startAt', '<=', endTs)
+      ),
+      (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      (err) => { console.error('[CalendarEventFactory] getEventsInRange error:', err); callback([]); }
+    ),
+ 
+  // One-shot fetch for a range — used for coach reports
+  getEventsInRangeOnce: async (clubId, startTs, endTs) => {
+    const snap = await getDocs(
+      query(
+        collection(db, `clubs/${clubId}/calendarEvents`),
+        where('startAt', '>=', startTs),
+        where('startAt', '<=', endTs)
+      )
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+};
+ 
+// ─────────────────────────────────────────────────────────────────────────────
+// 18. ATTENDANCE FACTORY
+// ─────────────────────────────────────────────────────────────────────────────
+ 
+export const AttendanceFactory = {
+  // Create or overwrite an attendance record (memberId is the document ID)
+  upsert: (clubId, eventId, memberId, data) =>
+    setDoc(
+      doc(db, `clubs/${clubId}/calendarEvents/${eventId}/attendance`, memberId),
+      {
+        memberId,
+        status:        data.status        || 'present',
+        absentReason:  data.absentReason  || '',
+        checkedInAt:   data.checkedInAt   ?? null,
+        checkedInBy:   data.checkedInBy   ?? null,
+        selfCheckedIn: data.selfCheckedIn ?? false,
+        updatedAt:     serverTimestamp(),
+      },
+      { merge: true }
+    ),
+ 
+  // Self check-in by a member (uid is their Firebase Auth uid)
+  selfCheckIn: (clubId, eventId, memberId, uid) =>
+    AttendanceFactory.upsert(clubId, eventId, memberId, {
+      status:        'present',
+      checkedInAt:   serverTimestamp(),
+      checkedInBy:   uid,
+      selfCheckedIn: true,
+    }),
+ 
+  // Self excuse (member marks themselves as absent with optional reason)
+  selfExcuse: (clubId, eventId, memberId, uid, reason = '') =>
+    AttendanceFactory.upsert(clubId, eventId, memberId, {
+      status:        'excused',
+      absentReason:  reason,
+      checkedInAt:   null,
+      checkedInBy:   uid,
+      selfCheckedIn: true,
+    }),
+ 
+  // Coach marks a member as present
+  coachCheckIn: (clubId, eventId, memberId, coachUid) =>
+    AttendanceFactory.upsert(clubId, eventId, memberId, {
+      status:        'present',
+      checkedInAt:   serverTimestamp(),
+      checkedInBy:   coachUid,
+      selfCheckedIn: false,
+    }),
+ 
+  // Coach marks a member as absent
+  coachMarkAbsent: (clubId, eventId, memberId, coachUid) =>
+    AttendanceFactory.upsert(clubId, eventId, memberId, {
+      status:        'registered_absent',
+      checkedInAt:   null,
+      checkedInBy:   coachUid,
+      selfCheckedIn: false,
+    }),
+ 
+  // Real-time subscription to all attendance for one event
+  getForEvent: (clubId, eventId, callback) =>
+    onSnapshot(
+      collection(db, `clubs/${clubId}/calendarEvents/${eventId}/attendance`),
+      (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+    ),
+ 
+  // One-shot fetch of attendance for one event
+  getForEventOnce: async (clubId, eventId) => {
+    const snap = await getDocs(
+      collection(db, `clubs/${clubId}/calendarEvents/${eventId}/attendance`)
+    );
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+ 
+  // Get own attendance record for a specific event
+  getOwnRecord: async (clubId, eventId, memberId) => {
+    const snap = await getDoc(
+      doc(db, `clubs/${clubId}/calendarEvents/${eventId}/attendance`, memberId)
+    );
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  },
+ 
+  // Coach report: aggregate attendance data for a period.
+  // Returns an object: { [coachMemberId]: { name, eventCount, events: [...] } }
+  // Strategy: fetch all events in range, then fetch attendance for each.
+  // For a typical month this is ~20 events × 1 Firestore read each = manageable.
+  getCoachReport: async (clubId, fromTs, toTs) => {
+    const events = await CalendarEventFactory.getEventsInRangeOnce(clubId, fromTs, toTs);
+    const report = {}; // { coachMemberId: { eventCount, events: [] } }
+ 
+    for (const event of events) {
+      if (event.status === 'cancelled') continue;
+ 
+      // Each event's coachMemberIds array tells us who was scheduled
+      const coaches = event.coachMemberIds || [];
+      for (const coachId of coaches) {
+        if (!report[coachId]) report[coachId] = { eventCount: 0, events: [] };
+        report[coachId].eventCount++;
+        report[coachId].events.push({
+          eventId:  event.id,
+          title:    event.title,
+          startAt:  event.startAt,
+          isSubstitute: false,
+        });
+      }
+    }
+ 
+    return report;
+  },
+};
+ 
+// ─────────────────────────────────────────────────────────────────────────────
+// 19. TRAINING PREP FACTORY
+// ─────────────────────────────────────────────────────────────────────────────
+ 
+export const TrainingPrepFactory = {
+  create: (clubId, data, createdByUid) =>
+    addDoc(collection(db, `clubs/${clubId}/trainingPreps`), {
+      title:           data.title           || '',
+      ageGroup:        data.ageGroup        || 'mixed',
+      level:           data.level           || 'intermediate',
+      totalMin:        data.totalMin        || 90,
+      focus:           data.focus           || [],
+      generatedByAI:   data.generatedByAI   || false,
+      aiPromptSummary: data.aiPromptSummary || '',
+      blocks:          data.blocks          || [],
+      usedInEventIds:  [],
+      createdAt:       serverTimestamp(),
+      createdBy:       createdByUid || null,
+      updatedAt:       serverTimestamp(),
+    }),
+ 
+  getAll: (clubId, callback) =>
+    onSnapshot(
+      collection(db, `clubs/${clubId}/trainingPreps`),
+      (snap) => {
+        const sorted = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        callback(sorted);
+      }
+    ),
+ 
+  getById: (clubId, prepId) =>
+    getDoc(doc(db, `clubs/${clubId}/trainingPreps`, prepId)),
+ 
+  update: (clubId, prepId, data) =>
+    updateDoc(doc(db, `clubs/${clubId}/trainingPreps`, prepId), {
+      ...data,
+      updatedAt: serverTimestamp(),
+    }),
+ 
+  delete: (clubId, prepId) =>
+    deleteDoc(doc(db, `clubs/${clubId}/trainingPreps`, prepId)),
+ 
+  // Link a prep to a calendar event (adds eventId to usedInEventIds array)
+  linkToEvent: async (clubId, prepId, eventId) => {
+    const prepRef = doc(db, `clubs/${clubId}/trainingPreps`, prepId);
+    const snap    = await getDoc(prepRef);
+    if (!snap.exists()) return;
+    const current = snap.data().usedInEventIds || [];
+    if (current.includes(eventId)) return; // already linked
+    return updateDoc(prepRef, {
+      usedInEventIds: [...current, eventId],
+      updatedAt:      serverTimestamp(),
+    });
   },
 };
