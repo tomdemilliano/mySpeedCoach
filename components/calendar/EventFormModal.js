@@ -156,7 +156,15 @@ function CancelForm({ event, clubId, onClose }) {
 }
 
 // ─── Main form ────────────────────────────────────────────────────────────────
-export default function EventFormModal({ event, clubId, uid, groups, locations, onClose, mode = 'create' }) {
+// ─── Router wrapper (avoids conditional hook calls) ──────────────────────────
+export default function EventFormModal(props) {
+  if (props.mode === 'cancel' && props.event) {
+    return <CancelForm event={props.event} clubId={props.clubId} onClose={props.onClose} />;
+  }
+  return <EventForm {...props} />;
+}
+
+function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, mode = 'create' }) {
   if (mode === 'cancel' && event) {
     return <CancelForm event={event} clubId={clubId} onClose={onClose} />;
   }
