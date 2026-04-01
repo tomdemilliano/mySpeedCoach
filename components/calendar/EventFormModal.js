@@ -280,6 +280,14 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           <button onClick={onClose} style={iconBtnStyle}><X size={18} /></button>
         </div>
 
+        {/* Uitzondering-banner voor recurring events */}
+        {isEdit && event?.templateId && (
+          <div style={{ backgroundColor: '#f59e0b11', border: '1px solid #f59e0b33', borderRadius: '10px', padding: '10px 12px', marginBottom: '16px', fontSize: '12px', color: '#f59e0b', display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+            <span style={{ fontSize: '14px', flexShrink: 0 }}>ℹ️</span>
+            <span>Je wijzigt <strong>alleen deze instantie</strong> van de reeks. De overige trainingen blijven ongewijzigd.</span>
+          </div>
+        )}
+
         {/* Type selector */}
         <div style={{ marginBottom: '16px' }}>
           {label('Type')}
