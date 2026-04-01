@@ -396,9 +396,16 @@ export default function AgendaPage() {
           location={selectedEvent.locationId ? locationMap[selectedEvent.locationId] : null}
           memberContext={memberContext}
           coachView={isCoachOrAdmin}
+          groups={allGroups}
+          locations={Object.values(locationMap)}
           onClose={() => setSelectedEvent(null)}
-          onEdit={() => { setSelectedEvent(null); window.location.href = '/calendar-admin'; }}
-          onCancel={() => { setSelectedEvent(null); window.location.href = '/calendar-admin'; }}
+          onEventChanged={() => {
+            // Re-fetch templates after edit/cancel so virtual events update
+            if (activeClub) {
+              EventTemplateFactory.getAllOnce(activeClub.id).then(setTemplates).catch(console.error);
+            }
+            setSelectedEvent(null);
+          }}
         />
       )}
     </div>
