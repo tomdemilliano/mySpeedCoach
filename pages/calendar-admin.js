@@ -20,11 +20,13 @@ import { useState, useEffect } from 'react';
 import {
   UserFactory, ClubFactory, GroupFactory,
   UserMemberLinkFactory,
-  LocationFactory, EventTemplateFactory,
+  LocationFactory, EventTemplateFactory, CalendarEventFactory,
 } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  recurrenceLabel, formatTs, EVENT_TYPES,
+  recurrenceLabel, formatTs, getEventColor,
+  generateVirtualEvents, mergeWithExceptions,
+  startOfDay, endOfDay, addDays,
 } from '../utils/calendarUtils';
 import {
   MapPin, Plus, Edit2, Trash2, X, Save, Check,
@@ -33,6 +35,8 @@ import {
   ToggleRight, Repeat, Dumbbell, Star, Trophy,
   ArrowLeft, Settings, BarChart2, Zap,
 } from 'lucide-react';
+import EventFormModal from '../components/calendar/EventFormModal';
+import AttendanceReport from '../components/calendar/AttendanceReport';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DAYS_NL = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
@@ -675,7 +679,154 @@ function TemplatesTab({ clubId, uid, groups, locations }) {
   );
 }
 
-// ─── Placeholder tabs (Fase 3 & 6) ───────────────────────────────────────────
+// ─── Tab: Evenementen ─────────────────────────────────────────────────────────
+function EventenTab({ clubId, uid, groups, locations }) {
+  const [events,    setEvents]    = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [formOpen,  setFormOpen]  = useState(false);
+  const [formMode,  setFormMode]  = useState('create');
+  const [editing,   setEditing]   = useState(null);
+  const [daysAhead, setDaysAhead] = useState(30);
+
+  const TYPE_ICONS = { training: Dumbbell, club_event: Star, competition: Trophy };
+
+  useEffect(() => {
+    if (!clubId) return;
+    const start = startOfDay(new Date());
+    const end   = endOfDay(addDays(new Date(), daysAhead));
+    const startTs = { seconds: Math.floor(start.getTime() / 1000) };
+    const endTs   = { seconds: Math.floor(end.getTime()   / 1000) };
+    setLoading(true);
+    const unsub = CalendarEventFactory.getEventsInRange(clubId, startTs, endTs, (docs) => {
+      setEvents(docs.sort((a, b) => (a.startAt?.seconds || 0) - (b.startAt?.seconds || 0)));
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [clubId, daysAhead]);
+
+  useEffect(() => {
+    if (!clubId) return;
+    EventTemplateFactory.getAllOnce(clubId).then(setTemplates).catch(console.error);
+  }, [clubId]);
+
+  const allEvents = (() => {
+    const start = startOfDay(new Date());
+    const end   = endOfDay(addDays(new Date(), daysAhead));
+    const virtual = generateVirtualEvents(templates, start, end);
+    return mergeWithExceptions(virtual, events);
+  })();
+
+  const openCancel = (event) => { setEditing(event); setFormMode('cancel'); setFormOpen(true); };
+  const openEdit   = (event) => { if (event._virtual) return; setEditing(event); setFormMode('edit'); setFormOpen(true); };
+
+  const handleFormClose = () => {
+    setFormOpen(false); setEditing(null);
+    EventTemplateFactory.getAllOnce(clubId).then(setTemplates).catch(console.error);
+  };
+
+  const getGroupNames = (groupIds) =>
+    (groupIds || []).map(gid => groups.find(g => g.id === gid)?.name).filter(Boolean).join(', ');
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <div>
+          <div style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Calendar size={18} color="#3b82f6" /> Evenementen
+          </div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+            Komende {daysAhead} dagen · {allEvents.length} events
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <select value={daysAhead} onChange={e => setDaysAhead(parseInt(e.target.value))} style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#94a3b8', fontSize: '12px', fontFamily: 'inherit', cursor: 'pointer' }}>
+            <option value={7}>7 dagen</option>
+            <option value={14}>14 dagen</option>
+            <option value={30}>30 dagen</option>
+            <option value={60}>60 dagen</option>
+          </select>
+          <button onClick={() => { setEditing(null); setFormMode('create'); setFormOpen(true); }} style={bs.primary}>
+            <Plus size={15} /> Nieuw event
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
+          <div style={{ width: '28px', height: '28px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        </div>
+      ) : allEvents.length === 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '50px 20px', textAlign: 'center' }}>
+          <Calendar size={40} color="#334155" style={{ marginBottom: '12px', opacity: 0.5 }} />
+          <p style={{ color: '#475569', fontSize: '14px', margin: '0 0 16px' }}>Geen events de komende {daysAhead} dagen.</p>
+          <button onClick={() => { setEditing(null); setFormMode('create'); setFormOpen(true); }} style={bs.primary}>
+            <Plus size={14} /> Eerste event aanmaken
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {allEvents.map(event => {
+            const color = getEventColor(event);
+            const TypeIcon = TYPE_ICONS[event.type] || Calendar;
+            const isCancelled = event.status === 'cancelled';
+            const startMs = (event.startAt?.seconds || 0) * 1000;
+            const d = new Date(startMs);
+            const dateStr = d.toLocaleDateString('nl-BE', { weekday: 'short', day: '2-digit', month: 'short' });
+            const timeStr = d.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
+            const loc = event.locationId ? locations.find(l => l.id === event.locationId) : null;
+
+            return (
+              <div key={event.id} style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: `1px solid ${isCancelled ? '#ef444433' : color + '33'}`, borderLeft: `3px solid ${isCancelled ? '#ef4444' : color}`, padding: '12px 14px', opacity: isCancelled ? 0.7 : 1 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <div style={{ width: '34px', height: '34px', borderRadius: '8px', backgroundColor: color + '22', border: `1px solid ${color}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <TypeIcon size={15} color={color} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '3px' }}>
+                      <span style={{ fontWeight: '700', fontSize: '14px', color: isCancelled ? '#475569' : '#f1f5f9', textDecoration: isCancelled ? 'line-through' : 'none' }}>{event.title}</span>
+                      {isCancelled && <span style={{ fontSize: '9px', fontWeight: '800', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#ef444422', color: '#ef4444', border: '1px solid #ef444433' }}>GEANNULEERD</span>}
+                      {event.isSpecial && <span style={{ fontSize: '9px', fontWeight: '800', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44' }}>{event.specialLabel || 'Speciaal'}</span>}
+                      {event._virtual && <span style={{ fontSize: '9px', fontWeight: '600', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#334155', color: '#64748b' }}>Recurring</span>}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <span>{dateStr} · {timeStr}</span>
+                      {loc && <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><MapPin size={10} /> {loc.name}</span>}
+                      {event.groupIds?.length > 0 && <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><Users size={10} /> {getGroupNames(event.groupIds)}</span>}
+                    </div>
+                    {isCancelled && event.cancelReason && <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '4px', fontStyle: 'italic' }}>{event.cancelReason}</div>}
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                    {!event._virtual && !isCancelled && (
+                      <button onClick={() => openEdit(event)} style={s.iconBtn} title="Bewerken"><Edit2 size={14} /></button>
+                    )}
+                    {!isCancelled && (
+                      <button onClick={() => openCancel(event)} style={{ ...s.iconBtn, color: '#ef4444' }} title="Annuleren"><Trash2 size={14} /></button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {formOpen && (
+        <EventFormModal
+          event={editing}
+          clubId={clubId}
+          uid={uid}
+          groups={groups}
+          locations={locations}
+          mode={formMode}
+          onClose={handleFormClose}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Placeholder tabs ─────────────────────────────────────────────────────────
 function PlaceholderTab({ icon: Icon, color, title, description }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 20px', textAlign: 'center' }}>
@@ -930,19 +1081,17 @@ export default function CalendarAdminPage() {
           />
         )}
         {activeTab === 'events' && (
-          <PlaceholderTab
-            icon={Calendar}
-            color="#3b82f6"
-            title="Eenmalige events"
-            description="Hier kan je extra trainingen of eenmalige club-evenementen toevoegen. Beschikbaar in de volgende fase."
+          <EventenTab
+            clubId={activeClub.id}
+            uid={uid}
+            groups={groups}
+            locations={locations}
           />
         )}
         {activeTab === 'rapporten' && (
-          <PlaceholderTab
-            icon={BarChart2}
-            color="#f59e0b"
-            title="Rapporten"
-            description="Aanwezigheidsoverzicht en coach-rapport komen hier. Beschikbaar na implementatie van de aanwezigheidsmodule."
+          <AttendanceReport
+            clubId={activeClub.id}
+            groups={groups}
           />
         )}
       </main>
