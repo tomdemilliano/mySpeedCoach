@@ -46,7 +46,7 @@ export default function UpcomingEventsWidget({ clubId, memberGroupIds = [], onEv
   const [loading,     setLoading]    = useState(true);
 
   useEffect(() => {
-    if (!clubId) return;
+    if (!clubId || !ready) return;
     let cancelled = false;
 
     const load = async () => {
@@ -86,7 +86,7 @@ export default function UpcomingEventsWidget({ clubId, memberGroupIds = [], onEv
 
     load();
     return () => { cancelled = true; };
-  }, [clubId, memberGroupIds.join(',')]);
+  }, [clubId, ready, memberGroupIds.join(',')]);
 
   const handleClick = (event) => {
     if (onEventClick) {
