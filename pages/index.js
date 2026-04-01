@@ -13,6 +13,7 @@ import {
   ArrowLeft, Medal, Activity, Hash, Calendar, ArrowRight
 } from 'lucide-react';
 import SeasonBanner from '../components/SeasonBanner';
+import UpcomingEventsWidget from '../components/calendar/UpcomingEventsWidget'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const parseHeartRate = (value) => {
@@ -604,6 +605,7 @@ export default function IndexPage() {
         />
         
         <AnnouncementsWidget memberContext={memberContext} />
+        <UpcomingEventsWidget clubId={activeClub?.id}  memberGroupIds={memberGroupIds} /> 
         <PushPermissionBanner uid={uid} />
         
         <div style={{ marginBottom: '24px' }}>
