@@ -47,6 +47,9 @@ function WeekEventPill({ event, onClick }) {
         lineHeight: 1.3,
       }}>
         {event.title}
+        {((event.prepIds?.length > 0) || event.prepId) && (
+          <span style={{ marginLeft: '3px', fontSize: '8px', color: '#a78bfa' }}>✨</span>
+        )}
       </div>
       <div style={{ fontSize: '9px', color: '#64748b', fontWeight: '600', marginTop: '1px' }}>
         {timeStr}
