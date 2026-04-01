@@ -605,7 +605,7 @@ export default function IndexPage() {
         />
         
         <AnnouncementsWidget memberContext={memberContext} />
-        <UpcomingEventsWidget clubId={activeClub?.id}  memberGroupIds={memberGroupIds} /> 
+        <UpcomingEventsWidget clubId={memberContext?.clubId}  memberGroupIds={memberGroupIds} /> 
         <PushPermissionBanner uid={uid} />
         
         <div style={{ marginBottom: '24px' }}>
