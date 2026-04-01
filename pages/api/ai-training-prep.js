@@ -35,19 +35,30 @@ export default async function handler(req, res) {
 
   // ── Bouw de prompt ────────────────────────────────────────────────────────
   const AGE_LABELS = { u12: 'jonger dan 12 jaar', u16: '12-16 jaar', senior: '16+ jaar', mixed: 'gemengde leeftijden' };
-  const LEVEL_LABELS = { beginner: 'beginnend', intermediate: 'gevorderd', advanced: 'wedstrijdniveau' };
-  const FOCUS_LABELS = { speed: 'snelheid', endurance: 'uithoudingsvermogen', freestyle: 'freestyle', technique: 'techniek' };
+  const LEVEL_LABELS = { recreatief: 'recreatief (fun & skills, geen wedstrijdfocus)', beginner: 'beginnend', intermediate: 'gevorderd', advanced: 'wedstrijdniveau' };
+  const FOCUS_LABELS = { speed: 'snelheid', endurance: 'uithoudingsvermogen', freestyle: 'freestyle', technique: 'techniek', fun: 'plezier en spel', skills: 'nieuwe skills leren' };
 
+  const isRecreatief = level === 'recreatief';
   const ageLabel   = AGE_LABELS[ageGroup]   || ageGroup;
   const levelLabel = LEVEL_LABELS[level]    || level;
-  const focusLabel = focus.map(f => FOCUS_LABELS[f] || f).join(', ') || 'algemeen';
+  const focusLabel = focus.map(f => FOCUS_LABELS[f] || f).join(', ') || (isRecreatief ? 'plezier, spel en nieuwe skills' : 'algemeen');
   const discLabel  = availableDisciplines.length > 0
     ? availableDisciplines.join(', ')
     : 'Speed Sprint, Endurance';
-  const compLine   = weeksToCompetition
-    ? `Er is een wedstrijd over ${weeksToCompetition} week(en). Pas de intensiteit en focus hierop aan.`
-    : 'Er is momenteel geen wedstrijd gepland.';
+  const compLine   = isRecreatief
+    ? 'Dit is een recreatieve groep zonder wedstrijdfocus.'
+    : weeksToCompetition
+      ? `Er is een wedstrijd over ${weeksToCompetition} week(en). Pas de intensiteit en focus hierop aan.`
+      : 'Er is momenteel geen wedstrijd gepland.';
   const notesLine  = groupNotes ? `Extra info over de groep: ${groupNotes}` : '';
+
+  const recreatiefExtra = isRecreatief ? `
+RECREATIEVE GROEP: Focus op plezier, motivatie en een positieve beleving.
+- Gebruik spelvormen, uitdagingen en variatie
+- Vermijd lange herhalingen van dezelfde oefening
+- Bouw nieuwe skills op een speelse manier in
+- Intensiteit blijft laag tot medium — niemand mag het gevoel krijgen dat het te zwaar is
+- Gebruik motiverende namen voor de blokken (bijv. "Raketstart spel", "Touwen-estafette")` : '';
 
   const prompt = `Je bent een ervaren touwspringen-coach en schrijft een gedetailleerde trainingsvoorbereiding.
 
@@ -57,6 +68,7 @@ Focuspunten: ${focusLabel}
 Beschikbare disciplines: ${discLabel}
 ${compLine}
 ${notesLine}
+${recreatiefExtra}
 
 Maak een trainingsschema met warming-up, hoofdblok en cooling-down blokken.
 Verdeel de ${totalMin} minuten logisch over de fases (warmup ~15%, main ~70%, cooldown ~15%).
