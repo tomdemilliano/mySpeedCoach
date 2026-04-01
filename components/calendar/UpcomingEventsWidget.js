@@ -40,7 +40,7 @@ function formatEventDate(startMs) {
   return `${dayName} ${dateStr} · ${timeStr}`;
 }
 
-export default function UpcomingEventsWidget({ clubId, memberGroupIds = [], onEventClick }) {
+export default function UpcomingEventsWidget({ clubId, memberGroupIds = [], ready = true, onEventClick }) {
   const [events,      setEvents]     = useState([]);
   const [locationMap, setLocationMap]= useState({});
   const [loading,     setLoading]    = useState(true);
