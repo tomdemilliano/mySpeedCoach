@@ -165,10 +165,6 @@ export default function EventFormModal(props) {
 }
 
 function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, mode = 'create' }) {
-  if (mode === 'cancel' && event) {
-    return <CancelForm event={event} clubId={clubId} onClose={onClose} />;
-  }
-
   const isEdit = mode === 'edit' && !!event;
   const today  = new Date().toISOString().split('T')[0];
 
