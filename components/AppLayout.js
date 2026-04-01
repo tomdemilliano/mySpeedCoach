@@ -4,7 +4,7 @@ import {
   Zap, Hash, LayoutDashboard, ShieldAlert,
   X, ChevronRight, Medal, Home,
   MoreHorizontal, Trophy, History,
-  Building2, Award, Megaphone,
+  Building2, Award, Megaphone, Calendar
 } from 'lucide-react';
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
@@ -37,10 +37,10 @@ const getBottomNav = (role, isCoach) => {
       isPrimary: true,
     },
     {
-      href:  '/achievements',
-      label: 'Prestaties',
-      icon:  Trophy,
-      color: '#f59e0b',
+      href:  '/agenda',
+      label: 'Agenda',
+      icon:  Calendar,
+      color: '#22c55e',
     },
     // Slot 5: Meer drawer trigger
     {
@@ -58,8 +58,10 @@ const getSidebarItems = (role, isCoach) => {
   const items = [];
 
   // Everyone
+  items.push({ href: '/achievements', label: 'Prestaties',    icon: Trophy,        description: 'PR\'s & doelen',       color: '#f59e0b' });
   items.push({ href: '/badges',   label: 'Badge leaderboard', icon: Medal,         description: 'Club klassement',      color: '#f59e0b' });
   items.push({ href: '/history',  label: 'Geschiedenis',      icon: History,       description: 'Sessies & AI analyse', color: '#60a5fa' });
+  
 
   // Coaches + admins
   if (hasAdminAccess) {
