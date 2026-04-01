@@ -25,6 +25,7 @@ import {
   UserFactory, ClubFactory, GroupFactory,
   UserMemberLinkFactory,
   EventTemplateFactory, CalendarEventFactory, LocationFactory,
+  TrainingPlanFactory,
 } from '../constants/dbSchema';
 import {
   generateVirtualEvents, mergeWithExceptions, filterEventsForMember,
@@ -35,7 +36,7 @@ import CalendarListView  from '../components/calendar/CalendarListView';
 import CalendarWeekView  from '../components/calendar/CalendarWeekView';
 import CalendarMonthView from '../components/calendar/CalendarMonthView';
 import EventDetailSheet  from '../components/calendar/EventDetailSheet';
-import { Calendar, List, Grid3x3, CalendarDays, Settings, Filter } from 'lucide-react';
+import { Calendar, List, Grid3x3, CalendarDays, Settings, Filter, Target } from 'lucide-react';
 
 // ─── Cookie helper ────────────────────────────────────────────────────────────
 const COOKIE_KEY = 'msc_uid';
@@ -89,6 +90,7 @@ export default function AgendaPage() {
   const [locationMap, setLocationMap] = useState({});
   const [allGroups,   setAllGroups]   = useState([]);
   const [loading,     setLoading]     = useState(true);
+  const [plans,       setPlans]       = useState([]);
 
   const unsubEventsRef = useRef(null);
 
@@ -163,6 +165,18 @@ export default function AgendaPage() {
     EventTemplateFactory.getAllOnce(activeClub.id)
       .then(setTemplates)
       .catch(console.error);
+  }, [activeClub?.id]);
+
+  // ── Subscribe to training plans for this club ──────────────────────────────
+  useEffect(() => {
+    if (!activeClub) return;
+    const unsub = TrainingPlanFactory.getAll(activeClub.id, (data) => {
+      // Filter: toon enkel toekomstige wedstrijden (of max 7 dagen geleden)
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 7);
+      setPlans(data.filter(p => p.competitionDate && new Date(p.competitionDate + 'T12:00:00') > cutoff));
+    });
+    return () => unsub();
   }, [activeClub?.id]);
 
   // ── Subscribe to real Firestore events for current range ───────────────────
@@ -279,9 +293,12 @@ export default function AgendaPage() {
               </button>
             )}
             {isCoachOrAdmin && (
-              <a href="/calendar-admin" style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 10px', borderRadius: '8px', border: '1px solid #334155', color: '#64748b', textDecoration: 'none', fontSize: '12px', fontWeight: '600' }}>
+              <button
+                onClick={() => { window.location.href = '/calendar-admin'; }}
+                style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 10px', borderRadius: '8px', border: '1px solid #334155', color: '#64748b', backgroundColor: 'transparent', fontFamily: 'inherit', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}
+              >
                 <Settings size={12} /> Beheer
-              </a>
+              </button>
             )}
           </div>
         </div>
@@ -350,6 +367,52 @@ export default function AgendaPage() {
 
       {/* ── Content ── */}
       <main style={{ padding: '16px' }}>
+
+        {/* ── Trainingsschema's banner ── */}
+        {plans.length > 0 && (
+          <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {plans.map(plan => {
+              const compDate = new Date(plan.competitionDate + 'T12:00:00');
+              const daysLeft = Math.ceil((compDate - new Date()) / (1000 * 60 * 60 * 24));
+              const totalTrainings = (plan.trainings || []).length;
+              const prepped = (plan.trainings || []).filter(t => (t.prepIds || []).length > 0).length;
+              const progress = totalTrainings > 0 ? prepped / totalTrainings : 0;
+
+              // Alleen tonen voor relevante groepen
+              const isRelevant = !plan.groupId ||
+                memberGroupIds.includes(plan.groupId) || isCoachOrAdmin;
+              if (!isRelevant) return null;
+
+              return (
+                <div
+                  key={plan.id}
+                  onClick={() => { window.location.href = `/training-plan/${plan.id}`; }}
+                  style={{ textDecoration: 'none', display: 'block', backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #f9731633', padding: '10px 14px', overflow: 'hidden', position: 'relative', cursor: 'pointer' }}
+                >
+                  {/* Progress bar achtergrond */}
+                  <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${progress * 100}%`, backgroundColor: '#a78bfa0a', transition: 'width 0.4s' }} />
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <Target size={16} color="#f97316" style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {plan.competitionName || 'Wedstrijdschema'}
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#64748b' }}>
+                        {daysLeft > 0
+                          ? `Nog ${daysLeft} dag${daysLeft !== 1 ? 'en' : ''}`
+                          : 'Wedstrijd voorbij'}
+                        {plan.groupName && ` · ${plan.groupName}`}
+                        {isCoachOrAdmin && ` · ✨ ${prepped}/${totalTrainings} voorbereid`}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: '11px', color: '#475569', flexShrink: 0 }}>→</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {loading && (
           <div style={{ display: 'flex', justifyContent: 'center', padding: '50px' }}>
             <div style={{ width: '28px', height: '28px', border: '3px solid #1e293b', borderTop: '3px solid #22c55e', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
