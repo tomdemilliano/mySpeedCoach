@@ -42,7 +42,7 @@ const STATUS_CELL = {
 };
 
 // ─── Aanwezigheidsmatrix ──────────────────────────────────────────────────────
-function PresenceMatrix({ clubId, groups }) {
+function PresenceMatrix({ clubId, groups = [] }) {
   const def = dateRangeDefaults();
   const [from,     setFrom]     = useState(def.from);
   const [to,       setTo]       = useState(def.to);
@@ -334,7 +334,7 @@ function CoachOverview({ clubId }) {
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
-export default function AttendanceReport({ clubId, groups }) {
+export default function AttendanceReport({ clubId, groups = [] }) {
   const [subTab, setSubTab] = useState('matrix');
 
   const SUB_TABS = [
