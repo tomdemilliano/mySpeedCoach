@@ -21,6 +21,7 @@ import {
   UserFactory, ClubFactory, GroupFactory,
   UserMemberLinkFactory,
   LocationFactory, EventTemplateFactory, CalendarEventFactory,
+  TrainingPrepFactory,
 } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -37,6 +38,8 @@ import {
 } from 'lucide-react';
 import EventFormModal from '../components/calendar/EventFormModal';
 import AttendanceReport from '../components/calendar/AttendanceReport';
+import TrainingPrepEditor from '../components/calendar/TrainingPrepEditor';
+import TrainingPrepViewer from '../components/calendar/TrainingPrepViewer';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DAYS_NL = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
@@ -967,6 +970,132 @@ function EventenTab({ clubId, uid, groups = [], locations = [] }) {
   );
 }
 
+// ─── Tab: Prep Library ────────────────────────────────────────────────────────
+function PrepLibraryTab({ clubId, uid, disciplines = [] }) {
+  const [preps,      setPreps]      = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editing,    setEditing]    = useState(null);
+  const [viewing,    setViewing]    = useState(null);
+
+  useEffect(() => {
+    if (!clubId) return;
+    const unsub = TrainingPrepFactory.getAll(clubId, (data) => {
+      setPreps(data);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [clubId]);
+
+  const handleDelete = async (prep) => {
+    if (!confirm(`Voorbereiding "${prep.title}" verwijderen?`)) return;
+    await TrainingPrepFactory.delete(clubId, prep.id);
+  };
+
+  const FOCUS_LABELS = { speed: 'Snelheid', endurance: 'Uithoudingsvermogen', technique: 'Techniek', freestyle: 'Freestyle' };
+  const LEVEL_COLORS = { beginner: '#22c55e', intermediate: '#f59e0b', advanced: '#ef4444' };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <div>
+          <div style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Zap size={18} color="#a78bfa" /> Trainingsvoorbereiding
+          </div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+            {preps.length} voorbereiding{preps.length !== 1 ? 'en' : ''} in de bibliotheek
+          </div>
+        </div>
+        <button onClick={() => { setEditing(null); setEditorOpen(true); }} style={bs.primary}>
+          <Plus size={15} /> Nieuwe voorbereiding
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
+          <div style={{ width: '28px', height: '28px', border: '3px solid #1e293b', borderTop: '3px solid #a78bfa', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        </div>
+      ) : preps.length === 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '50px 20px', textAlign: 'center' }}>
+          <Zap size={40} color="#334155" style={{ marginBottom: '12px', opacity: 0.5 }} />
+          <p style={{ color: '#475569', fontSize: '14px', margin: '0 0 16px' }}>
+            Nog geen trainingsvoorbereidingen. Maak er een aan, manueel of met AI.
+          </p>
+          <button onClick={() => { setEditing(null); setEditorOpen(true); }} style={bs.primary}>
+            <Plus size={14} /> Eerste voorbereiding aanmaken
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {preps.map(prep => {
+            const levelColor = LEVEL_COLORS[prep.level] || '#64748b';
+            const totalMin = (prep.blocks || []).reduce((s, b) => s + (b.durationMin || 0), 0);
+            return (
+              <div key={prep.id} style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '14px 16px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '5px' }}>
+                      <span style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9' }}>{prep.title}</span>
+                      {prep.generatedByAI && (
+                        <span style={{ fontSize: '9px', fontWeight: '700', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa33' }}>✨ AI</span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <span style={{ fontSize: '10px', fontWeight: '700', padding: '1px 6px', borderRadius: '5px', backgroundColor: levelColor + '22', color: levelColor, border: `1px solid ${levelColor}33` }}>
+                        {prep.level}
+                      </span>
+                      <span style={{ fontSize: '10px', color: '#475569', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                        <Clock size={9} /> {totalMin} min
+                      </span>
+                      {(prep.focus || []).map(f => (
+                        <span key={f} style={{ fontSize: '10px', color: '#64748b', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#334155' }}>
+                          {FOCUS_LABELS[f] || f}
+                        </span>
+                      ))}
+                      {prep.usedInEventIds?.length > 0 && (
+                        <span style={{ fontSize: '10px', color: '#475569' }}>· {prep.usedInEventIds.length}× gebruikt</span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                    <button onClick={() => setViewing(prep)} style={{ ...s.iconBtn, color: '#60a5fa' }} title="Bekijken"><Zap size={14} /></button>
+                    <button onClick={() => { setEditing(prep); setEditorOpen(true); }} style={s.iconBtn} title="Bewerken"><Edit2 size={14} /></button>
+                    <button onClick={() => handleDelete(prep)} style={{ ...s.iconBtn, color: '#ef4444' }} title="Verwijderen"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {editorOpen && (
+        <TrainingPrepEditor
+          prep={editing}
+          clubId={clubId}
+          coachMemberId={null}
+          coachUid={uid}
+          disciplines={disciplines}
+          onSaved={() => setEditorOpen(false)}
+          onClose={() => setEditorOpen(false)}
+        />
+      )}
+
+      {viewing && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 500 }}>
+          <div style={{ backgroundColor: '#1e293b', borderRadius: '20px 20px 0 0', padding: '24px', width: '100%', maxWidth: '600px', border: '1px solid #334155', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <span style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9' }}>{viewing.title}</span>
+              <button onClick={() => setViewing(null)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}><X size={18} /></button>
+            </div>
+            <TrainingPrepViewer prep={viewing} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Placeholder tabs ─────────────────────────────────────────────────────────
 function PlaceholderTab({ icon: Icon, color, title, description }) {
   return (
@@ -1144,6 +1273,7 @@ export default function CalendarAdminPage() {
     { key: 'templates',  label: 'Trainingsreeksen', icon: Repeat   },
     ...(canManageAdmin ? [{ key: 'locaties', label: 'Locaties', icon: MapPin }] : []),
     { key: 'events',     label: 'Eenmalige events', icon: Calendar },
+    { key: 'prep',       label: 'Voorbereiding',    icon: Zap      },
     { key: 'rapporten',  label: 'Rapporten',         icon: BarChart2 },
   ];
 
@@ -1227,6 +1357,13 @@ export default function CalendarAdminPage() {
             uid={uid}
             groups={groups}
             locations={locations}
+          />
+        )}
+        {activeTab === 'prep' && (
+          <PrepLibraryTab
+            clubId={activeClub.id}
+            uid={uid}
+            disciplines={[]}
           />
         )}
         {activeTab === 'rapporten' && (
