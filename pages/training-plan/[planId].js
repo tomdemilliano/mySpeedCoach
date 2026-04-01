@@ -12,13 +12,13 @@ import {
   ArrowLeft, Target, Calendar, CheckCircle2,
   Zap, Sparkles, ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../../hooks/useAuth';
 import {
   TrainingPlanFactory, TrainingPrepFactory,
   UserMemberLinkFactory, ClubMemberFactory,
-} from '../constants/dbSchema';
-import TrainingPrepEditor from '../components/calendar/TrainingPrepEditor';
-import TrainingPrepViewer from '../components/calendar/TrainingPrepViewer';
+} from '../../constants/dbSchema';
+import TrainingPrepEditor from '../../components/calendar/TrainingPrepEditor';
+import TrainingPrepViewer from '../../components/calendar/TrainingPrepViewer';
 
 const INTENSITY_CONFIG = {
   low:    { label: 'Laag',   color: '#22c55e', bar: '█░░' },
