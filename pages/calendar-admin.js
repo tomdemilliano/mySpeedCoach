@@ -17,8 +17,8 @@ import { Calendar, Users, ChevronDown, ChevronUp, Download } from 'lucide-react'
 import {
   CalendarEventFactory, AttendanceFactory,
   GroupFactory, ClubMemberFactory,
-} from '../../constants/dbSchema';
-import { startOfDay, endOfDay, addDays } from '../../utils/calendarUtils';
+} from '../constants/dbSchema';
+import { startOfDay, endOfDay, addDays } from '../utils/calendarUtils';
 
 const MONTH_NL = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
 
