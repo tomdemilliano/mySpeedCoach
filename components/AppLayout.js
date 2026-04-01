@@ -67,6 +67,7 @@ const getSidebarItems = (role, isCoach) => {
   if (hasAdminAccess) {
     items.push({ href: '/badge-beheer', label: 'Badge beheer', icon: Award,         description: 'Aanmaken & uitreiken', color: '#a78bfa' });
     items.push({ href: '/dashboard',    label: 'Dashboard',    icon: LayoutDashboard, description: 'Live monitoring',    color: '#22c55e' });
+    items.push({ href: '/calendar-admin',  label: 'Kalenderbeheer',  icon: Calendar,        description: 'Trainingen & schema\'s', color: '#22c55e' });
   }
 
   // Admins only
