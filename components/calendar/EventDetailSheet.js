@@ -144,6 +144,33 @@ export default function EventDetailSheet({
     onEventChanged?.();
   };
 
+  // Voor virtuele events: materialiseer eerst, dan open de modal.
+  // We updaten het event-object in lokale state zodat EventFormModal
+  // het gematerialiseerde doc krijgt.
+  const [materializedEvent, setMaterializedEvent] = useState(null);
+  const [materializing,     setMaterializing]     = useState(false);
+
+  const openEditModal = async () => {
+    if (!event._virtual) {
+      setCoachModal('edit');
+      return;
+    }
+    // Virtueel event: materialiseer eerst
+    setMaterializing(true);
+    try {
+      const { CalendarEventFactory } = await import('../../constants/dbSchema');
+      const realEvent = await CalendarEventFactory.getOrMaterialize(
+        memberContext.clubId, event, memberContext.uid
+      );
+      setMaterializedEvent(realEvent);
+      setCoachModal('edit');
+    } catch (e) {
+      console.error('[EventDetailSheet] materialize for edit:', e);
+    } finally {
+      setMaterializing(false);
+    }
+  };
+
   const attendanceCfg = ownAttendance ? STATUS_LABELS[ownAttendance.status] : null;
   const AttIcon       = attendanceCfg?.icon;
 
@@ -161,9 +188,10 @@ export default function EventDetailSheet({
   }
 
   if (coachModal === 'edit' || coachModal === 'cancel') {
+    const eventForModal = (coachModal === 'edit' && materializedEvent) ? materializedEvent : event;
     return (
       <EventFormModal
-        event={coachModal === 'edit' ? event : event}
+        event={eventForModal}
         clubId={memberContext?.clubId}
         uid={memberContext?.uid}
         groups={groups}
@@ -375,9 +403,13 @@ export default function EventDetailSheet({
                 <Users size={13} /> Aanwezigheid
               </button>
               {/* Bewerken — alleen als niet geannuleerd */}
-              {!isCancelled && !event._virtual && (
-                <button onClick={() => setCoachModal('edit')} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '9px 14px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '8px', color: '#94a3b8', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' }}>
-                  <Edit2 size={13} /> Bewerken
+              {!isCancelled && (
+                <button
+                  onClick={openEditModal}
+                  disabled={materializing}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '9px 14px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '8px', color: '#94a3b8', fontWeight: '600', fontSize: '13px', cursor: materializing ? 'default' : 'pointer', fontFamily: 'inherit', opacity: materializing ? 0.65 : 1 }}
+                >
+                  <Edit2 size={13} /> {materializing ? 'Laden…' : 'Bewerken'}
                 </button>
               )}
               {/* Annuleren */}
