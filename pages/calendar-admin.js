@@ -21,7 +21,7 @@ import {
   UserFactory, ClubFactory, GroupFactory,
   UserMemberLinkFactory,
   LocationFactory, EventTemplateFactory, CalendarEventFactory,
-  TrainingPrepFactory,
+  TrainingPrepFactory, TrainingPlanFactory,
 } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -34,12 +34,13 @@ import {
   Calendar, Users, Clock, AlertCircle, AlertTriangle, Building2,
   ChevronRight, RefreshCw, CheckCircle2, ToggleLeft,
   ToggleRight, Repeat, Dumbbell, Star, Trophy,
-  ArrowLeft, Settings, BarChart2, Zap,
+  ArrowLeft, Settings, BarChart2, Zap, Target,
 } from 'lucide-react';
 import EventFormModal from '../components/calendar/EventFormModal';
 import AttendanceReport from '../components/calendar/AttendanceReport';
 import TrainingPrepEditor from '../components/calendar/TrainingPrepEditor';
 import TrainingPrepViewer from '../components/calendar/TrainingPrepViewer';
+import TrainingPlanEditor from '../components/calendar/TrainingPlanEditor';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DAYS_NL = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
@@ -1096,6 +1097,130 @@ function PrepLibraryTab({ clubId, uid, disciplines = [] }) {
   );
 }
 
+// ─── Tab: Trainingsschema's ───────────────────────────────────────────────────
+function PlanLibraryTab({ clubId, uid, groups = [], templates = [], disciplines = [] }) {
+  const [plans,       setPlans]       = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [editorOpen,  setEditorOpen]  = useState(false);
+  const [viewingPlan, setViewingPlan] = useState(null);
+
+  useEffect(() => {
+    if (!clubId) return;
+    const unsub = TrainingPlanFactory.getAll(clubId, (data) => {
+      setPlans(data);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [clubId]);
+
+  const handleDelete = async (plan) => {
+    if (!confirm(`Schema "${plan.competitionName || 'Schema'}" verwijderen?`)) return;
+    await TrainingPlanFactory.delete(clubId, plan.id);
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <div>
+          <div style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Target size={18} color="#f97316" /> Trainingsschema's
+          </div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+            {plans.length} schema{plans.length !== 1 ? "'s" : ''} richting wedstrijden
+          </div>
+        </div>
+        <button onClick={() => setEditorOpen(true)} style={bs.primary}>
+          <Plus size={15} /> Nieuw schema
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
+          <div style={{ width: '28px', height: '28px', border: '3px solid #1e293b', borderTop: '3px solid #f97316', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        </div>
+      ) : plans.length === 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '50px 20px', textAlign: 'center' }}>
+          <Target size={40} color="#334155" style={{ marginBottom: '12px', opacity: 0.5 }} />
+          <p style={{ color: '#475569', fontSize: '14px', margin: '0 0 16px' }}>
+            Nog geen trainingsschema's. Genereer er een richting een wedstrijd.
+          </p>
+          <button onClick={() => setEditorOpen(true)} style={bs.primary}>
+            <Plus size={14} /> Schema genereren
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {plans.map(plan => {
+            const trainingCount = (plan.trainings || []).length;
+            const prepCount     = (plan.trainings || []).filter(t => (t.prepIds || []).length > 0).length;
+            const compDate      = plan.competitionDate
+              ? new Date(plan.competitionDate + 'T12:00:00').toLocaleDateString('nl-BE', { day: '2-digit', month: 'short', year: 'numeric' })
+              : '—';
+            const group = groups.find(g => g.id === plan.groupId);
+
+            return (
+              <div key={plan.id} style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #f9731622', padding: '14px 16px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <div style={{ width: '36px', height: '36px', borderRadius: '9px', backgroundColor: '#f9731622', border: '1px solid #f9731644', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Target size={16} color="#f97316" />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9', marginBottom: '3px' }}>
+                      {plan.competitionName || 'Wedstrijdschema'}
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: '11px', color: '#64748b' }}>
+                      <span>📅 {compDate}</span>
+                      {group && <span>👥 {group.name}</span>}
+                      <span>🏋️ {trainingCount} trainingen</span>
+                      <span style={{ color: prepCount > 0 ? '#a78bfa' : '#475569' }}>
+                        ✨ {prepCount}/{trainingCount} met prep
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                    <button onClick={() => setViewingPlan(plan)} style={{ ...s.iconBtn, color: '#f97316' }} title="Bekijken">
+                      <ChevronRight size={15} />
+                    </button>
+                    <button onClick={() => handleDelete(plan)} style={{ ...s.iconBtn, color: '#ef4444' }} title="Verwijderen">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {editorOpen && (
+        <TrainingPlanEditor
+          plan={null}
+          clubId={clubId}
+          uid={uid}
+          groups={groups}
+          templates={templates}
+          disciplines={disciplines}
+          onSaved={(plan) => setEditorOpen(false)}
+          onClose={() => setEditorOpen(false)}
+        />
+      )}
+
+      {viewingPlan && (
+        <TrainingPlanEditor
+          plan={viewingPlan}
+          clubId={clubId}
+          uid={uid}
+          groups={groups}
+          templates={templates}
+          disciplines={disciplines}
+          onSaved={() => {}}
+          onClose={() => setViewingPlan(null)}
+        />
+      )}
+    </div>
+  );
+}
+
 // ─── Placeholder tabs ─────────────────────────────────────────────────────────
 function PlaceholderTab({ icon: Icon, color, title, description }) {
   return (
@@ -1129,6 +1254,7 @@ export default function CalendarAdminPage() {
   const [activeClub,   setActiveClub]   = useState(null);
   const [groups,       setGroups]       = useState([]);
   const [locations,    setLocations]    = useState([]);
+  const [templates,    setTemplates]    = useState([]);
 
   const [activeTab, setActiveTab] = useState('templates');
 
@@ -1208,7 +1334,7 @@ export default function CalendarAdminPage() {
     run();
   }, [uid, authLoading]);
 
-  // ── Load groups + locations when activeClub changes ───────────────────────
+  // ── Load groups + locations + templates when activeClub changes ──────────────
   useEffect(() => {
     if (!activeClub) return;
     let cancelled = false;
@@ -1219,8 +1345,11 @@ export default function CalendarAdminPage() {
     const u2 = LocationFactory.getAll(activeClub.id, data => {
       if (!cancelled) setLocations(data);
     });
+    const u3 = EventTemplateFactory.getAll(activeClub.id, data => {
+      if (!cancelled) setTemplates(data);
+    });
 
-    return () => { cancelled = true; u1(); u2(); };
+    return () => { cancelled = true; u1(); u2(); u3(); };
   }, [activeClub]);
 
   // ── Guards ─────────────────────────────────────────────────────────────────
@@ -1270,10 +1399,11 @@ export default function CalendarAdminPage() {
   const canManageAdmin = isSuperAdmin || isClubAdmin;
 
   const TABS = [
-    { key: 'templates',  label: 'Trainingsreeksen', icon: Repeat   },
+    { key: 'templates',  label: 'Trainingsreeksen', icon: Repeat    },
     ...(canManageAdmin ? [{ key: 'locaties', label: 'Locaties', icon: MapPin }] : []),
-    { key: 'events',     label: 'Eenmalige events', icon: Calendar },
-    { key: 'prep',       label: 'Voorbereiding',    icon: Zap      },
+    { key: 'events',     label: 'Eenmalige events', icon: Calendar  },
+    { key: 'prep',       label: 'Voorbereiding',    icon: Zap       },
+    { key: 'schemas',    label: "Schema's",          icon: Target    },
     { key: 'rapporten',  label: 'Rapporten',         icon: BarChart2 },
   ];
 
@@ -1363,6 +1493,15 @@ export default function CalendarAdminPage() {
           <PrepLibraryTab
             clubId={activeClub.id}
             uid={uid}
+            disciplines={[]}
+          />
+        )}
+        {activeTab === 'schemas' && (
+          <PlanLibraryTab
+            clubId={activeClub.id}
+            uid={uid}
+            groups={groups}
+            templates={templates}
             disciplines={[]}
           />
         )}
