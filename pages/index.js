@@ -292,6 +292,25 @@ export default function IndexPage() {
     });
   }, [memberContext?.clubId]);
 
+  // ── Resolve memberGroupIds via GroupFactory ────────────────────────────────
+  useEffect(() => {
+    if (!memberContext) return;
+    const { clubId, memberId } = memberContext;
+    let cancelled = false;
+    
+    GroupFactory.getGroupsByClubOnce(clubId).then(async (groups) => {
+      const gids = [];
+      for (const group of groups) {
+        const members = await GroupFactory.getMembersByGroupOnce(clubId, group.id);
+        const me = members.find(m => (m.memberId || m.id) === memberId);
+        if (me) gids.push(group.id);
+      }
+      if (!cancelled) setMemberGroupIds(gids);
+    });
+    
+    return () => { cancelled = true; };
+  }, [memberContext?.clubId, memberContext?.memberId]);
+
   // ── Records, goals, sessions, badges ──────────────────────────────────────
   useEffect(() => {
     if (!memberContext) return;
@@ -370,9 +389,7 @@ export default function IndexPage() {
             if (mine) collected[key] = { clubId: club.id, clubName: club.name, groupId: group.id, groupName: group.name, isSkipper: mine.isSkipper, isCoach: mine.isCoach };
             else delete collected[key];
             const vals = Object.values(collected);
-            setMemberships(vals);
-            setMemberGroupIds(vals.map(m => m.groupId));
-            
+            setMemberships(vals);            
           });
           allUnsubs.push(u2);
         });
