@@ -46,6 +46,7 @@ const AGE_OPTIONS = [
 ];
 
 const LEVEL_OPTIONS = [
+  { value: 'recreatief',   label: '🎉 Recreatief (fun & skills)' },
   { value: 'beginner',     label: 'Beginner' },
   { value: 'intermediate', label: 'Gevorderd' },
   { value: 'advanced',     label: 'Wedstrijdniveau' },
@@ -56,6 +57,8 @@ const FOCUS_OPTIONS = [
   { value: 'endurance',  label: '🏃 Uithoudingsvermogen' },
   { value: 'technique',  label: '🎯 Techniek' },
   { value: 'freestyle',  label: '🎪 Freestyle' },
+  { value: 'fun',        label: '🎉 Plezier & spel' },
+  { value: 'skills',     label: '🌟 Nieuwe skills' },
 ];
 
 const PHASE_COLOR = { warmup: '#f59e0b', main: '#3b82f6', cooldown: '#22c55e' };
@@ -262,16 +265,26 @@ function AiPromptPanel({ disciplines, onGenerated, onClose }) {
             </div>
           </div>
 
+          {/* Recreatief hint */}
+          {form.level === 'recreatief' && (
+            <div style={{ backgroundColor: '#22c55e11', border: '1px solid #22c55e33', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#22c55e', display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+              <span style={{ flexShrink: 0 }}>🎉</span>
+              <span>Recreatieve modus: de AI genereert een gezellige training met focus op plezier, spel en nieuwe vaardigheden leren. Minder nadruk op prestaties en intensiteit.</span>
+            </div>
+          )}
+
           {/* Duration + Weeks to comp */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: form.level === 'recreatief' ? '1fr' : '1fr 1fr', gap: '10px' }}>
             <div>
               <label style={labelStyle}>Duur (minuten)</label>
               <input type="number" min="30" max="180" style={inputStyle} value={form.totalMin} onChange={e => set('totalMin', e.target.value)} />
             </div>
+            {form.level !== 'recreatief' && (
             <div>
               <label style={labelStyle}>Weken tot wedstrijd</label>
               <input type="number" min="0" max="52" style={inputStyle} value={form.weeksToCompetition} onChange={e => set('weeksToCompetition', e.target.value)} placeholder="Leeg = geen wedstrijd" />
             </div>
+            )}
           </div>
 
           {/* Focus */}
