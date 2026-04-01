@@ -21,6 +21,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter } from 'next/router';
 import {
   UserFactory, ClubFactory, GroupFactory,
   UserMemberLinkFactory,
@@ -71,6 +72,7 @@ function getRangeForView(view, anchor) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function AgendaPage() {
+  const router = useRouter();
   const [uid,            setUid]            = useState(null);
   const [currentUser,    setCurrentUser]    = useState(null);
   const [memberContext,  setMemberContext]  = useState(null);
@@ -294,7 +296,7 @@ export default function AgendaPage() {
             )}
             {isCoachOrAdmin && (
               <button
-                onClick={() => { window.location.href = '/calendar-admin'; }}
+                onClick={() => router.push('/calendar-admin')}
                 style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 10px', borderRadius: '8px', border: '1px solid #334155', color: '#64748b', backgroundColor: 'transparent', fontFamily: 'inherit', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}
               >
                 <Settings size={12} /> Beheer
@@ -386,7 +388,7 @@ export default function AgendaPage() {
               return (
                 <div
                   key={plan.id}
-                  onClick={() => { window.location.href = `/training-plan/${plan.id}`; }}
+                  onClick={() => router.push(`/training-plan/${plan.id}`)}
                   style={{ textDecoration: 'none', display: 'block', backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #f9731633', padding: '10px 14px', overflow: 'hidden', position: 'relative', cursor: 'pointer' }}
                 >
                   {/* Progress bar achtergrond */}
