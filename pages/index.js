@@ -254,6 +254,7 @@ export default function IndexPage() {
   const [viewMode,       setViewMode]       = useState('skipper');
   const [isCoachInGroup, setIsCoachInGroup] = useState(false);
   const [primaryClub, setPrimaryClub]       = useState(null);
+  const [memberGroupIds, setMemberGroupIds] = useState([]);
 
   // ── Load clubs ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -368,7 +369,10 @@ export default function IndexPage() {
             const key = `${club.id}-${group.id}`;
             if (mine) collected[key] = { clubId: club.id, clubName: club.name, groupId: group.id, groupName: group.name, isSkipper: mine.isSkipper, isCoach: mine.isCoach };
             else delete collected[key];
-            setMemberships(Object.values(collected));
+            const vals = Object.values(collected);
+            setMemberships(vals);
+            setMemberGroupIds(vals.map(m => m.groupId));
+            
           });
           allUnsubs.push(u2);
         });
