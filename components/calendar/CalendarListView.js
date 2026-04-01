@@ -87,6 +87,12 @@ function EventRow({ event, locationMap, onClick }) {
               {event.specialLabel}
             </span>
           )}
+          {/* Prep indicator */}
+          {((event.prepIds?.length > 0) || event.prepId) && (
+            <span title={`${(event.prepIds?.length || 1)} voorbereiding(en)`} style={{ fontSize: '9px', fontWeight: '800', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa33', flexShrink: 0 }}>
+              ✨ prep
+            </span>
+          )}
         </div>
 
         {/* Location */}
