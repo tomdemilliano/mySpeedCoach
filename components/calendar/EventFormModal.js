@@ -95,6 +95,13 @@ function CancelForm({ event, clubId, onClose }) {
   const handleCancel = async () => {
     setSaving(true); setError('');
     try {
+      // Virtuele recurring events bestaan nog niet als Firestore doc.
+      // Materialiseer eerst zodat we een exception-doc kunnen aanmaken.
+      if (event._virtual) {
+        await CalendarEventFactory.materializeVirtual(
+          clubId, event, {}, null
+        );
+      }
       await CalendarEventFactory.cancel(clubId, event.id, reason.trim());
       onClose();
     } catch (e) {
