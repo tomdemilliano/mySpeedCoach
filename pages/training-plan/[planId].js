@@ -16,7 +16,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
   TrainingPlanFactory, TrainingPrepFactory,
   UserMemberLinkFactory, ClubMemberFactory,
-} from '../../constants/dbSchema';
+} from '../constants/dbSchema';
 import TrainingPrepEditor from '../components/calendar/TrainingPrepEditor';
 import TrainingPrepViewer from '../components/calendar/TrainingPrepViewer';
 
