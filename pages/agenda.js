@@ -1,171 +1,406 @@
 /**
  * pages/agenda.js
  *
- * Kalender-pagina voor leden.
- * Fase 1: fundament aanwezig, kalenderweergave volgt in Fase 2.
+ * Kalender-pagina voor alle leden.
+ * Toont alle trainingen, wedstrijden en club-evenementen voor de actieve club.
  *
- * Deze pagina toont alvast:
- *   - Een coming-soon state met beschrijving van wat er komt
- *   - Een knop naar /calendar-admin voor coaches/admins
+ * Weergaven (toggle): lijst | week | maand
+ * Data-flow:
+ *   1. Load active EventTemplates (one-shot)
+ *   2. Subscribe to real calendarEvent docs for current range (onSnapshot)
+ *   3. Generate virtual events client-side (generateVirtualEvents)
+ *   4. Merge with exceptions (mergeWithExceptions)
+ *   5. Filter for member's groups (filterEventsForMember)
+ *   6. Render in selected view
  *
- * In Fase 2 wordt dit vervangen door de volledige kalenderimplementatie
- * (CalendarListView, CalendarWeekView, CalendarMonthView).
+ * Rules:
+ *   - All DB via factories (CLAUDE.md §1)
+ *   - No <form> elements (CLAUDE.md §4)
+ *   - Inline CSS only (CLAUDE.md §9)
+ *   - Dutch UI (CLAUDE.md §9)
  */
 
-import { useState, useEffect } from 'react';
-import { Calendar, Clock, ChevronRight, Settings } from 'lucide-react';
-import { UserFactory, UserMemberLinkFactory, GroupFactory } from '../constants/dbSchema';
-import { useAuth } from '../contexts/AuthContext';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  UserFactory, ClubFactory, GroupFactory,
+  UserMemberLinkFactory,
+  EventTemplateFactory, CalendarEventFactory, LocationFactory,
+} from '../constants/dbSchema';
+import {
+  generateVirtualEvents, mergeWithExceptions, filterEventsForMember,
+  startOfDay, endOfDay, startOfWeek, endOfWeek,
+  startOfMonth, endOfMonth, addDays,
+} from '../utils/calendarUtils';
+import CalendarListView  from '../components/calendar/CalendarListView';
+import CalendarWeekView  from '../components/calendar/CalendarWeekView';
+import CalendarMonthView from '../components/calendar/CalendarMonthView';
+import EventDetailSheet  from '../components/calendar/EventDetailSheet';
+import { Calendar, List, Grid3x3, CalendarDays, Settings, Filter } from 'lucide-react';
 
+// ─── Cookie helper ────────────────────────────────────────────────────────────
 const COOKIE_KEY = 'msc_uid';
-const getCookie = () => {
+const getCookieUid = () => {
   if (typeof document === 'undefined') return null;
   const m = document.cookie.match(new RegExp(`(?:^|; )${COOKIE_KEY}=([^;]*)`));
   return m ? m[1] : null;
 };
 
-export default function AgendaPage() {
-  const { uid } = useAuth();
-  const [hasCoachAccess, setHasCoachAccess] = useState(false);
+// ─── View types ───────────────────────────────────────────────────────────────
+const VIEWS = [
+  { key: 'lijst',  label: 'Lijst',  icon: List        },
+  { key: 'week',   label: 'Week',   icon: CalendarDays },
+  { key: 'maand',  label: 'Maand',  icon: Grid3x3     },
+];
 
-  // Check if current user is a coach or admin (to show the admin link)
+// ─── Range calculation per view ───────────────────────────────────────────────
+function getRangeForView(view, anchor) {
+  switch (view) {
+    case 'week':
+      return { start: startOfWeek(anchor), end: endOfWeek(anchor) };
+    case 'maand':
+      return {
+        start: addDays(startOfWeek(startOfMonth(anchor)), -7),
+        end:   addDays(endOfWeek(endOfMonth(anchor)), 7),
+      };
+    case 'lijst':
+    default:
+      return { start: startOfDay(anchor), end: endOfDay(addDays(anchor, 60)) };
+  }
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+export default function AgendaPage() {
+  const [uid,            setUid]            = useState(null);
+  const [currentUser,    setCurrentUser]    = useState(null);
+  const [memberContext,  setMemberContext]  = useState(null);
+  const [memberGroupIds, setMemberGroupIds] = useState([]);
+  const [isCoachOrAdmin, setIsCoachOrAdmin] = useState(false);
+  const [activeClub,     setActiveClub]     = useState(null);
+  const [bootstrapDone,  setBootstrapDone]  = useState(false);
+
+  const [view,             setView]            = useState('lijst');
+  const [anchor,           setAnchor]          = useState(() => new Date());
+  const [selectedEvent,    setSelectedEvent]   = useState(null);
+  const [showGroupFilter,  setShowGroupFilter] = useState(false);
+  const [activeGroupFilter,setActiveGroupFilter] = useState(null);
+
+  const [templates,   setTemplates]   = useState([]);
+  const [realEvents,  setRealEvents]  = useState([]);
+  const [locationMap, setLocationMap] = useState({});
+  const [allGroups,   setAllGroups]   = useState([]);
+  const [loading,     setLoading]     = useState(true);
+
+  const unsubEventsRef = useRef(null);
+
+  // ── Bootstrap ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    const cookieUid = getCookie();
-    if (!cookieUid) return;
-    UserFactory.get(cookieUid).then(snap => {
-      if (!snap.exists()) return;
-      const role = snap.data().role || 'user';
-      if (role === 'clubadmin' || role === 'superadmin') {
-        setHasCoachAccess(true);
-        return;
-      }
-      // Check if coach in any group
+    const cookieUid = getCookieUid();
+    if (!cookieUid) { setBootstrapDone(true); return; }
+    setUid(cookieUid);
+
+    let cancelled = false;
+    const run = async () => {
+      const snap = await UserFactory.get(cookieUid);
+      if (!snap.exists() || cancelled) { setBootstrapDone(true); return; }
+      const user = { id: cookieUid, ...snap.data() };
+      setCurrentUser(user);
+
+      const role = user.role || 'user';
+      if (role === 'superadmin' || role === 'clubadmin') setIsCoachOrAdmin(true);
+
       const unsubLinks = UserMemberLinkFactory.getForUser(cookieUid, async (profiles) => {
         unsubLinks();
-        for (const profile of profiles) {
-          const groups = await GroupFactory.getGroupsByClubOnce(profile.member.clubId);
-          for (const group of groups) {
-            const members = await GroupFactory.getMembersByGroupOnce(profile.member.clubId, group.id);
-            const me = members.find(m => (m.memberId || m.id) === profile.member.id);
-            if (me?.isCoach) { setHasCoachAccess(true); return; }
+        if (cancelled) return;
+        if (profiles.length === 0) { setBootstrapDone(true); return; }
+
+        const profile  = profiles[0];
+        const clubId   = profile.member.clubId;
+        const memberId = profile.member.id;
+
+        const clubSnap = await ClubFactory.getById(clubId);
+        if (!clubSnap.exists() || cancelled) { setBootstrapDone(true); return; }
+        setActiveClub({ id: clubSnap.id, ...clubSnap.data() });
+        setMemberContext({ clubId, memberId, uid: cookieUid });
+
+        const groups = await GroupFactory.getGroupsByClubOnce(clubId);
+        if (cancelled) return;
+        setAllGroups(groups);
+
+        const gids = [];
+        for (const group of groups) {
+          const members = await GroupFactory.getMembersByGroupOnce(clubId, group.id);
+          const me = members.find(m => (m.memberId || m.id) === memberId);
+          if (me) {
+            gids.push(group.id);
+            if (me.isCoach) setIsCoachOrAdmin(true);
           }
         }
+        if (!cancelled) {
+          setMemberGroupIds(gids);
+          setBootstrapDone(true);
+        }
       });
+    };
+    run();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Load locations ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!activeClub) return;
+    LocationFactory.getAllOnce(activeClub.id)
+      .then(locs => {
+        const m = {};
+        locs.forEach(l => { m[l.id] = l; });
+        setLocationMap(m);
+      })
+      .catch(console.error);
+  }, [activeClub?.id]);
+
+  // ── Load templates ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!activeClub) return;
+    EventTemplateFactory.getAllOnce(activeClub.id)
+      .then(setTemplates)
+      .catch(console.error);
+  }, [activeClub?.id]);
+
+  // ── Subscribe to real Firestore events for current range ───────────────────
+  useEffect(() => {
+    if (!activeClub) return;
+
+    const { start, end } = getRangeForView(view, anchor);
+    const startTs = { seconds: Math.floor(start.getTime() / 1000) };
+    const endTs   = { seconds: Math.floor(end.getTime()   / 1000) };
+
+    if (unsubEventsRef.current) { unsubEventsRef.current(); unsubEventsRef.current = null; }
+    setLoading(true);
+
+    const unsub = CalendarEventFactory.getEventsInRange(
+      activeClub.id, startTs, endTs,
+      (docs) => { setRealEvents(docs); setLoading(false); }
+    );
+    unsubEventsRef.current = unsub;
+
+    return () => { if (unsubEventsRef.current) { unsubEventsRef.current(); unsubEventsRef.current = null; } };
+  }, [activeClub?.id, view, anchor.getTime()]);
+
+  // ── Derived: merged + filtered events ─────────────────────────────────────
+  const visibleEvents = (() => {
+    if (!bootstrapDone) return [];
+    const { start, end } = getRangeForView(view, anchor);
+    const virtual = generateVirtualEvents(templates, start, end);
+    const merged  = mergeWithExceptions(virtual, realEvents);
+    if (isCoachOrAdmin && !activeGroupFilter) return merged;
+    const filterIds = activeGroupFilter ? [activeGroupFilter] : memberGroupIds;
+    return filterEventsForMember(merged, filterIds);
+  })();
+
+  // ── Navigation ─────────────────────────────────────────────────────────────
+  const goNext = useCallback(() => {
+    setAnchor(a => {
+      if (view === 'week')  return addDays(a, 7);
+      if (view === 'maand') return new Date(a.getFullYear(), a.getMonth() + 1, 1);
+      return addDays(a, 30);
     });
-  }, [uid]);
+  }, [view]);
 
-  const upcomingFeatures = [
-    { icon: '📅', text: 'Trainingskalender per groep met maand-, week- en lijstweergave' },
-    { icon: '✅', text: 'Aanwezigheid bijhouden — inchecken via de app of QR-code' },
-    { icon: '❌', text: 'Zelf afmelden met een reden (excuus)' },
-    { icon: '🏆', text: 'Wedstrijden met info over vereiste niveaus' },
-    { icon: '🎯', text: 'Trainingsvoorbereiding en AI-gegenereerde oefenschema\'s' },
-    { icon: '⭐', text: 'Speciale trainingen (Halloween, carnaval, fluo, ...) uitgelicht' },
-  ];
+  const goPrev = useCallback(() => {
+    setAnchor(a => {
+      if (view === 'week')  return addDays(a, -7);
+      if (view === 'maand') return new Date(a.getFullYear(), a.getMonth() - 1, 1);
+      return addDays(a, -30);
+    });
+  }, [view]);
 
+  const goToday = useCallback(() => setAnchor(new Date()), []);
+
+  // ── Guards ─────────────────────────────────────────────────────────────────
+  if (!bootstrapDone) {
+    return (
+      <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+        <div style={{ width: '32px', height: '32px', border: '3px solid #1e293b', borderTop: '3px solid #22c55e', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      </div>
+    );
+  }
+
+  if (!activeClub) {
+    return (
+      <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px', fontFamily: 'system-ui, sans-serif', padding: '24px' }}>
+        <Calendar size={40} color="#334155" />
+        <p style={{ color: '#64748b', fontSize: '14px', textAlign: 'center', maxWidth: '280px', margin: 0 }}>
+          Je bent nog niet gekoppeld aan een club. Vraag toegang via de clubpagina.
+        </p>
+        <a href="/" style={{ padding: '10px 20px', backgroundColor: '#3b82f6', color: 'white', borderRadius: '8px', textDecoration: 'none', fontWeight: '600', fontSize: '14px' }}>
+          Terug naar home
+        </a>
+      </div>
+    );
+  }
+
+  // ── Main render ────────────────────────────────────────────────────────────
   return (
-    <div style={{
-      backgroundColor: '#0f172a', minHeight: '100vh',
-      color: 'white', fontFamily: 'system-ui, sans-serif',
-    }}>
-      {/* Header */}
-      <header style={{
-        padding: '12px 16px', backgroundColor: '#1e293b',
-        borderBottom: '1px solid #334155',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ width: '34px', height: '34px', borderRadius: '9px', backgroundColor: '#22c55e22', border: '1px solid #22c55e44', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Calendar size={17} color="#22c55e" />
+    <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif', paddingBottom: '80px' }}>
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+
+      {/* ── Header ── */}
+      <header style={{ backgroundColor: '#1e293b', borderBottom: '1px solid #334155', padding: '12px 16px', position: 'sticky', top: 0, zIndex: 100 }}>
+
+        {/* Top row */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ width: '34px', height: '34px', borderRadius: '9px', backgroundColor: '#22c55e22', border: '1px solid #22c55e44', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Calendar size={17} color="#22c55e" />
+            </div>
+            <div>
+              <div style={{ fontWeight: '800', fontSize: '15px', color: '#f1f5f9' }}>Agenda</div>
+              <div style={{ fontSize: '11px', color: '#475569' }}>{activeClub.name}</div>
+            </div>
           </div>
-          <div>
-            <div style={{ fontWeight: '800', fontSize: '15px', color: '#f1f5f9' }}>Agenda</div>
-            <div style={{ fontSize: '11px', color: '#475569' }}>Trainingen & evenementen</div>
+
+          <div style={{ display: 'flex', gap: '6px' }}>
+            {allGroups.length > 1 && (
+              <button
+                onClick={() => setShowGroupFilter(p => !p)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 10px',
+                  borderRadius: '8px', fontFamily: 'inherit',
+                  border: `1px solid ${activeGroupFilter ? '#3b82f6' : '#334155'}`,
+                  backgroundColor: activeGroupFilter ? '#3b82f622' : 'transparent',
+                  color: activeGroupFilter ? '#60a5fa' : '#64748b',
+                  fontSize: '12px', fontWeight: '600', cursor: 'pointer',
+                }}
+              >
+                <Filter size={12} />
+                {activeGroupFilter
+                  ? (allGroups.find(g => g.id === activeGroupFilter)?.name || 'Groep')
+                  : 'Groep'}
+              </button>
+            )}
+            {isCoachOrAdmin && (
+              <a href="/calendar-admin" style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 10px', borderRadius: '8px', border: '1px solid #334155', color: '#64748b', textDecoration: 'none', fontSize: '12px', fontWeight: '600' }}>
+                <Settings size={12} /> Beheer
+              </a>
+            )}
           </div>
         </div>
 
-        {hasCoachAccess && (
-          <a href="/calendar-admin" style={{
-            display: 'flex', alignItems: 'center', gap: '6px',
-            padding: '7px 12px', borderRadius: '8px',
-            backgroundColor: '#22c55e22', border: '1px solid #22c55e44',
-            color: '#22c55e', textDecoration: 'none', fontSize: '12px', fontWeight: '600',
-          }}>
-            <Settings size={13} /> Beheer
-          </a>
+        {/* Group filter dropdown */}
+        {showGroupFilter && allGroups.length > 1 && (
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', paddingBottom: '8px' }}>
+            <button
+              onClick={() => { setActiveGroupFilter(null); setShowGroupFilter(false); }}
+              style={{
+                padding: '5px 12px', borderRadius: '20px', fontFamily: 'inherit',
+                border: `1px solid ${!activeGroupFilter ? '#22c55e' : '#334155'}`,
+                backgroundColor: !activeGroupFilter ? '#22c55e22' : 'transparent',
+                color: !activeGroupFilter ? '#22c55e' : '#64748b',
+                fontSize: '12px', fontWeight: '600', cursor: 'pointer',
+              }}
+            >
+              Alle mijn groepen
+            </button>
+            {allGroups
+              .filter(g => isCoachOrAdmin || memberGroupIds.includes(g.id))
+              .map(g => (
+                <button
+                  key={g.id}
+                  onClick={() => { setActiveGroupFilter(g.id); setShowGroupFilter(false); }}
+                  style={{
+                    padding: '5px 12px', borderRadius: '20px', fontFamily: 'inherit',
+                    border: `1px solid ${activeGroupFilter === g.id ? '#3b82f6' : '#334155'}`,
+                    backgroundColor: activeGroupFilter === g.id ? '#3b82f622' : 'transparent',
+                    color: activeGroupFilter === g.id ? '#60a5fa' : '#64748b',
+                    fontSize: '12px', fontWeight: '600', cursor: 'pointer',
+                  }}
+                >
+                  {g.name}
+                </button>
+              ))}
+          </div>
         )}
+
+        {/* View toggle */}
+        <div style={{ display: 'flex', backgroundColor: '#0f172a', borderRadius: '10px', padding: '3px', border: '1px solid #334155' }}>
+          {VIEWS.map(v => {
+            const Icon   = v.icon;
+            const active = view === v.key;
+            return (
+              <button
+                key={v.key}
+                onClick={() => setView(v.key)}
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
+                  padding: '7px 0', borderRadius: '7px', fontFamily: 'inherit',
+                  border: 'none',
+                  backgroundColor: active ? '#1e293b' : 'transparent',
+                  color: active ? '#f1f5f9' : '#475569',
+                  fontSize: '12px', fontWeight: active ? '700' : '500',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}
+              >
+                <Icon size={13} />
+                {v.label}
+              </button>
+            );
+          })}
+        </div>
       </header>
 
-      {/* Coming soon */}
-      <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        justifyContent: 'center', minHeight: 'calc(100vh - 57px)',
-        padding: '40px 20px', textAlign: 'center',
-      }}>
-        <div style={{
-          width: '80px', height: '80px', borderRadius: '24px',
-          backgroundColor: '#1e293b', border: '1px solid #334155',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          marginBottom: '24px',
-        }}>
-          <Calendar size={36} color="#22c55e" />
-        </div>
-
-        <div style={{
-          display: 'inline-flex', alignItems: 'center', gap: '6px',
-          padding: '4px 12px', borderRadius: '20px',
-          backgroundColor: '#22c55e22', border: '1px solid #22c55e44',
-          color: '#22c55e', fontSize: '11px', fontWeight: '700',
-          textTransform: 'uppercase', letterSpacing: '0.5px',
-          marginBottom: '16px',
-        }}>
-          <Clock size={11} /> In ontwikkeling
-        </div>
-
-        <h2 style={{ fontSize: '22px', fontWeight: '800', color: '#f1f5f9', margin: '0 0 12px' }}>
-          Kalender in aanbouw
-        </h2>
-        <p style={{ fontSize: '14px', color: '#64748b', maxWidth: '340px', lineHeight: 1.6, margin: '0 0 32px' }}>
-          De kalender wordt momenteel gebouwd. Hier zie je binnenkort alle geplande trainingen, wedstrijden en clubevenementen.
-        </p>
-
-        {/* Feature list */}
-        <div style={{
-          backgroundColor: '#1e293b', borderRadius: '14px',
-          padding: '20px 24px', border: '1px solid #334155',
-          maxWidth: '400px', width: '100%', textAlign: 'left',
-          marginBottom: '24px',
-        }}>
-          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '16px' }}>
-            Wat je kan verwachten
+      {/* ── Content ── */}
+      <main style={{ padding: '16px' }}>
+        {loading && (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '50px' }}>
+            <div style={{ width: '28px', height: '28px', border: '3px solid #1e293b', borderTop: '3px solid #22c55e', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
           </div>
-          {upcomingFeatures.map((item, i) => (
-            <div key={i} style={{
-              display: 'flex', alignItems: 'flex-start', gap: '12px',
-              padding: '8px 0',
-              borderTop: i > 0 ? '1px solid #1e293b' : 'none',
-            }}>
-              <span style={{ fontSize: '18px', flexShrink: 0 }}>{item.icon}</span>
-              <span style={{ fontSize: '13px', color: '#94a3b8', lineHeight: 1.5 }}>{item.text}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Coach admin link */}
-        {hasCoachAccess && (
-          <a href="/calendar-admin" style={{
-            display: 'inline-flex', alignItems: 'center', gap: '8px',
-            padding: '12px 20px', borderRadius: '10px',
-            backgroundColor: '#22c55e', border: 'none',
-            color: 'white', textDecoration: 'none',
-            fontWeight: '700', fontSize: '14px',
-          }}>
-            <Settings size={16} />
-            Trainingsreeksen instellen
-            <ChevronRight size={16} />
-          </a>
         )}
-      </div>
+
+        {!loading && view === 'lijst' && (
+          <CalendarListView
+            events={visibleEvents}
+            locationMap={locationMap}
+            onEventClick={setSelectedEvent}
+          />
+        )}
+
+        {!loading && view === 'week' && (
+          <CalendarWeekView
+            events={visibleEvents}
+            locationMap={locationMap}
+            currentWeekStart={startOfWeek(anchor)}
+            onPrev={goPrev}
+            onNext={goNext}
+            onToday={goToday}
+            onEventClick={setSelectedEvent}
+          />
+        )}
+
+        {!loading && view === 'maand' && (
+          <CalendarMonthView
+            events={visibleEvents}
+            locationMap={locationMap}
+            currentMonth={anchor}
+            onPrev={goPrev}
+            onNext={goNext}
+            onToday={goToday}
+            onEventClick={setSelectedEvent}
+          />
+        )}
+      </main>
+
+      {/* ── Event detail sheet ── */}
+      {selectedEvent && (
+        <EventDetailSheet
+          event={selectedEvent}
+          location={selectedEvent.locationId ? locationMap[selectedEvent.locationId] : null}
+          memberContext={memberContext}
+          coachView={isCoachOrAdmin}
+          onClose={() => setSelectedEvent(null)}
+          onEdit={() => { setSelectedEvent(null); window.location.href = '/calendar-admin'; }}
+          onCancel={() => { setSelectedEvent(null); window.location.href = '/calendar-admin'; }}
+        />
+      )}
     </div>
   );
 }
