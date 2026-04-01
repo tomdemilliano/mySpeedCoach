@@ -26,9 +26,11 @@ import {
   getEventColor, formatDuration,
   durationFromEvent, isCheckInOpen, canSelfExcuse,
 } from '../../utils/calendarUtils';
-import { AttendanceFactory } from '../../constants/dbSchema';
-import EventFormModal   from './EventFormModal';
-import AttendanceList   from './AttendanceList';
+import { AttendanceFactory, TrainingPrepFactory, CalendarEventFactory } from '../../constants/dbSchema';
+import EventFormModal      from './EventFormModal';
+import AttendanceList      from './AttendanceList';
+import TrainingPrepEditor  from './TrainingPrepEditor';
+import TrainingPrepViewer  from './TrainingPrepViewer';
 
 const TYPE_ICONS  = { training: Dumbbell, club_event: Star, competition: Trophy };
 const TYPE_LABELS = { training: 'Training', club_event: 'Club evenement', competition: 'Wedstrijd' };
@@ -39,6 +41,195 @@ const STATUS_LABELS = {
   excused:           { label: 'Afgemeld',         color: '#f59e0b', icon: AlertCircle  },
   registered_absent: { label: 'Afwezig (coach)', color: '#ef4444', icon: XCircle      },
 };
+
+// ─── Prep section (coach only) ────────────────────────────────────────────────
+function PrepSection({ event, clubId, uid, memberId, disciplines = [] }) {
+  const [preps,         setPreps]         = useState([]);
+  const [allPreps,      setAllPreps]      = useState([]);
+  const [loadingPreps,  setLoadingPreps]  = useState(true);
+  const [showLibrary,   setShowLibrary]   = useState(false);
+  const [showEditor,    setShowEditor]    = useState(false);
+  const [expandedPrepId,setExpandedPrepId]= useState(null);
+  const [linking,       setLinking]       = useState(false);
+
+  // prepIds: combineer legacy prepId + nieuwe prepIds array
+  const prepIds = [
+    ...(event.prepIds || []),
+    ...(event.prepId && !( event.prepIds || []).includes(event.prepId) ? [event.prepId] : []),
+  ];
+
+  // Laad de gekoppelde preps
+  useEffect(() => {
+    if (!clubId || prepIds.length === 0) { setLoadingPreps(false); return; }
+    let cancelled = false;
+    Promise.all(prepIds.map(id => TrainingPrepFactory.getById(clubId, id)))
+      .then(snaps => {
+        if (cancelled) return;
+        setPreps(snaps.filter(s => s.exists()).map(s => ({ id: s.id, ...s.data() })));
+        setLoadingPreps(false);
+      })
+      .catch(() => setLoadingPreps(false));
+    return () => { cancelled = true; };
+  }, [clubId, prepIds.join(',')]);
+
+  // Laad alle beschikbare preps voor bibliotheek
+  useEffect(() => {
+    if (!showLibrary || !clubId) return;
+    TrainingPrepFactory.getAll !== undefined &&
+      TrainingPrepFactory.getAll(clubId, setAllPreps);
+  }, [showLibrary, clubId]);
+
+  const handleLinkFromLibrary = async (prep) => {
+    if (prepIds.includes(prep.id)) return;
+    setLinking(true);
+    try {
+      const newPrepIds = [...prepIds, prep.id];
+      // Materialiseer het event als het virtueel is
+      if (event._virtual) {
+        await CalendarEventFactory.materializeVirtual(clubId, event, {}, uid);
+      }
+      await CalendarEventFactory.update(clubId, event.id, { prepIds: newPrepIds });
+      await TrainingPrepFactory.linkToEvent(clubId, prep.id, event.id);
+      setShowLibrary(false);
+    } catch (e) { console.error('[PrepSection] link:', e); }
+    finally { setLinking(false); }
+  };
+
+  const handleUnlink = async (prepId) => {
+    if (!confirm('Voorbereiding loskoppelen van dit event?')) return;
+    const newPrepIds = prepIds.filter(id => id !== prepId);
+    try {
+      await CalendarEventFactory.update(clubId, event.id, {
+        prepIds: newPrepIds,
+        prepId:  newPrepIds[0] || null,
+      });
+    } catch (e) { console.error('[PrepSection] unlink:', e); }
+  };
+
+  const handleNewPrepSaved = async (savedPrep) => {
+    setShowEditor(false);
+    // Koppel de nieuwe prep aan dit event
+    if (savedPrep?.id) await handleLinkFromLibrary(savedPrep);
+  };
+
+  const unlinkedPreps = allPreps.filter(p => !prepIds.includes(p.id));
+
+  return (
+    <div style={{ backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #334155', overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: prepIds.length > 0 ? '1px solid #1e293b' : 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>Trainingsvoorbereiding</span>
+          {prepIds.length > 0 && (
+            <span style={{ fontSize: '10px', fontWeight: '800', padding: '1px 6px', borderRadius: '8px', backgroundColor: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44' }}>
+              {prepIds.length}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '5px' }}>
+          <button onClick={() => setShowLibrary(true)} style={{ fontSize: '11px', fontWeight: '600', color: '#60a5fa', background: 'none', border: '1px solid #3b82f633', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', fontFamily: 'inherit' }}>
+            + Uit bibliotheek
+          </button>
+          <button onClick={() => setShowEditor(true)} style={{ fontSize: '11px', fontWeight: '600', color: '#a78bfa', background: 'none', border: '1px solid #a78bfa33', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', fontFamily: 'inherit' }}>
+            + Nieuw
+          </button>
+        </div>
+      </div>
+
+      {/* Gekoppelde preps */}
+      {prepIds.length === 0 && (
+        <div style={{ padding: '12px 14px', fontSize: '12px', color: '#475569', fontStyle: 'italic' }}>
+          Nog geen voorbereiding gekoppeld.
+        </div>
+      )}
+
+      {loadingPreps && prepIds.length > 0 && (
+        <div style={{ padding: '12px 14px', fontSize: '12px', color: '#475569' }}>Laden…</div>
+      )}
+
+      {!loadingPreps && preps.map(prep => (
+        <div key={prep.id} style={{ borderTop: '1px solid #1e293b' }}>
+          {/* Prep header row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 14px', cursor: 'pointer' }}
+            onClick={() => setExpandedPrepId(p => p === prep.id ? null : prep.id)}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '13px', fontWeight: '600', color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {prep.title}
+                {prep.generatedByAI && <span style={{ fontSize: '9px', marginLeft: '5px', color: '#a78bfa' }}>✨</span>}
+              </div>
+              <div style={{ fontSize: '10px', color: '#64748b' }}>
+                {prep.level} · {(prep.blocks || []).reduce((s, b) => s + (b.durationMin || 0), 0)} min
+                {(prep.focus || []).length > 0 && ` · ${prep.focus.join(', ')}`}
+              </div>
+            </div>
+            <button onClick={e => { e.stopPropagation(); handleUnlink(prep.id); }}
+              style={{ background: 'none', border: 'none', color: '#ef444488', cursor: 'pointer', padding: '2px', flexShrink: 0 }} title="Loskoppelen">
+              ✕
+            </button>
+            <span style={{ color: '#334155', fontSize: '12px', flexShrink: 0 }}>
+              {expandedPrepId === prep.id ? '▲' : '▼'}
+            </span>
+          </div>
+          {/* Expanded viewer */}
+          {expandedPrepId === prep.id && (
+            <div style={{ padding: '0 14px 12px', borderTop: '1px solid #0f172a' }}>
+              <TrainingPrepViewer prep={prep} compact />
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Bibliotheek picker */}
+      {showLibrary && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 520 }}>
+          <div style={{ backgroundColor: '#1e293b', borderRadius: '20px 20px 0 0', padding: '20px', width: '100%', maxWidth: '560px', border: '1px solid #334155', maxHeight: '80vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <span style={{ fontWeight: '800', fontSize: '15px', color: '#f1f5f9' }}>Kies uit bibliotheek</span>
+              <button onClick={() => setShowLibrary(false)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}>✕</button>
+            </div>
+            {unlinkedPreps.length === 0 ? (
+              <p style={{ color: '#475569', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>
+                Alle beschikbare voorbereidingen zijn al gekoppeld.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {unlinkedPreps.map(prep => (
+                  <button key={prep.id} onClick={() => handleLinkFromLibrary(prep)} disabled={linking}
+                    style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '10px', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', opacity: linking ? 0.65 : 1 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '13px', fontWeight: '600', color: '#f1f5f9' }}>
+                        {prep.title} {prep.generatedByAI && <span style={{ color: '#a78bfa', fontSize: '10px' }}>✨ AI</span>}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#64748b' }}>
+                        {prep.level} · {(prep.blocks || []).reduce((s, b) => s + (b.durationMin || 0), 0)} min
+                        {(prep.focus || []).length > 0 && ` · ${prep.focus.slice(0, 2).join(', ')}`}
+                      </div>
+                    </div>
+                    <span style={{ color: '#22c55e', fontSize: '18px' }}>+</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Nieuwe prep editor */}
+      {showEditor && (
+        <TrainingPrepEditor
+          prep={null}
+          clubId={clubId}
+          coachMemberId={memberId}
+          coachUid={uid}
+          eventId={event._virtual ? null : event.id}
+          disciplines={disciplines}
+          onSaved={handleNewPrepSaved}
+          onClose={() => setShowEditor(false)}
+        />
+      )}
+    </div>
+  );
+}
 
 // ─── Excuse modal ─────────────────────────────────────────────────────────────
 function ExcuseModal({ onConfirm, onClose }) {
@@ -393,6 +584,17 @@ export default function EventDetailSheet({
                 </div>
               )}
             </div>
+          )}
+
+          {/* ── Trainingsvoorbereiding (coach only) ── */}
+          {coachView && event.type === 'training' && (
+            <PrepSection
+              event={event}
+              clubId={memberContext?.clubId}
+              uid={memberContext?.uid}
+              memberId={memberContext?.memberId}
+              disciplines={[]}
+            />
           )}
 
           {/* ── Coach actions ── */}
