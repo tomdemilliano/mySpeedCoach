@@ -30,7 +30,7 @@ import {
 } from '../utils/calendarUtils';
 import {
   MapPin, Plus, Edit2, Trash2, X, Save, Check,
-  Calendar, Users, Clock, AlertCircle, Building2,
+  Calendar, Users, Clock, AlertCircle, AlertTriangle, Building2,
   ChevronRight, RefreshCw, CheckCircle2, ToggleLeft,
   ToggleRight, Repeat, Dumbbell, Star, Trophy,
   ArrowLeft, Settings, BarChart2, Zap,
@@ -545,11 +545,145 @@ function LocatiesTab({ clubId, uid }) {
   );
 }
 
+// ─── Deactivate Template Modal ────────────────────────────────────────────────
+// Vraagt de gebruiker wat er moet gebeuren met bestaande exception-docs
+// (geannuleerde of gewijzigde instanties van de reeks).
+function DeactivateTemplateModal({ template, clubId, onClose }) {
+  const [keepExceptions, setKeepExceptions] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  const handleConfirm = async () => {
+    setSaving(true); setError('');
+    try {
+      // 1. Deactiveer de template (stopt generatie van nieuwe virtuele events)
+      await EventTemplateFactory.deactivate(clubId, template.id);
+
+      // 2. Optioneel: verwijder bestaande exception-docs voor deze template
+      if (!keepExceptions) {
+        const now = new Date();
+        // Zoek toekomstige exception-docs voor deze template
+        const futureStart = { seconds: Math.floor(now.getTime() / 1000) };
+        const farFuture   = { seconds: Math.floor(now.getTime() / 1000) + 365 * 24 * 3600 * 10 };
+        const exceptions  = await CalendarEventFactory.getEventsInRangeOnce(
+          clubId, futureStart, farFuture
+        );
+        const toDelete = exceptions.filter(e => e.templateId === template.id);
+        await Promise.all(
+          toDelete.map(e =>
+            CalendarEventFactory.update(clubId, e.id, { status: 'cancelled', cancelReason: 'Reeks verwijderd.' })
+          )
+        );
+      }
+      onClose();
+    } catch (e) {
+      console.error('[DeactivateTemplateModal]', e);
+      setError('Deactiveren mislukt. Probeer opnieuw.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const startStr = template.recurrence?.startDate || '';
+  const endStr   = template.recurrence?.endDate   || '';
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 500 }}>
+      <div style={{ backgroundColor: '#1e293b', borderRadius: '20px 20px 0 0', padding: '24px', width: '100%', maxWidth: '560px', border: '1px solid #334155' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f59e0b' }}>
+            <AlertTriangle size={18} />
+            <span style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9' }}>Reeks deactiveren</span>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Template info */}
+        <div style={{ backgroundColor: '#f59e0b11', border: '1px solid #f59e0b33', borderRadius: '10px', padding: '12px', marginBottom: '20px' }}>
+          <div style={{ fontSize: '14px', fontWeight: '700', color: '#f1f5f9', marginBottom: '2px' }}>
+            {template.title}
+          </div>
+          <div style={{ fontSize: '12px', color: '#64748b' }}>
+            {recurrenceLabel(template.recurrence)}
+            {startStr && ` · vanaf ${startStr}`}
+            {endStr   && ` t/m ${endStr}`}
+          </div>
+        </div>
+
+        {/* Uitleg */}
+        <p style={{ fontSize: '13px', color: '#94a3b8', lineHeight: 1.6, marginBottom: '16px' }}>
+          Na deactivering worden er geen nieuwe trainingen meer gegenereerd vanuit deze reeks.
+          Wat wil je doen met de <strong style={{ color: '#f1f5f9' }}>bestaande aangepaste of geannuleerde instanties</strong> van deze reeks (exception-documenten)?
+        </p>
+
+        {/* Keuze */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
+          {[
+            {
+              value: true,
+              label: 'Behouden',
+              desc: 'Eerder geannuleerde of gewijzigde instanties blijven zichtbaar in de kalender.',
+              icon: '✓',
+              color: '#22c55e',
+            },
+            {
+              value: false,
+              label: 'Annuleren',
+              desc: 'Alle toekomstige aangepaste instanties worden als geannuleerd gemarkeerd.',
+              icon: '✗',
+              color: '#ef4444',
+            },
+          ].map(opt => (
+            <button
+              key={String(opt.value)}
+              onClick={() => setKeepExceptions(opt.value)}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: '12px',
+                padding: '12px 14px', borderRadius: '10px', textAlign: 'left',
+                border: `1.5px solid ${keepExceptions === opt.value ? opt.color : '#334155'}`,
+                backgroundColor: keepExceptions === opt.value ? opt.color + '11' : 'transparent',
+                cursor: 'pointer', fontFamily: 'inherit', width: '100%',
+              }}
+            >
+              <div style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: opt.color + '22', border: `1px solid ${opt.color}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: opt.color, fontWeight: '800', fontSize: '12px' }}>
+                {opt.icon}
+              </div>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9', marginBottom: '2px' }}>{opt.label}</div>
+                <div style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.4 }}>{opt.desc}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {error && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ef444422', color: '#ef4444', fontSize: '13px', padding: '10px 12px', borderRadius: '8px', border: '1px solid #ef444433', marginBottom: '12px' }}>
+            <AlertCircle size={14} /> {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={handleConfirm} disabled={saving} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px', backgroundColor: '#f59e0b', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', opacity: saving ? 0.65 : 1, fontFamily: 'inherit' }}>
+            <Trash2 size={15} /> {saving ? 'Deactiveren…' : 'Reeks deactiveren'}
+          </button>
+          <button onClick={onClose} style={{ padding: '12px 16px', backgroundColor: 'transparent', border: '1px solid #334155', borderRadius: '8px', color: '#94a3b8', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }}>
+            Annuleren
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Tab: Templates ───────────────────────────────────────────────────────────
 function TemplatesTab({ clubId, uid, groups = [], locations = [] }) {
-  const [templates, setTemplates] = useState([]);
-  const [formOpen,  setFormOpen]  = useState(false);
-  const [editing,   setEditing]   = useState(null);
+  const [templates,          setTemplates]         = useState([]);
+  const [formOpen,           setFormOpen]           = useState(false);
+  const [editing,            setEditing]            = useState(null);
+  const [deactivateTarget,   setDeactivateTarget]   = useState(null); // template to deactivate
 
   useEffect(() => {
     if (!clubId) return;
@@ -557,9 +691,8 @@ function TemplatesTab({ clubId, uid, groups = [], locations = [] }) {
     return () => unsub();
   }, [clubId]);
 
-  const handleDeactivate = async (tpl) => {
-    if (!confirm(`Training-reeks "${tpl.title}" deactiveren? Toekomstige trainingen worden niet meer gegenereerd.`)) return;
-    await EventTemplateFactory.deactivate(clubId, tpl.id);
+  const handleDeactivate = (tpl) => {
+    setDeactivateTarget(tpl);
   };
 
   const getLocationName = (locationId) => {
@@ -673,6 +806,14 @@ function TemplatesTab({ clubId, uid, groups = [], locations = [] }) {
           groups={groups}
           locations={locations}
           onClose={() => { setFormOpen(false); setEditing(null); }}
+        />
+      )}
+
+      {deactivateTarget && (
+        <DeactivateTemplateModal
+          template={deactivateTarget}
+          clubId={clubId}
+          onClose={() => setDeactivateTarget(null)}
         />
       )}
     </div>
