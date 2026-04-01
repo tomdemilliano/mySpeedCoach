@@ -12,13 +12,20 @@ import {
   ArrowLeft, Target, Calendar, CheckCircle2,
   Zap, Sparkles, ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { useAuth } from '../../hooks/useAuth';
 import {
   TrainingPlanFactory, TrainingPrepFactory,
   UserMemberLinkFactory, ClubMemberFactory,
 } from '../../constants/dbSchema';
 import TrainingPrepEditor from '../../components/calendar/TrainingPrepEditor';
 import TrainingPrepViewer from '../../components/calendar/TrainingPrepViewer';
+
+// ─── Cookie helper (zelfde patroon als agenda.js) ─────────────────────────────
+const COOKIE_KEY = 'msc_uid';
+const getCookieUid = () => {
+  if (typeof document === 'undefined') return null;
+  const m = document.cookie.match(new RegExp(`(?:^|; )${COOKIE_KEY}=([^;]*)`));
+  return m ? m[1] : null;
+};
 
 const INTENSITY_CONFIG = {
   low:    { label: 'Laag',   color: '#22c55e', bar: '█░░' },
@@ -208,14 +215,20 @@ function TrainingCard({ training, isCoach, clubId, uid, planId, disciplines, onU
 export default function TrainingPlanPage() {
   const router   = useRouter();
   const { planId } = router.query;
-  const { uid, loading: authLoading } = useAuth();
 
+  const [uid,        setUid]        = useState(null);
   const [plan,       setPlan]       = useState(null);
   const [clubId,     setClubId]     = useState(null);
   const [isCoach,    setIsCoach]    = useState(false);
   const [loading,    setLoading]    = useState(true);
   const [notFound,   setNotFound]   = useState(false);
-  const [version,    setVersion]    = useState(0);   // bump to re-fetch plan
+
+  // Lees uid uit cookie (zelfde patroon als agenda.js)
+  useEffect(() => {
+    const cookieUid = getCookieUid();
+    if (cookieUid) setUid(cookieUid);
+    else { setLoading(false); setNotFound(true); }
+  }, []);
 
   // Resolve clubId from user's link + check coach role
   useEffect(() => {
@@ -257,7 +270,7 @@ export default function TrainingPlanPage() {
 
   const pageCSS = `* { box-sizing: border-box; } @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`;
 
-  if (authLoading || loading) return (
+  if (loading) return (
     <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <style>{pageCSS}</style>
       <div style={{ width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #f97316', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
