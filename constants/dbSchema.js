@@ -307,7 +307,31 @@ export const SCHEMA = {
       createdBy:       "uid",
       updatedAt:       "timestamp",
     },
-    
+    "clubs/{clubId}/trainingPlans/{planId}": {
+      groupId:          "string",
+      groupName:        "string",
+      competitionDate:  "string",       // YYYY-MM-DD
+      competitionName:  "string",
+      disciplines:      ["string"],
+      level:            "recreatief|beginner|intermediate|advanced",
+      ageGroup:         "u12|u16|senior|mixed",
+      summary:          "string",       // AI-gegenereerde samenvatting
+      trainings: [{                     // per-training thema's
+        date:        "string",          // YYYY-MM-DD (koppelt aan calendarEvent via datum)
+        eventId:     "string|null",     // optioneel: gekoppeld calendarEvent id
+        weekNumber:  "number",
+        weekLabel:   "string",
+        theme:       "string",
+        goals:       ["string"],
+        focus:       ["string"],
+        intensity:   "low|medium|high",
+        notes:       "string",
+        prepIds:     ["string"],        // gekoppelde TrainingPreps
+      }],
+      createdAt:   "timestamp",
+      createdBy:   "uid",
+      updatedAt:   "timestamp",
+    },    
   },
   rtdb: {
     live_sessions: {
@@ -2296,4 +2320,73 @@ export const TrainingPrepFactory = {
       updatedAt:      serverTimestamp(),
     });
   },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 20. TRAINING PLAN FACTORY
+// ─────────────────────────────────────────────────────────────────────────────
+// Plak dit na TrainingPrepFactory in dbSchema.js
+ 
+export const TrainingPlanFactory = {
+  create: (clubId, data, createdByUid) =>
+    addDoc(collection(db, `clubs/${clubId}/trainingPlans`), {
+      groupId:         data.groupId         || null,
+      groupName:       data.groupName       || '',
+      competitionDate: data.competitionDate || '',
+      competitionName: data.competitionName || '',
+      disciplines:     data.disciplines     || [],
+      level:           data.level           || 'intermediate',
+      ageGroup:        data.ageGroup        || 'mixed',
+      summary:         data.summary         || '',
+      trainings:       data.trainings       || [],
+      createdAt:       serverTimestamp(),
+      createdBy:       createdByUid || null,
+      updatedAt:       serverTimestamp(),
+    }),
+ 
+  getAll: (clubId, callback) =>
+    onSnapshot(
+      collection(db, `clubs/${clubId}/trainingPlans`),
+      (snap) => {
+        const sorted = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        callback(sorted);
+      }
+    ),
+ 
+  getForGroup: (clubId, groupId, callback) =>
+    onSnapshot(
+      query(
+        collection(db, `clubs/${clubId}/trainingPlans`),
+        where('groupId', '==', groupId)
+      ),
+      (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    ),
+ 
+  getById: (clubId, planId) =>
+    getDoc(doc(db, `clubs/${clubId}/trainingPlans`, planId)),
+ 
+  update: (clubId, planId, data) =>
+    updateDoc(doc(db, `clubs/${clubId}/trainingPlans`, planId), {
+      ...data,
+      updatedAt: serverTimestamp(),
+    }),
+ 
+  // Update een specifieke training binnen het plan (bijv. prep koppelen, eventId zetten)
+  updateTraining: async (clubId, planId, date, changes) => {
+    const snap = await getDoc(doc(db, `clubs/${clubId}/trainingPlans`, planId));
+    if (!snap.exists()) return;
+    const plan = snap.data();
+    const trainings = (plan.trainings || []).map(t =>
+      t.date === date ? { ...t, ...changes } : t
+    );
+    return updateDoc(doc(db, `clubs/${clubId}/trainingPlans`, planId), {
+      trainings,
+      updatedAt: serverTimestamp(),
+    });
+  },
+ 
+  delete: (clubId, planId) =>
+    deleteDoc(doc(db, `clubs/${clubId}/trainingPlans`, planId)),
 };
