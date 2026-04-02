@@ -9,8 +9,8 @@ Descriptive overview of the application. Read this alongside `CLAUDE.md` when wo
 MySpeedCoach is a club management and training platform for competitive rope skipping clubs. It is used by:
 
 - **Skippers** — athletes who track their own sessions, records, badges, and goals
-- **Coaches** — club members with `isCoach: true` in a group, who can count sessions, post announcements, and view the live dashboard
-- **Club admins** (`clubadmin` role) — manage groups, members, join requests, badges, seasons, and competitive labels for their club
+- **Coaches** — club members with `isCoach: true` in a group, who can count sessions, post announcements, view the live dashboard, manage the calendar, and create training preparations
+- **Club admins** (`clubadmin` role) — manage groups, members, join requests, badges, seasons, competitive labels, locations, and calendar templates for their club
 - **Super admins** (`superadmin` role) — manage all clubs, users, and global disciplines across the platform
 
 The primary club using the app is **Antwerp Ropes**.
@@ -52,6 +52,8 @@ The primary club using the app is **Antwerp Ropes**.
 │   ├── history.js          # Session history with AI analysis
 │   ├── badges.js           # Badge leaderboard (per group)
 │   ├── badge-beheer.js     # Badge management (coach/admin)
+│   ├── agenda.js           # Calendar page (list/week/month views, event detail sheet)
+│   ├── calendar-admin.js   # Calendar management (locations, templates, events, prep library, schemas, reports)
 │   ├── clubadmin.js        # Club management (Algemeen, Leden, Groepen, Seizoenen, Labels)
 │   ├── superadmin.js       # Platform management (clubs, users, disciplines)
 │   ├── settings.js         # User settings page (profile, notifications, membership, labels, zones)
@@ -59,11 +61,16 @@ The primary club using the app is **Antwerp Ropes**.
 │   ├── register.js         # Multi-step registration flow
 │   ├── verify-email.js     # Email verification gate
 │   ├── no-club.js          # Shown to verified users without a club membership
-│   ├── agenda.js           # Placeholder (not yet implemented)
+│   ├── training-plan/
+│   │   └── [planId].js     # Training plan detail page (skippers + coaches)
+│   └── agenda/
+│       └── checkin.js      # QR-scan landing page for self check-in
 │   └── api/                # Serverless API routes (firebase-admin, push, AI proxy)
-│       ├── ai-analysis.js  # Proxy to Anthropic API for session coaching
-│       ├── delete-user.js  # Firebase Auth user deletion (admin SDK)
-│       └── push/           # Web Push subscribe / unsubscribe / send
+│       ├── ai-analysis.js        # Proxy to Anthropic API for session coaching
+│       ├── ai-training-plan.js   # Proxy to Anthropic API for training plan generation
+│       ├── ai-training-prep.js   # Proxy to Anthropic API for training prep generation
+│       ├── delete-user.js        # Firebase Auth user deletion (admin SDK)
+│       └── push/                 # Web Push subscribe / unsubscribe / send
 ├── components/
 │   ├── AppLayout.js            # Navigation shell (sidebar desktop, bottom nav mobile)
 │   ├── AnnouncementsWidget.js  # Home screen announcement preview
@@ -73,7 +80,20 @@ The primary club using the app is **Antwerp Ropes**.
 │   ├── LabelGrid.js            # Competitive level (A/B/C) label assignment grid
 │   ├── PushPermissionBanner.js # Push opt-in banner + settings toggle
 │   ├── SeasonBanner.js         # Admin reminder banner when a new season is approaching
-│   └── SeasonManager.js        # Season CRUD UI for clubadmin
+│   ├── SeasonManager.js        # Season CRUD UI for clubadmin
+│   └── calendar/
+│       ├── AttendanceList.js       # Coach tick-list for marking attendance per event
+│       ├── AttendanceReport.js     # Attendance matrix + coach overview reports
+│       ├── CalendarListView.js     # Chronological event list, grouped by date
+│       ├── CalendarMonthView.js    # Classic month grid (Ma–Zo, 5–6 rows)
+│       ├── CalendarWeekView.js     # Week view with 7 columns
+│       ├── EventCard.js            # Compact event card (used across calendar views)
+│       ├── EventDetailSheet.js     # Bottom sheet with full event details + member/coach actions
+│       ├── EventFormModal.js       # Modal for creating/editing/cancelling events
+│       ├── TrainingPlanEditor.js   # Generates and displays AI training schemas toward a competition
+│       ├── TrainingPrepEditor.js   # Full editor for training preparations (manual + AI)
+│       ├── TrainingPrepViewer.js   # Read-only view of a TrainingPrep
+│       └── UpcomingEventsWidget.js # Home screen widget showing next upcoming events
 ├── constants/
 │   └── dbSchema.js         # SCHEMA definition + all factory objects
 ├── contexts/
@@ -86,6 +106,7 @@ The primary club using the app is **Antwerp Ropes**.
 ├── lib/
 │   └── webpush.js          # Server-side web-push initialisation helper
 ├── utils/
+│   ├── calendarUtils.js        # Pure calendar helpers: virtual event generation, merging, date utils
 │   └── renderBodyWithLinks.js  # Converts URLs in announcement body to <a> tags
 └── public/
     ├── sw.js               # Custom service worker (push notifications)
@@ -187,21 +208,22 @@ stored in Firestore. No session storage or local state is used for progress trac
 | Home | `/` |
 | Berichten | `/announcements` |
 | Live (primary, large) | `/live` |
-| Prestaties | `/achievements` |
+| Agenda | `/agenda` |
 | Meer (drawer trigger) | opens `SidebarDrawer` |
 
 **Meer drawer / Desktop sidebar secondary items** — role-gated:
 
 | Item | Who sees it |
 |---|---|
+| Prestaties | Everyone |
 | Badge leaderboard | Everyone |
 | Geschiedenis | Everyone |
 | Badge beheer | Coaches + admins |
-| Dashboard | Coaches + admins |
+| Kalenderbeheer | Coaches + admins |
 | Clubbeheer | Admins (`clubadmin` / `superadmin`) |
 | SuperAdmin | `superadmin` only |
 
-Superadmin also gets `/superadmin` in the More drawer.
+Note: **Dashboard** is no longer a standalone nav item — it is accessible via the `/live` hub page.
 
 ---
 
@@ -272,6 +294,95 @@ Role-aware: superadmins see all clubs/groups; clubadmins see their clubs; regula
 - Shows a "ghost" overlay comparing current session to the skipper's personal best
 - Supports relay monitoring: reads `live_sessions/{relayLeadUid}/relaySession` for team-level data, renders `RelayTotalCard` + `RelaySkipperCard` per team member
 - Uses `computeRollingTempo()` (steps per 30 seconds over a 5-second window) for the tempo metric
+
+---
+
+## Calendar System
+
+The calendar is the most recently added major feature, comprising several interconnected pages and components.
+
+### Data flow
+
+```
+EventTemplates (Firestore, recurring rules)
+  → generateVirtualEvents() [calendarUtils.js, client-side]
+  → mergeWithExceptions() [calendarUtils.js]
+      ↑ real calendarEvent docs (Firestore, exceptions + standalone)
+  → filterEventsForMember()
+  → rendered in CalendarListView / CalendarWeekView / CalendarMonthView
+```
+
+Virtual events are generated entirely client-side from template recurrence rules and are never written to Firestore unless a write is triggered (check-in, edit, attendance). At that point `CalendarEventFactory.materializeVirtual()` creates a real Firestore doc using the **deterministic ID** `{templateId}_{YYYYMMDD}`, so exceptions always match their virtual counterpart.
+
+### pages/agenda.js
+
+The member-facing calendar page. Features:
+- Three view modes: list (`CalendarListView`), week (`CalendarWeekView`), month (`CalendarMonthView`)
+- Group filter for coaches/admins to switch between groups
+- `EventDetailSheet` opens on event tap — members can self check-in or self-excuse; coaches get edit/cancel/attendance actions
+- Training plan banners shown above the calendar for relevant upcoming competitions
+- Navigation to `/calendar-admin` for coaches/admins
+
+### pages/calendar-admin.js
+
+The coach/admin management page. Tabs:
+
+| Tab | Who | Content |
+|---|---|---|
+| Trainingsreeksen | Coaches + admins | CRUD for `EventTemplate` recurring rules (`TemplateFormModal`, `DeactivateTemplateModal`) |
+| Locaties | Admins only | CRUD for `Location` docs (`LocationFormModal`) |
+| Eenmalige events | Coaches + admins | List + create/edit/cancel standalone `calendarEvent` docs (`EventFormModal`) |
+| Voorbereiding | Coaches + admins | Training prep library — manual + AI generation (`TrainingPrepEditor`, `TrainingPrepViewer`) |
+| Schema's | Coaches + admins | AI training schemas toward competitions (`TrainingPlanEditor`) |
+| Rapporten | Coaches + admins | `AttendanceReport` — presence matrix + coach overview |
+
+### pages/agenda/checkin.js
+
+QR-scan landing page for self check-in. URL pattern: `/agenda/checkin?eventId=<id>`. The page resolves the event (real or virtual), validates group membership and check-in window, then calls `AttendanceFactory.selfCheckIn()`. Materialises virtual events if needed before writing.
+
+### pages/training-plan/[planId].js
+
+Detail page for a training plan. Accessible to both skippers (read-only) and coaches (with prep-add buttons). Shows the plan week by week with per-training theme, goals, intensity, and linked `TrainingPrep` objects.
+
+### calendarUtils.js
+
+Pure client-side helpers with no Firestore imports:
+- `generateVirtualEvents(templates, rangeStart, rangeEnd)` — produces virtual event objects from recurring templates
+- `mergeWithExceptions(virtualEvents, realDocs)` — real doc wins when IDs match; standalone real docs are appended
+- `buildEventId(templateId, date)` — deterministic ID `{templateId}_{YYYYMMDD}`
+- `isCheckInOpen(event)` — window is `[startAt − 30min, startAt + 30min]`
+- `canSelfExcuse(event)` — allowed until `startAt`
+- `filterEventsForMember(events, groupIds)` — visibility filter
+- `getUpcomingEvents(events, n)` — next N events from now
+- Date helpers: `startOfDay`, `endOfDay`, `startOfWeek`, `endOfWeek`, `startOfMonth`, `endOfMonth`, `addDays`, `isSameDay`, `formatTs`, `formatDuration`, `durationFromEvent`, `recurrenceLabel`, `getEventColor`
+
+### Event types and statuses
+
+| Type | Color |
+|---|---|
+| `training` | `#3b82f6` |
+| `club_event` | `#a78bfa` |
+| `competition` | `#f97316` |
+
+| Status | Notes |
+|---|---|
+| `scheduled` | Default |
+| `cancelled` | Coach cancelled; `cancelReason` shown to members |
+| `modified` | Exception doc differs from template (e.g. location changed) |
+
+### Training Prep & Plan
+
+**TrainingPrep** (`clubs/{clubId}/trainingPreps/{prepId}`) — a structured training session with warmup/main/cooldown blocks, each with title, duration, intensity, description, and optional discipline. Can be generated by AI (`/api/ai-training-prep`) or built manually. Linked to one or more `calendarEvent` docs via `usedInEventIds`.
+
+**TrainingPlan** (`clubs/{clubId}/trainingPlans/{planId}`) — an AI-generated periodisation schema toward a competition date, containing one entry per training date with theme, goals, focus, intensity, and linked `prepIds`. Generated via `/api/ai-training-plan`. Visible to members on `/training-plan/[planId]` and in agenda banners.
+
+### AI API routes
+
+| Route | Model | Purpose |
+|---|---|---|
+| `/api/ai-analysis` | claude-haiku-4-5 | Post-session coaching analysis |
+| `/api/ai-training-prep` | claude-sonnet-4 | Generate a structured TrainingPrep from group context |
+| `/api/ai-training-plan` | claude-sonnet-4 | Generate a full periodisation plan toward a competition |
 
 ---
 
@@ -419,7 +530,7 @@ The `ClubMember` document (`clubs/{clubId}/members/{memberId}`) now includes:
 | `VAPID_SUBJECT` | Server only | `mailto:` contact for VAPID |
 | `FIREBASE_CLIENT_EMAIL` | Server only | Admin SDK service account |
 | `FIREBASE_PRIVATE_KEY` | Server only | Admin SDK private key (escape `\n` in Vercel) |
-| `ANTHROPIC_API_KEY` | Server only | Used by `/api/ai-analysis` proxy |
+| `ANTHROPIC_API_KEY` | Server only | Used by `/api/ai-analysis`, `/api/ai-training-prep`, `/api/ai-training-plan` |
 
 ---
 
@@ -439,18 +550,24 @@ All Firestore and RTDB access goes through factory objects in `constants/dbSchem
 
 | # | Factory | Collection / Path |
 |---|---|---|
-| 1 | `UserFactory` | `users/{uid}` — bevat `registrationStep` (0\|1\|2) en `registrationDone` (boolean) for recorverable registrationwizard |
+| 1 | `UserFactory` | `users/{uid}` — bevat `registrationStep` (0\|1\|2) en `registrationDone` (boolean) for recoverable registration wizard |
 | 2 | `ClubFactory` | `clubs/{clubId}` |
-| 2 | `GroupFactory` | `clubs/{clubId}/groups/{groupId}/members/` |
-| 3 | `LiveSessionFactory` | RTDB `live_sessions/{uid}` |
-| 4 | `ClubJoinRequestFactory` | `clubJoinRequests` |
-| 5 | `BadgeFactory` | `badges`, `clubs/{clubId}/members/{memberId}/earnedBadges` |
-| 6 | `CounterBadgeFactory` | `countedSessions`, `users/{uid}/earnedBadges` |
-| 7 | `ClubMemberFactory` | `clubs/{clubId}/members/{memberId}` and sub-collections |
-| 8 | `UserMemberLinkFactory` | `userMemberLinks` |
-| 9 | `GoalFactory` | `clubs/{clubId}/members/{memberId}/goals` |
-| 10 | `AuthFactory` | Firebase Auth SDK |
-| 11 | `AnnouncementFactory` | `announcements` |
-| 12 | `DisciplineFactory` | `disciplines` |
-| 13 | `SeasonFactory` | `clubs/{clubId}/seasons` |
-| 14 | `MemberLabelFactory` | `clubs/{clubId}/seasons/{seasonId}/memberLabels` |
+| 3 | `GroupFactory` | `clubs/{clubId}/groups/{groupId}/members/` |
+| 4 | `LiveSessionFactory` | RTDB `live_sessions/{uid}` |
+| 5 | `ClubJoinRequestFactory` | `clubJoinRequests` |
+| 6 | `BadgeFactory` | `badges`, `clubs/{clubId}/members/{memberId}/earnedBadges` |
+| 7 | `CounterBadgeFactory` | `countedSessions`, `users/{uid}/earnedBadges` |
+| 8 | `ClubMemberFactory` | `clubs/{clubId}/members/{memberId}` and sub-collections |
+| 9 | `UserMemberLinkFactory` | `userMemberLinks` |
+| 10 | `GoalFactory` | `clubs/{clubId}/members/{memberId}/goals` |
+| 11 | `AuthFactory` | Firebase Auth SDK |
+| 12 | `AnnouncementFactory` | `announcements` |
+| 13 | `DisciplineFactory` | `disciplines` |
+| 14 | `SeasonFactory` | `clubs/{clubId}/seasons` |
+| 15 | `MemberLabelFactory` | `clubs/{clubId}/seasons/{seasonId}/memberLabels` |
+| 16 | `LocationFactory` | `locations` (top-level, filtered by `clubId`) |
+| 17 | `EventTemplateFactory` | `clubs/{clubId}/eventTemplates/{templateId}` |
+| 18 | `CalendarEventFactory` | `clubs/{clubId}/calendarEvents/{eventId}` — also handles `materializeVirtual()` and `getOrMaterialize()` |
+| 19 | `AttendanceFactory` | `clubs/{clubId}/calendarEvents/{eventId}/attendance/{memberId}` |
+| 20 | `TrainingPrepFactory` | `clubs/{clubId}/trainingPreps/{prepId}` |
+| 21 | `TrainingPlanFactory` | `clubs/{clubId}/trainingPlans/{planId}` |
