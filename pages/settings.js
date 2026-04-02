@@ -510,12 +510,7 @@ function ErrorBanner({ message }) {
   );
 }
 
-const LABEL_COLORS = { A: '#22c55e', B: '#f59e0b', C: '#ef4444' };
-const LABEL_DESCRIPTIONS = {
-  A: 'Nationaal niveau',
-  B: 'Regionaal niveau',
-  C: 'Clubniveau',
-};
+const LABEL_COLORS = { A: '#3b82f6', B: '#a78bfa', C: '#06b6d4' };
  
 function LabelBadge({ label }) {
   if (!label) return <span style={{ fontSize: '12px', color: '#334155' }}>—</span>;
@@ -646,16 +641,6 @@ export function LabelsTab({ uid, currentUser }) {
     <div style={tabBody}>
       <SectionHeaderSimple title="Niveaulabels" subtitle="Jouw competitief niveau per seizoen en discipline" />
  
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
-        {Object.entries(LABEL_DESCRIPTIONS).map(([label, desc]) => (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <LabelBadge label={label} />
-            <span style={{ fontSize: '11px', color: '#64748b' }}>{desc}</span>
-          </div>
-        ))}
-      </div>
- 
       {/* Season list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {seasons.map(season => {
@@ -735,9 +720,6 @@ export function LabelsTab({ uid, currentUser }) {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b' }}>
                           <span style={{ fontSize: '12px', color: '#94a3b8', flex: 1 }}>Allround</span>
                           <LabelBadge label={labelDoc.allroundLabel} />
-                          <span style={{ fontSize: '11px', color: LABEL_COLORS[labelDoc.allroundLabel] || '#64748b' }}>
-                            {LABEL_DESCRIPTIONS[labelDoc.allroundLabel] || ''}
-                          </span>
                         </div>
                       )}
  
@@ -750,9 +732,6 @@ export function LabelsTab({ uid, currentUser }) {
                           <div key={entry.disciplineId} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b' }}>
                             <span style={{ fontSize: '12px', color: '#94a3b8', flex: 1 }}>{disc.name}</span>
                             <LabelBadge label={entry.label} />
-                            <span style={{ fontSize: '11px', color: LABEL_COLORS[entry.label] || '#64748b' }}>
-                              {LABEL_DESCRIPTIONS[entry.label] || ''}
-                            </span>
                           </div>
                         );
                       })}
