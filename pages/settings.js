@@ -28,7 +28,7 @@ import {
   Save, Send, Trash2, EyeOff,
   CheckCircle2, XCircle, Clock,
   Building2, UserX, AlertCircle,
-  ArrowLeft, ChevronRight, Trophy, ChevronDown
+  ArrowLeft, ChevronRight, Trophy, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { useDisciplines } from '../hooks/useDisciplines';
 
