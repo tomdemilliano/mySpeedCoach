@@ -189,7 +189,7 @@ function LidmaatschapTab({ uid, currentUser }) {
     return () => u();
   }, [uid]);
 
-  // Resolve active group memberships
+  // Resolve active group memberships per club
   useEffect(() => {
     if (!uid || allClubs.length === 0) return;
     const collected = {};
@@ -203,12 +203,12 @@ function LidmaatschapTab({ uid, currentUser }) {
             const key = `${club.id}-${group.id}`;
             if (me) {
               collected[key] = {
-                clubId:     club.id,
-                clubName:   club.name,
-                groupId:    group.id,
-                groupName:  group.name,
-                isSkipper:  me.isSkipper,
-                isCoach:    me.isCoach,
+                clubId:    club.id,
+                clubName:  club.name,
+                groupId:   group.id,
+                groupName: group.name,
+                isSkipper: me.isSkipper,
+                isCoach:   me.isCoach,
               };
             } else {
               delete collected[key];
@@ -249,85 +249,116 @@ function LidmaatschapTab({ uid, currentUser }) {
     }
   };
 
-  const visibleRequests = requests.filter(r => !r.hidden);
+  // Approved requests grouped by clubId for easy lookup
+  const approvedClubIds = new Set(requests.filter(r => r.status === 'approved').map(r => r.clubId));
+
+  // Per approved club: which groups is the user already in?
+  const groupsByClub = {};
+  memberships.forEach(m => {
+    if (!groupsByClub[m.clubId]) groupsByClub[m.clubId] = [];
+    groupsByClub[m.clubId].push(m);
+  });
+
+  // Pending + rejected requests (not yet approved)
+  const openRequests = requests.filter(r => r.status !== 'approved' && !r.hidden);
 
   return (
     <div style={css.tabBody}>
 
-      {/* Active memberships */}
-      {memberships.length > 0 && (
-        <>
-          <SectionHeader title="Actieve lidmaatschappen" subtitle="Clubs en groepen waar je nu lid van bent" />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '28px' }}>
-            {memberships.map((m, i) => (
-              <div key={i} style={{ ...css.card, display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div style={{ width: '36px', height: '36px', borderRadius: '9px', backgroundColor: '#3b82f622', border: '1px solid #3b82f644', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Building2 size={16} color="#60a5fa" />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9' }}>{m.clubName}</div>
-                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '1px' }}>{m.groupName}</div>
-                </div>
-                <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                  {m.isSkipper && <RolePill label="Skipper" color="#3b82f6" />}
-                  {m.isCoach   && <RolePill label="Coach"   color="#f59e0b" />}
+      {/* ── Lidmaatschappen (approved) ── */}
+      <SectionHeader title="Lidmaatschappen" subtitle="Clubs waarbij je aanvraag is goedgekeurd" />
+
+      {approvedClubIds.size === 0 ? (
+        <div style={{ ...css.card, marginBottom: '28px', color: '#475569', fontSize: '13px', textAlign: 'center', padding: '24px' }}>
+          Nog geen goedgekeurde lidmaatschappen.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '28px' }}>
+          {[...approvedClubIds].map(clubId => {
+            const clubGroups = groupsByClub[clubId] || [];
+            const clubName   = requests.find(r => r.clubId === clubId)?.clubName || clubId;
+            const hasGroups  = clubGroups.length > 0;
+            return (
+              <div key={clubId} style={{ ...css.card, borderColor: '#3b82f644' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ width: '36px', height: '36px', borderRadius: '9px', backgroundColor: '#3b82f622', border: '1px solid #3b82f644', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Building2 size={16} color="#60a5fa" />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9' }}>{clubName}</div>
+                    {hasGroups ? (
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '5px' }}>
+                        {clubGroups.map(m => (
+                          <span key={m.groupId} style={{ fontSize: '10px', padding: '2px 7px', borderRadius: '10px', backgroundColor: '#3b82f611', border: '1px solid #3b82f633', color: '#60a5fa', fontWeight: '600' }}>
+                            {m.groupName}
+                          </span>
+                        ))}
+                        <div style={{ display: 'flex', gap: '4px', flexShrink: 0, marginLeft: '4px' }}>
+                          {clubGroups.some(m => m.isSkipper) && <RolePill label="Skipper" color="#3b82f6" />}
+                          {clubGroups.some(m => m.isCoach)   && <RolePill label="Coach"   color="#f59e0b" />}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '3px' }}>
+                        Wacht op toewijzing aan een groep door een coach.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
-        </>
+            );
+          })}
+        </div>
       )}
 
-      {/* Requests */}
-      {visibleRequests.length > 0 && (
-        <>
-          <SectionHeader title="Clubaanvragen" subtitle="Status van je ingediende aanvragen" />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '28px' }}>
-            {visibleRequests.map(req => {
-              const cfg  = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending;
-              const Icon = cfg.icon;
-              return (
-                <div key={req.id} style={{ ...css.card, borderColor: `${cfg.color}33` }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: '36px', height: '36px', borderRadius: '9px', backgroundColor: `${cfg.color}22`, border: `1px solid ${cfg.color}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <Building2 size={16} color={cfg.color} />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9' }}>{req.clubName}</div>
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: '700', color: cfg.color, marginTop: '2px' }}>
-                        <Icon size={10} /> {cfg.label}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
-                      {req.status !== 'pending' && (
-                        <button onClick={() => ClubJoinRequestFactory.hide(req.id)} style={css.iconBtn} title="Verbergen">
-                          <EyeOff size={14} />
-                        </button>
-                      )}
-                      <button onClick={() => { if (confirm('Aanvraag verwijderen?')) ClubJoinRequestFactory.delete(req.id); }} style={{ ...css.iconBtn, color: '#ef4444' }} title="Verwijderen">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                  {req.status === 'rejected' && req.rejectionReason && (
-                    <div style={{ marginTop: '8px', fontSize: '12px', color: '#ef4444', backgroundColor: '#ef444411', borderRadius: '6px', padding: '8px 10px', borderLeft: '3px solid #ef4444' }}>
-                      <strong>Reden:</strong> {req.rejectionReason}
-                    </div>
-                  )}
-                  {req.status === 'approved' && (
-                    <div style={{ marginTop: '8px', fontSize: '12px', color: '#22c55e', backgroundColor: '#22c55e11', borderRadius: '6px', padding: '8px 10px', borderLeft: '3px solid #22c55e' }}>
-                      Aanvraag goedgekeurd. Een coach voegt je toe aan een groep.
-                    </div>
-                  )}
+      {/* ── Aanvragen (pending + rejected) ── */}
+      <SectionHeader title="Aanvragen" subtitle="Openstaande en afgewezen aanvragen" />
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+        {openRequests.length === 0 && !showForm && (
+          <div style={{ color: '#475569', fontSize: '13px', marginBottom: '4px' }}>
+            Geen openstaande aanvragen.
+          </div>
+        )}
+        {openRequests.map(req => {
+          const isPending  = req.status === 'pending';
+          const accentColor = isPending ? '#f59e0b' : '#ef4444';
+          return (
+            <div key={req.id} style={{ ...css.card, borderColor: `${accentColor}33` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '9px', backgroundColor: `${accentColor}22`, border: `1px solid ${accentColor}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Building2 size={16} color={accentColor} />
                 </div>
-              );
-            })}
-          </div>
-        </>
-      )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9' }}>{req.clubName}</div>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: '700', color: accentColor, marginTop: '2px' }}>
+                    {isPending
+                      ? <><Clock size={10} /> In behandeling</>
+                      : <><XCircle size={10} /> Afgewezen</>}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+                  {!isPending && (
+                    <button onClick={() => ClubJoinRequestFactory.hide(req.id)} style={css.iconBtn} title="Verbergen">
+                      <EyeOff size={14} />
+                    </button>
+                  )}
+                  <button onClick={() => { if (confirm('Aanvraag verwijderen?')) ClubJoinRequestFactory.delete(req.id); }} style={{ ...css.iconBtn, color: '#ef4444' }} title="Verwijderen">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+              {req.status === 'rejected' && req.rejectionReason && (
+                <div style={{ marginTop: '8px', fontSize: '12px', color: '#ef4444', backgroundColor: '#ef444411', borderRadius: '6px', padding: '8px 10px', borderLeft: '3px solid #ef4444' }}>
+                  <strong>Reden:</strong> {req.rejectionReason}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
 
-      {/* New join request */}
-      <SectionHeader title="Nieuwe aanvraag" subtitle="Word lid van een club" />
+      {/* Nieuwe aanvraag indienen */}
       {!showForm ? (
         <button onClick={() => { setShowForm(true); setJoinError(''); }} style={css.secondaryBtn}>
           <Send size={14} /> Aanvraag indienen bij een club
