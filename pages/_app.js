@@ -236,7 +236,7 @@ useEffect(() => {
         @keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
       `}</style>
       <img
-        src="/icons/skippr-logo-tranaprant.png"
+        src="/icons/skippr-logo-transparant.png"
         alt="Skippr"
         style={{ width: '260px', maxWidth: '70vw', animation: 'fadeIn 0.5s ease-out forwards' }}
       />
