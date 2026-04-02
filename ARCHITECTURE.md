@@ -130,9 +130,23 @@ User visits app
   → _app.js checks Firebase Auth state (AuthFactory.onAuthStateChanged)
   → if not logged in → redirect to /login
   → if logged in but email not verified → redirect to /verify-email
+  → if verified but registrationDone = false and firstName missing → redirect to /register
   → if verified but no UserMemberLink → redirect to /no-club
   → otherwise → render AppLayout with resolved userRole + coachView
 ```
+
+Registration wizard flow (`/register`):
+  → Step 0: credentials (email + password) → Firebase Auth account created
+      → registrationStep: 1 persisted to Firestore immediately
+      → verification email sent via custom SMTP
+  → Step 1: name entry → firstName + lastName + registrationStep: 2 + registrationDone: true saved in one update
+  → Step 2: confirmation screen → redirect to /verify-email
+
+Interrupted registration recovery:
+  → register.js reads registrationStep from Firestore on every mount
+  → registrationStep = 0 → show step 0 (credentials)
+  → registrationStep ≥ 1 → show step 1 (name), regardless of whether browser was closed
+  → registrationDone = true → redirect to /
 
 Coach detection in `_app.js`:
 1. Load all `UserMemberLink` records for the current user
@@ -140,6 +154,27 @@ Coach detection in `_app.js`:
 3. If the user's `memberId` appears in any group with `isCoach: true` → set `coachView = true`
 
 This is stored in `sessionStorage` under key `msc_viewmode` and can be toggled on the home page by users who have both skipper and coach access.
+
+---
+
+## Registration Wizard
+
+The registration page (`pages/register.js`) is a multi-step wizard with persistent progress
+stored in Firestore. No session storage or local state is used for progress tracking.
+
+| Step | Content | Firestore after completion |
+|---|---|---|
+| 0 | Email + password | `registrationStep: 1` written immediately after Firebase Auth account creation |
+| 1 | First name + last name | `registrationStep: 2`, `registrationDone: true`, `firstName`, `lastName` written in a single update |
+| 2 | Confirmation screen | — (redirects to `/verify-email`) |
+
+**Key implementation details:**
+
+- `registrationStep` in Firestore is the single source of truth for wizard progress
+- After `AuthFactory.registerWithEmail()`, the code polls until the user document exists (max 10 × 300ms) before calling `updateProfile` — this prevents a race condition with `AuthContext.onAuthStateChanged` which creates the document asynchronously
+- `_app.js` redirects users with `registrationDone: false` and no `firstName` back to `/register` on any page load or navigation, including after a hard refresh
+- Admin roles (`clubadmin`, `superadmin`) are exempt from this check — they may exist in Firestore without having gone through the registration wizard
+- Verification emails are sent via a custom SMTP server configured in Firebase Authentication → Settings → Custom SMTP
 
 ---
 
@@ -404,7 +439,7 @@ All Firestore and RTDB access goes through factory objects in `constants/dbSchem
 
 | # | Factory | Collection / Path |
 |---|---|---|
-| 1 | `UserFactory` | `users/{uid}` |
+| 1 | `UserFactory` | `users/{uid}` — bevat `registrationStep` (0\|1\|2) en `registrationDone` (boolean) for recorverable registrationwizard |
 | 2 | `ClubFactory` | `clubs/{clubId}` |
 | 2 | `GroupFactory` | `clubs/{clubId}/groups/{groupId}/members/` |
 | 3 | `LiveSessionFactory` | RTDB `live_sessions/{uid}` |
