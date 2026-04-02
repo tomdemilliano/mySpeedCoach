@@ -230,9 +230,17 @@ useEffect(() => {
   }, [uid, router.pathname]);
 
   if (loading) return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
-      <div style={{ width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+    <div style={{ minHeight: '100vh', backgroundColor: '#0f172a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '32px' }}>
+      <style>{`
+        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+      `}</style>
+      <img
+        src="/icons/skippr-logo-tranaprant.png"
+        alt="Skippr"
+        style={{ width: '260px', maxWidth: '70vw', animation: 'fadeIn 0.5s ease-out forwards' }}
+      />
+      <div style={{ width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #20a4a4', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
     </div>
   );
 
