@@ -550,7 +550,11 @@ export function LabelsTab({ uid, currentUser }) {
     const unsub = UserMemberLinkFactory.getForUser(uid, async (profiles) => {
       const self = profiles.find(p => p.link.relationship === 'self');
       if (!self || cancelled) { setLoading(false); return; }
-      const ctx = { clubId: self.member.clubId, memberId: self.member.id };
+      const ctx = {
+        clubId:      self.member.clubId,
+        memberId:    self.member.id,
+        skipperType: self.member.skipperType ?? null,
+      };
       setMemberContext(ctx);
  
       // Load club
@@ -602,7 +606,7 @@ export function LabelsTab({ uid, currentUser }) {
     return new Date(ms).toLocaleDateString('nl-BE', { month: 'short', year: 'numeric' });
   };
  
-  if (!discsLoading && (currentUser?.skipperType !== 'competitive')) {
+  if (!loading && memberContext && memberContext.skipperType !== 'competitive') {
     return (
       <div style={tabBody}>
         <SectionHeaderSimple title="Niveaulabels" subtitle="Jouw competitief niveau per seizoen en discipline" />
