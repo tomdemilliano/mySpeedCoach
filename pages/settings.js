@@ -294,16 +294,16 @@ function LidmaatschapTab({ uid, currentUser }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9' }}>{clubName}</div>
                     {hasGroups ? (
-                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '5px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '6px' }}>
                         {clubGroups.map(m => (
-                          <span key={m.groupId} style={{ fontSize: '10px', padding: '2px 7px', borderRadius: '10px', backgroundColor: '#3b82f611', border: '1px solid #3b82f633', color: '#60a5fa', fontWeight: '600' }}>
-                            {m.groupName}
-                          </span>
+                          <div key={m.groupId} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '13px', color: '#94a3b8' }}>{m.groupName}</span>
+                            <div style={{ display: 'flex', gap: '4px' }}>
+                              {m.isSkipper && <RolePill label="Skipper" color="#3b82f6" />}
+                              {m.isCoach   && <RolePill label="Coach"   color="#f59e0b" />}
+                            </div>
+                          </div>
                         ))}
-                        <div style={{ display: 'flex', gap: '4px', flexShrink: 0, marginLeft: '4px' }}>
-                          {clubGroups.some(m => m.isSkipper) && <RolePill label="Skipper" color="#3b82f6" />}
-                          {clubGroups.some(m => m.isCoach)   && <RolePill label="Coach"   color="#f59e0b" />}
-                        </div>
                       </div>
                     ) : (
                       <div style={{ fontSize: '12px', color: '#64748b', marginTop: '3px' }}>
