@@ -167,6 +167,7 @@ export default function RegisterPage() {
 
       setStep(1);
     } catch (err) {
+      console.error('Registration error:', err.code, err.message);
       setError(getFriendlyError(err.code));
     } finally {
       setLoading(false);
