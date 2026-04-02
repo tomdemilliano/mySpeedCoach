@@ -37,22 +37,51 @@ function AppShell({ Component, pageProps }) {
     }
   }, [uid]);
 
-  // Auth guard
+  // Auth guard — inclusief registratie-volledigheidscheck
   useEffect(() => {
     if (loading) return;
+    
+    // Niet ingelogd → naar login
     if (!uid && !isPublicPath) {
       router.replace(`/login?next=${encodeURIComponent(router.asPath)}`);
       return;
     }
+    
+    // Email niet geverifieerd → naar verify-email
     if (uid && !AuthFactory.isEmailVerified() && !EMAIL_VERIFY_EXEMPT.includes(router.pathname)) {
       router.replace('/verify-email');
       return;
     }
-    if (uid && (router.pathname === '/login' || router.pathname === '/register')) {
-      router.replace(router.query.next || '/');
+    
+    // Ingelogd + geverifieerd, maar registratie niet afgerond → naar /register
+    // Uitzondering: admins en superadmins hoeven dit niet (kunnen al bestaan zonder wizard)
+    if (
+      uid &&
+      AuthFactory.isEmailVerified() &&
+      !ADMIN_ROLES.includes(userRole) &&
+      !['/', '/login', '/register', '/verify-email', '/no-club'].includes(router.pathname)
+    ) {
+      UserFactory.get(uid).then(snap => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        // Blokkeer doorgang als naam ontbreekt én registratie niet afgerond is
+        if (!data.registrationDone && !data.firstName) {
+          router.replace('/register');
+        }
+      }).catch(() => {});
     }
-  }, [uid, loading, isPublicPath, router.pathname]);
-
+    
+    // Al ingelogd maar op login/register → stuur door
+    if (uid && (router.pathname === '/login' || router.pathname === '/register')) {
+      // Alleen doorsturen als registratie volledig is, anders laat register.js het afhandelen
+      UserFactory.get(uid).then(snap => {
+        if (snap.exists() && snap.data().registrationDone) {
+          router.replace(router.query.next || '/');
+        }
+      }).catch(() => {});
+    }
+  }, [uid, loading, isPublicPath, router.pathname, userRole]);
+  
   // Role
   useEffect(() => {
     if (!uid) { setUserRole('user'); return; }
