@@ -11,6 +11,8 @@ export const SCHEMA = {
       lastName: "string",
       email: "string",
       role: "superadmin|clubadmin|user",
+      registrationStep: "0|1|2",      // persistent progress through registration wizard
+      registrationDone: "boolean",    // true only after name saved and wizard completed
       lastVisited: "timestamp",
       assignedDevice: {
         deviceId: "string",
@@ -370,6 +372,8 @@ export const UserFactory = {
       ...userData,
       role: userData.role || 'user',
       heartrateZones: defaultZones,
+      registrationStep: userData.registrationStep ?? 0,
+      registrationDone: userData.registrationDone ?? false,
       createdAt: serverTimestamp(),
       assignedDevice: { deviceId: "", deviceName: "", lastConnection: null }
     });
