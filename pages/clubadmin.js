@@ -31,6 +31,199 @@ const STATUS_CONFIG = {
 
 const MONTH_NAMES = ['', 'januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
 
+// ─── ClubInfo input styles (used by ClubInfoSection) ─────────────────────────
+const ciLabelStyle = {
+  display: 'block', fontSize: '11px', fontWeight: '700',
+  color: '#64748b', textTransform: 'uppercase',
+  letterSpacing: '0.4px', marginBottom: '5px',
+};
+const ciInputStyle = {
+  width: '100%', padding: '10px 12px', borderRadius: '8px',
+  border: '1px solid #334155', backgroundColor: '#0f172a',
+  color: 'white', fontSize: '14px', fontFamily: 'inherit',
+  boxSizing: 'border-box',
+};
+const ciSelectStyle = { ...ciInputStyle };
+
+// ─── ClubInfo Section ─────────────────────────────────────────────────────────
+function ClubInfoSection({ clubInfo, setClubInfo }) {
+  const newDocId = () => Math.random().toString(36).slice(2, 9);
+
+  const addDocument = () => {
+    setClubInfo(prev => ({
+      ...prev,
+      documents: [
+        ...prev.documents,
+        { id: newDocId(), title: '', description: '', url: '', type: 'other', showOnInfoPage: true },
+      ],
+    }));
+  };
+
+  const updateDoc = (id, changes) => {
+    setClubInfo(prev => ({
+      ...prev,
+      documents: prev.documents.map(d => d.id === id ? { ...d, ...changes } : d),
+    }));
+  };
+
+  const removeDoc = (id) => {
+    setClubInfo(prev => ({
+      ...prev,
+      documents: prev.documents.filter(d => d.id !== id),
+    }));
+  };
+
+  return (
+    <div style={{ marginTop: '32px', borderTop: '1px solid #334155', paddingTop: '24px' }}>
+
+      {/* ── Section title ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+        <div style={{
+          width: '28px', height: '28px', borderRadius: '7px',
+          backgroundColor: '#3b82f622', border: '1px solid #3b82f644',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <span style={{ fontSize: '14px' }}>ℹ️</span>
+        </div>
+        <div>
+          <div style={{ fontSize: '14px', fontWeight: '800', color: '#f1f5f9' }}>Clubinfopagina</div>
+          <div style={{ fontSize: '11px', color: '#64748b' }}>
+            Informatie die getoond wordt op de "Mijn Club" pagina voor leden
+          </div>
+        </div>
+      </div>
+
+      {/* ── Webshop ── */}
+      <div style={{
+        backgroundColor: '#0f172a', borderRadius: '12px',
+        border: '1px solid #334155', padding: '16px', marginBottom: '14px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '16px' }}>🛒</span>
+            <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>Webshop</span>
+          </div>
+          <button
+            onClick={() => setClubInfo(prev => ({ ...prev, showWebshop: !prev.showWebshop }))}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+          >
+            <span style={{ fontSize: '11px', color: clubInfo.showWebshop ? '#22c55e' : '#64748b', fontWeight: '600' }}>
+              {clubInfo.showWebshop ? 'Zichtbaar' : 'Verborgen'}
+            </span>
+            <div style={{ width: '36px', height: '20px', borderRadius: '10px', backgroundColor: clubInfo.showWebshop ? '#22c55e' : '#334155', position: 'relative', transition: 'background-color 0.2s' }}>
+              <div style={{ width: '14px', height: '14px', borderRadius: '50%', backgroundColor: 'white', position: 'absolute', top: '3px', left: clubInfo.showWebshop ? '19px' : '3px', transition: 'left 0.2s' }} />
+            </div>
+          </button>
+        </div>
+        <div style={{ marginBottom: '10px' }}>
+          <label style={ciLabelStyle}>URL</label>
+          <input style={ciInputStyle} value={clubInfo.webshopUrl} onChange={e => setClubInfo(prev => ({ ...prev, webshopUrl: e.target.value }))} placeholder="https://shop.mijnclub.be" />
+        </div>
+        <div>
+          <label style={ciLabelStyle}>Korte omschrijving (optioneel)</label>
+          <input style={ciInputStyle} value={clubInfo.webshopDescription} onChange={e => setClubInfo(prev => ({ ...prev, webshopDescription: e.target.value }))} placeholder="Bestel je clubkledij en materiaal" />
+        </div>
+      </div>
+
+      {/* ── Bij een ongeval ── */}
+      <div style={{
+        backgroundColor: '#0f172a', borderRadius: '12px',
+        border: '1px solid #334155', padding: '16px', marginBottom: '14px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '16px' }}>🚨</span>
+            <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>Bij een ongeval</span>
+          </div>
+          <button
+            onClick={() => setClubInfo(prev => ({ ...prev, showAccident: !prev.showAccident }))}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+          >
+            <span style={{ fontSize: '11px', color: clubInfo.showAccident ? '#22c55e' : '#64748b', fontWeight: '600' }}>
+              {clubInfo.showAccident ? 'Zichtbaar' : 'Verborgen'}
+            </span>
+            <div style={{ width: '36px', height: '20px', borderRadius: '10px', backgroundColor: clubInfo.showAccident ? '#22c55e' : '#334155', position: 'relative', transition: 'background-color 0.2s' }}>
+              <div style={{ width: '14px', height: '14px', borderRadius: '50%', backgroundColor: 'white', position: 'absolute', top: '3px', left: clubInfo.showAccident ? '19px' : '3px', transition: 'left 0.2s' }} />
+            </div>
+          </button>
+        </div>
+        <label style={ciLabelStyle}>Instructies voor leden</label>
+        <textarea
+          style={{ ...ciInputStyle, minHeight: '100px', resize: 'vertical', lineHeight: 1.6, fontFamily: 'inherit' }}
+          value={clubInfo.accidentText}
+          onChange={e => setClubInfo(prev => ({ ...prev, accidentText: e.target.value }))}
+          placeholder={'Stap 1: Blijf kalm en zorg voor veiligheid.\nStap 2: Bel 112 bij ernstig letsel.\nStap 3: Contacteer de trainer (naam, tel).'}
+        />
+      </div>
+
+      {/* ── Documenten ── */}
+      <div style={{ backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #334155', padding: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '16px' }}>📄</span>
+            <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>Clubdocumenten</span>
+          </div>
+          <button
+            onClick={addDocument}
+            style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 12px', backgroundColor: '#a78bfa22', border: '1px solid #a78bfa44', borderRadius: '8px', color: '#a78bfa', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            + Document
+          </button>
+        </div>
+
+        {clubInfo.documents.length === 0 ? (
+          <p style={{ fontSize: '12px', color: '#475569', margin: 0, textAlign: 'center', padding: '12px 0' }}>
+            Nog geen documenten. Klik op "+ Document" om er een toe te voegen.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {clubInfo.documents.map((doc) => (
+              <div key={doc.id} style={{ backgroundColor: '#1e293b', borderRadius: '10px', border: '1px solid #334155', padding: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <button
+                    onClick={() => updateDoc(doc.id, { showOnInfoPage: !doc.showOnInfoPage })}
+                    style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '6px', backgroundColor: doc.showOnInfoPage ? '#22c55e22' : '#33415522', border: `1px solid ${doc.showOnInfoPage ? '#22c55e44' : '#33415544'}`, color: doc.showOnInfoPage ? '#22c55e' : '#64748b', fontSize: '10px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}
+                  >
+                    {doc.showOnInfoPage ? '👁 Zichtbaar' : '👁 Verborgen'}
+                  </button>
+                  <button
+                    onClick={() => removeDoc(doc.id)}
+                    style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px', fontSize: '16px', lineHeight: 1 }}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                  <div>
+                    <label style={ciLabelStyle}>Naam *</label>
+                    <input style={ciInputStyle} value={doc.title} onChange={e => updateDoc(doc.id, { title: e.target.value })} placeholder="Intern reglement" />
+                  </div>
+                  <div>
+                    <label style={ciLabelStyle}>Type</label>
+                    <select style={ciSelectStyle} value={doc.type} onChange={e => updateDoc(doc.id, { type: e.target.value })}>
+                      <option value="reglement">Reglement</option>
+                      <option value="privacy">Privacy</option>
+                      <option value="other">Ander</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ marginBottom: '8px' }}>
+                  <label style={ciLabelStyle}>Link of URL</label>
+                  <input style={ciInputStyle} value={doc.url} onChange={e => updateDoc(doc.id, { url: e.target.value })} placeholder="https://… of /downloads/reglement.pdf" />
+                </div>
+                <div>
+                  <label style={ciLabelStyle}>Omschrijving (optioneel)</label>
+                  <input style={ciInputStyle} value={doc.description} onChange={e => updateDoc(doc.id, { description: e.target.value })} placeholder="Laatste versie goedgekeurd op …" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Award Badge Modal ────────────────────────────────────────────────────────
 function AwardBadgeModal({ skipper, awardedByName, clubId, onClose }) {
   const [badges,     setBadges]     = useState([]);
@@ -283,7 +476,6 @@ function ClubMemberFormModal({ member, clubId, createdByUid, onClose }) {
 }
 
 // ─── Approve Member Modal ─────────────────────────────────────────────────────
-// Uses factories only — no direct Firestore imports (CLAUDE.md §1)
 function ApproveMemberModal({ request, clubId, approvedByUid, onClose }) {
   const [mode,             setMode]             = useState('existing');
   const [existingMembers,  setExistingMembers]  = useState([]);
@@ -325,17 +517,12 @@ function ApproveMemberModal({ request, clubId, approvedByUid, onClose }) {
         if (!selectedMemberId) { setError('Selecteer een bestaand lid.'); setSaving(false); return; }
         memberId = selectedMemberId;
       }
-
-      // Create the UserMemberLink via factory — no direct Firestore import
       await UserMemberLinkFactory.create(
         request.uid, clubId, memberId,
         'self', { canEdit: false, canViewHealth: false },
         approvedByUid
       );
-
-      // Approve the request via factory
       await ClubJoinRequestFactory.approve(request.id);
-
       onClose();
     } catch (e) {
       console.error('[ApproveMemberModal]', e);
@@ -455,61 +642,56 @@ export default function ClubAdmin() {
   const [activeClub, setActiveClub] = useState(null);
   const [activeClubData, setActiveClubData] = useState(null);
 
-  // Tab state — Algemeen is first
-  const [activeTab,  setActiveTab]  = useState('algemeen');
-  const [ledenSubTab, setLedenSubTab] = useState('leden'); // 'leden' | 'aanvragen'
+  const [activeTab,   setActiveTab]   = useState('algemeen');
+  const [ledenSubTab, setLedenSubTab] = useState('leden');
 
-  // Shared data
-  const [groups,             setGroups]             = useState([]);
-  const [memberCounts,       setMemberCounts]       = useState({});
-  const [clubMemberProfiles, setClubMemberProfiles] = useState([]);
+  const [groups,              setGroups]              = useState([]);
+  const [memberCounts,        setMemberCounts]        = useState({});
+  const [clubMemberProfiles,  setClubMemberProfiles]  = useState([]);
   const [allGroupMemberships, setAllGroupMemberships] = useState({});
-  // groupMembers map: { [groupId]: [...] } for LabelGrid
-  const [groupMembersMap,    setGroupMembersMap]    = useState({});
+  const [groupMembersMap,     setGroupMembersMap]     = useState({});
 
-  // Groepen tab
-  const [selectedGroup, setSelectedGroup] = useState(null);
-  const [searchTerm,    setSearchTerm]    = useState('');
-  const [showOnlyActive, setShowOnlyActive] = useState(true);
-  const [groupMembers,  setGroupMembers]  = useState([]);
-  const [dragMemberId,  setDragMemberId]  = useState(null);
-  const [dragOver,      setDragOver]      = useState(false);
+  const [selectedGroup,    setSelectedGroup]    = useState(null);
+  const [searchTerm,       setSearchTerm]       = useState('');
+  const [showOnlyActive,   setShowOnlyActive]   = useState(true);
+  const [groupMembers,     setGroupMembers]     = useState([]);
+  const [dragMemberId,     setDragMemberId]     = useState(null);
+  const [dragOver,         setDragOver]         = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [editingGroupId,   setEditingGroupId]   = useState(null);
-  const [groupForm,        setGroupForm]         = useState({ name: '', useHRM: true });
+  const [groupForm,        setGroupForm]        = useState({ name: '', useHRM: true });
 
-  // Leden tab
-  const [ledenSearch,  setLedenSearch]  = useState('');
-  const [ledenEditing, setLedenEditing] = useState(null);
-  const [ledenForm,    setLedenForm]    = useState(false);
-  const [awardTarget,  setAwardTarget]  = useState(null);
+  const [ledenSearch,       setLedenSearch]       = useState('');
+  const [ledenEditing,      setLedenEditing]      = useState(null);
+  const [ledenForm,         setLedenForm]         = useState(false);
+  const [awardTarget,       setAwardTarget]       = useState(null);
   const [editingMembership, setEditingMembership] = useState(null);
 
-  // Aanvragen
-  const [joinRequests,       setJoinRequests]       = useState([]);
-  const [requestFilter,      setRequestFilter]      = useState('pending');
-  const [rejectModalOpen,    setRejectModalOpen]    = useState(false);
-  const [rejectingRequestId, setRejectingRequestId] = useState(null);
-  const [rejectReason,       setRejectReason]       = useState('');
-  const [rejectError,        setRejectError]        = useState('');
-  const [rejectSaving,       setRejectSaving]       = useState(false);
+  const [joinRequests,        setJoinRequests]        = useState([]);
+  const [requestFilter,       setRequestFilter]       = useState('pending');
+  const [rejectModalOpen,     setRejectModalOpen]     = useState(false);
+  const [rejectingRequestId,  setRejectingRequestId]  = useState(null);
+  const [rejectReason,        setRejectReason]        = useState('');
+  const [rejectError,         setRejectError]         = useState('');
+  const [rejectSaving,        setRejectSaving]        = useState(false);
   const [approveModalRequest, setApproveModalRequest] = useState(null);
 
-  // Algemeen tab — club form
-  const [clubForm,     setClubForm]     = useState({ name: '', logoUrl: '', email: '', street: '', city: '', postalCode: '', seasonStartDay: '', seasonStartMonth: '' });
-  const [savingClub,   setSavingClub]   = useState(false);
-  const [clubSaveOk,   setClubSaveOk]   = useState(false);
+  // Algemeen tab
+  const [clubForm,   setClubForm]   = useState({ name: '', logoUrl: '', email: '', street: '', city: '', postalCode: '', seasonStartDay: '', seasonStartMonth: '' });
+  const [savingClub, setSavingClub] = useState(false);
+  const [clubSaveOk, setClubSaveOk] = useState(false);
+
+  // ClubInfo state — leeg initialiseren, gevuld vanuit activeClub useEffect
   const [clubInfo, setClubInfo] = useState({
-     webshopUrl:         club?.clubInfo?.webshopUrl         || '',
-     webshopDescription: club?.clubInfo?.webshopDescription || '',
-     showWebshop:        club?.clubInfo?.showWebshop        ?? false,
-     accidentText:       club?.clubInfo?.accidentText       || '',
-     showAccident:       club?.clubInfo?.showAccident       ?? false,
-     documents:          club?.clubInfo?.documents          || [],
+    webshopUrl:         '',
+    webshopDescription: '',
+    showWebshop:        false,
+    accidentText:       '',
+    showAccident:       false,
+    documents:          [],
   });
 
-  // Disciplines & season
-  const { disciplines } = useDisciplines();
+  const { disciplines }   = useDisciplines();
   const { currentSeason } = useCurrentSeason(activeClub?.id, activeClubData);
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
@@ -520,7 +702,6 @@ export default function ClubAdmin() {
       const user = { id: uid, ...snap.data() };
       setCurrentUser(user);
       const role = user.role || 'user';
-
       if (role === 'superadmin') {
         setIsSuperAdmin(true);
         ClubFactory.getAll(all => setAdminClubs(all));
@@ -547,27 +728,27 @@ export default function ClubAdmin() {
     if (adminClubs.length === 1) setActiveClub(adminClubs[0]);
   }, [adminClubs]);
 
-  // Sync activeClubData whenever activeClub changes
+  // Sync activeClubData + forms whenever activeClub changes
   useEffect(() => {
     if (!activeClub) return;
     setActiveClubData(activeClub);
     setClubForm({
       name:             activeClub.name             || '',
-      logoUrl:          activeClub.logoUrl           || '',
-      email:            activeClub.email             || '',
-      street:           activeClub.street            || '',
-      city:             activeClub.city              || '',
-      postalCode:       activeClub.postalCode        || '',
-      seasonStartDay:   activeClub.seasonStartDay    || '',
-      seasonStartMonth: activeClub.seasonStartMonth  || '',
-      setClubInfo({
-        webshopUrl:         activeClub.clubInfo?.webshopUrl         || '',
-        webshopDescription: activeClub.clubInfo?.webshopDescription || '',
-        showWebshop:        activeClub.clubInfo?.showWebshop        ?? false,
-        accidentText:       activeClub.clubInfo?.accidentText       || '',
-        showAccident:       activeClub.clubInfo?.showAccident       ?? false,
-        documents:          activeClub.clubInfo?.documents          || [],
-      });
+      logoUrl:          activeClub.logoUrl          || '',
+      email:            activeClub.email            || '',
+      street:           activeClub.street           || '',
+      city:             activeClub.city             || '',
+      postalCode:       activeClub.postalCode       || '',
+      seasonStartDay:   activeClub.seasonStartDay   || '',
+      seasonStartMonth: activeClub.seasonStartMonth || '',
+    });
+    setClubInfo({
+      webshopUrl:         activeClub.clubInfo?.webshopUrl         || '',
+      webshopDescription: activeClub.clubInfo?.webshopDescription || '',
+      showWebshop:        activeClub.clubInfo?.showWebshop        ?? false,
+      accidentText:       activeClub.clubInfo?.accidentText       || '',
+      showAccident:       activeClub.clubInfo?.showAccident       ?? false,
+      documents:          activeClub.clubInfo?.documents          || [],
     });
   }, [activeClub]);
 
@@ -584,15 +765,12 @@ export default function ClubAdmin() {
     return () => u();
   }, [activeClub]);
 
-  // ── All group memberships (for "unassigned" sidebar + LabelGrid) ───────────
   useEffect(() => {
     if (!activeClub || groups.length === 0) return;
-    const memberMap  = {};
-    const gmMap      = {};
-    const unsubs     = [];
+    const memberMap = {};
+    const unsubs    = [];
     groups.forEach(g => {
       const u = GroupFactory.getMembersByGroup(activeClub.id, g.id, mems => {
-        gmMap[g.id] = mems;
         setGroupMembersMap(prev => ({ ...prev, [g.id]: mems }));
         mems.forEach(m => {
           const mid = m.memberId || m.id;
@@ -608,21 +786,18 @@ export default function ClubAdmin() {
     return () => unsubs.forEach(u => u && u());
   }, [activeClub, groups]);
 
-  // ── Club members (always loaded) ───────────────────────────────────────────
   useEffect(() => {
     if (!activeClub) return;
     const u = ClubMemberFactory.getAll(activeClub.id, setClubMemberProfiles);
     return () => u();
   }, [activeClub]);
 
-  // ── Group detail members ───────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedGroup || !activeClub) return;
     const u = GroupFactory.getMembersByGroup(activeClub.id, selectedGroup.id, setGroupMembers);
     return () => u();
   }, [selectedGroup, activeClub]);
 
-  // ── Join requests ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!activeClub) return;
     const u = ClubJoinRequestFactory.getAll(all => {
@@ -637,27 +812,19 @@ export default function ClubAdmin() {
   }, [activeClub]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
-  const currentUserName    = currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() : 'Admin';
-  const pendingCount       = joinRequests.filter(r => r.status === 'pending').length;
-  const filteredRequests   = requestFilter === 'all' ? joinRequests : joinRequests.filter(r => r.status === requestFilter);
-  const memberIdsInGroup   = new Set(groupMembers.map(m => m.memberId || m.id));
-  const assignedMemberIds  = new Set(Object.keys(allGroupMemberships).filter(mid => allGroupMemberships[mid]?.length > 0));
-  const unassignedMembers  = clubMemberProfiles.filter(p => !assignedMemberIds.has(p.id));
-  const availableToAdd     = clubMemberProfiles.filter(p => !memberIdsInGroup.has(p.id));
-  const filteredAvailable  = availableToAdd.filter(p => `${p.firstName} ${p.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()));
-  const filteredLeden      = clubMemberProfiles.filter(m => `${m.firstName} ${m.lastName}`.toLowerCase().includes(ledenSearch.toLowerCase()));
-  const getMemberProfile   = (memberId) => clubMemberProfiles.find(p => p.id === memberId) || null;
-  const showClubPicker     = isSuperAdmin || adminClubs.length > 1;
+  const currentUserName   = currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() : 'Admin';
+  const pendingCount      = joinRequests.filter(r => r.status === 'pending').length;
+  const filteredRequests  = requestFilter === 'all' ? joinRequests : joinRequests.filter(r => r.status === requestFilter);
+  const memberIdsInGroup  = new Set(groupMembers.map(m => m.memberId || m.id));
+  const assignedMemberIds = new Set(Object.keys(allGroupMemberships).filter(mid => allGroupMemberships[mid]?.length > 0));
+  const unassignedMembers = clubMemberProfiles.filter(p => !assignedMemberIds.has(p.id));
+  const availableToAdd    = clubMemberProfiles.filter(p => !memberIdsInGroup.has(p.id));
+  const filteredAvailable = availableToAdd.filter(p => `${p.firstName} ${p.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredLeden     = clubMemberProfiles.filter(m => `${m.firstName} ${m.lastName}`.toLowerCase().includes(ledenSearch.toLowerCase()));
+  const getMemberProfile  = (memberId) => clubMemberProfiles.find(p => p.id === memberId) || null;
+  const showClubPicker    = isSuperAdmin || adminClubs.length > 1;
 
   // ── Handlers ──────────────────────────────────────────────────────────────
-  const handleGroupSubmit = async (e) => {
-    e.preventDefault();
-    editingGroupId
-      ? await GroupFactory.update(activeClub.id, editingGroupId, groupForm)
-      : await GroupFactory.create(activeClub.id, groupForm);
-    setIsGroupModalOpen(false); setEditingGroupId(null);
-  };
-
   const handleAddMember = async (profileId) => {
     await GroupFactory.addMember(activeClub.id, selectedGroup.id, profileId, {
       isSkipper: true, isCoach: false, startMembership: new Date(), endMembership: null,
@@ -691,7 +858,6 @@ export default function ClubAdmin() {
 
   const handleSaveClub = async () => {
     setSavingClub(true);
-    const newDocId = () => Math.random().toString(36).slice(2, 9);
     try {
       const updates = {
         name:             clubForm.name.trim(),
@@ -705,17 +871,14 @@ export default function ClubAdmin() {
         clubInfo,
       };
       await ClubFactory.update(activeClub.id, updates);
-      await ClubFactory.update(clubId, { clubInfo });
       setActiveClubData(prev => ({ ...prev, ...updates }));
       setClubSaveOk(true);
       setTimeout(() => setClubSaveOk(false), 2500);
-      
     } catch (e) { console.error(e); alert('Opslaan mislukt.'); }
     finally { setSavingClub(false); }
   };
 
   // ── Tab definitions ────────────────────────────────────────────────────────
-  // Order: Algemeen → Leden → Groepen → Seizoenen → Labels
   const TABS = [
     { key: 'algemeen',  label: 'Algemeen'  },
     { key: 'leden',     label: 'Leden',    badge: pendingCount },
@@ -779,7 +942,6 @@ export default function ClubAdmin() {
     <div style={s.page}>
       <style>{css}</style>
 
-      {/* ── Header ── */}
       <header style={s.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           {activeClub.logoUrl
@@ -788,10 +950,8 @@ export default function ClubAdmin() {
           }
           <span style={s.headerTitle}>{activeClubData?.name || activeClub.name}</span>
           <span style={{ fontSize: '11px', color: '#475569', fontWeight: '400' }}>Clubbeheer</span>
-
           {showClubPicker && (
-            <select
-              value={activeClub.id}
+            <select value={activeClub.id}
               onChange={e => {
                 const club = adminClubs.find(c => c.id === e.target.value);
                 if (club) { setActiveClub(club); setSelectedGroup(null); setGroups([]); setActiveTab('algemeen'); }
@@ -803,22 +963,13 @@ export default function ClubAdmin() {
           )}
         </div>
 
-        {/* Tab bar — same style as badge-beheer */}
         <div style={{ display: 'flex', borderBottom: '1px solid #334155', marginTop: '4px' }}>
           {TABS.map(tab => {
             const isActive = activeTab === tab.key;
             return (
               <button key={tab.key}
                 onClick={() => { setActiveTab(tab.key); setSelectedGroup(null); setSearchTerm(''); }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '6px',
-                  padding: '12px 16px', background: 'none', border: 'none',
-                  borderBottom: `2px solid ${isActive ? '#22c55e' : 'transparent'}`,
-                  cursor: 'pointer', fontSize: '13px', fontWeight: isActive ? '700' : '500',
-                  color: isActive ? '#22c55e' : '#64748b',
-                  fontFamily: 'inherit', whiteSpace: 'nowrap', position: 'relative',
-                  transition: 'color 0.15s, border-color 0.15s',
-                }}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '12px 16px', background: 'none', border: 'none', borderBottom: `2px solid ${isActive ? '#22c55e' : 'transparent'}`, cursor: 'pointer', fontSize: '13px', fontWeight: isActive ? '700' : '500', color: isActive ? '#22c55e' : '#64748b', fontFamily: 'inherit', whiteSpace: 'nowrap', position: 'relative', transition: 'color 0.15s, border-color 0.15s' }}
               >
                 {tab.label}
                 {tab.badge > 0 && (
@@ -839,23 +990,16 @@ export default function ClubAdmin() {
           <div style={{ maxWidth: '600px' }}>
             <div style={s.sectionTitle}><Building2 size={16} color="#22c55e" /> Clubgegevens</div>
 
-            {/* Logo */}
             <div style={s.fieldCard}>
               <label style={s.fieldLabel}>Logo</label>
-              <ClubLogoUploader
-                currentUrl={clubForm.logoUrl}
-                clubId={activeClub.id}
-                onUploaded={url => setClubForm(f => ({ ...f, logoUrl: url }))}
-              />
+              <ClubLogoUploader currentUrl={clubForm.logoUrl} clubId={activeClub.id} onUploaded={url => setClubForm(f => ({ ...f, logoUrl: url }))} />
             </div>
 
-            {/* Name */}
             <div style={s.fieldCard}>
               <label style={s.fieldLabel}>Clubnaam *</label>
               <input style={s.input} value={clubForm.name} onChange={e => setClubForm(f => ({ ...f, name: e.target.value }))} placeholder="Antwerp Ropes" />
             </div>
 
-            {/* Contact */}
             <div style={s.fieldCard}>
               <label style={s.fieldLabel}>Contactgegevens</label>
               <input style={{ ...s.input, marginBottom: '8px' }} value={clubForm.email} onChange={e => setClubForm(f => ({ ...f, email: e.target.value }))} placeholder="info@mijnclub.be" type="email" />
@@ -866,7 +1010,6 @@ export default function ClubAdmin() {
               </div>
             </div>
 
-            {/* Season start */}
             <div style={s.fieldCard}>
               <label style={s.fieldLabel}>Startdag seizoen</label>
               <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '10px', lineHeight: 1.5 }}>
@@ -889,306 +1032,20 @@ export default function ClubAdmin() {
               </div>
             </div>
 
-const ClubInfoSection = ({ clubInfo, setClubInfo }) => {
-  const newDocId = () => Math.random().toString(36).slice(2, 9);
- 
-  const addDocument = () => {
-    setClubInfo(prev => ({
-      ...prev,
-      documents: [
-        ...prev.documents,
-        { id: newDocId(), title: '', description: '', url: '', type: 'other', showOnInfoPage: true },
-      ],
-    }));
-  };
- 
-  const updateDoc = (id, changes) => {
-    setClubInfo(prev => ({
-      ...prev,
-      documents: prev.documents.map(d => d.id === id ? { ...d, ...changes } : d),
-    }));
-  };
- 
-  const removeDoc = (id) => {
-    setClubInfo(prev => ({
-      ...prev,
-      documents: prev.documents.filter(d => d.id !== id),
-    }));
-  };
- 
-  return (
-    <div style={{ marginTop: '32px', borderTop: '1px solid #334155', paddingTop: '24px' }}>
- 
-      {/* ── Section title ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
-        <div style={{
-          width: '28px', height: '28px', borderRadius: '7px',
-          backgroundColor: '#3b82f622', border: '1px solid #3b82f644',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          {/* Info icon — use lucide Info */}
-          <span style={{ fontSize: '14px' }}>ℹ️</span>
-        </div>
-        <div>
-          <div style={{ fontSize: '14px', fontWeight: '800', color: '#f1f5f9' }}>Clubinfopagina</div>
-          <div style={{ fontSize: '11px', color: '#64748b' }}>
-            Informatie die getoond wordt op de "Mijn Club" pagina voor leden
-          </div>
-        </div>
-      </div>
- 
-      {/* ── Webshop ── */}
-      <div style={{
-        backgroundColor: '#0f172a', borderRadius: '12px',
-        border: '1px solid #334155', padding: '16px', marginBottom: '14px',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '16px' }}>🛒</span>
-            <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>Webshop</span>
-          </div>
-          {/* Toggle */}
-          <button
-            onClick={() => setClubInfo(prev => ({ ...prev, showWebshop: !prev.showWebshop }))}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '6px',
-              background: 'none', border: 'none', cursor: 'pointer',
-              padding: 0, fontFamily: 'inherit',
-            }}
-          >
-            <span style={{ fontSize: '11px', color: clubInfo.showWebshop ? '#22c55e' : '#64748b', fontWeight: '600' }}>
-              {clubInfo.showWebshop ? 'Zichtbaar' : 'Verborgen'}
-            </span>
-            <div style={{
-              width: '36px', height: '20px', borderRadius: '10px',
-              backgroundColor: clubInfo.showWebshop ? '#22c55e' : '#334155',
-              position: 'relative', transition: 'background-color 0.2s',
-            }}>
-              <div style={{
-                width: '14px', height: '14px', borderRadius: '50%',
-                backgroundColor: 'white', position: 'absolute', top: '3px',
-                left: clubInfo.showWebshop ? '19px' : '3px',
-                transition: 'left 0.2s',
-              }} />
+            {/* ── ClubInfo sectie ── */}
+            <ClubInfoSection clubInfo={clubInfo} setClubInfo={setClubInfo} />
+
+            <div style={{ marginTop: '24px' }}>
+              <button onClick={handleSaveClub} disabled={savingClub} style={{ ...bs.primary, opacity: savingClub ? 0.65 : 1 }}>
+                {clubSaveOk ? <><CheckCircle2 size={15} /> Opgeslagen!</> : <><Save size={15} /> {savingClub ? 'Opslaan…' : 'Wijzigingen opslaan'}</>}
+              </button>
             </div>
-          </button>
-        </div>
-        <div style={{ marginBottom: '10px' }}>
-          <label style={labelStyle}>URL</label>
-          <input
-            style={inputStyle}
-            value={clubInfo.webshopUrl}
-            onChange={e => setClubInfo(prev => ({ ...prev, webshopUrl: e.target.value }))}
-            placeholder="https://shop.mijnclub.be"
-          />
-        </div>
-        <div>
-          <label style={labelStyle}>Korte omschrijving (optioneel)</label>
-          <input
-            style={inputStyle}
-            value={clubInfo.webshopDescription}
-            onChange={e => setClubInfo(prev => ({ ...prev, webshopDescription: e.target.value }))}
-            placeholder="Bestel je clubkledij en materiaal"
-          />
-        </div>
-      </div>
- 
-      {/* ── Bij een ongeval ── */}
-      <div style={{
-        backgroundColor: '#0f172a', borderRadius: '12px',
-        border: '1px solid #334155', padding: '16px', marginBottom: '14px',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '16px' }}>🚨</span>
-            <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>Bij een ongeval</span>
-          </div>
-          <button
-            onClick={() => setClubInfo(prev => ({ ...prev, showAccident: !prev.showAccident }))}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '6px',
-              background: 'none', border: 'none', cursor: 'pointer',
-              padding: 0, fontFamily: 'inherit',
-            }}
-          >
-            <span style={{ fontSize: '11px', color: clubInfo.showAccident ? '#22c55e' : '#64748b', fontWeight: '600' }}>
-              {clubInfo.showAccident ? 'Zichtbaar' : 'Verborgen'}
-            </span>
-            <div style={{
-              width: '36px', height: '20px', borderRadius: '10px',
-              backgroundColor: clubInfo.showAccident ? '#22c55e' : '#334155',
-              position: 'relative', transition: 'background-color 0.2s',
-            }}>
-              <div style={{
-                width: '14px', height: '14px', borderRadius: '50%',
-                backgroundColor: 'white', position: 'absolute', top: '3px',
-                left: clubInfo.showAccident ? '19px' : '3px',
-                transition: 'left 0.2s',
-              }} />
-            </div>
-          </button>
-        </div>
-        <label style={labelStyle}>Instructies voor leden</label>
-        <textarea
-          style={{
-            ...inputStyle,
-            minHeight: '100px', resize: 'vertical',
-            lineHeight: 1.6, fontFamily: 'inherit',
-          }}
-          value={clubInfo.accidentText}
-          onChange={e => setClubInfo(prev => ({ ...prev, accidentText: e.target.value }))}
-          placeholder={`Stap 1: Blijf kalm en zorg voor veiligheid.\nStap 2: Bel 112 bij ernstig letsel.\nStap 3: Contacteer de trainer (naam, tel).`}
-        />
-      </div>
- 
-      {/* ── Documenten ── */}
-      <div style={{
-        backgroundColor: '#0f172a', borderRadius: '12px',
-        border: '1px solid #334155', padding: '16px',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '16px' }}>📄</span>
-            <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>Clubdocumenten</span>
-          </div>
-          <button
-            onClick={addDocument}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '5px',
-              padding: '6px 12px', backgroundColor: '#a78bfa22',
-              border: '1px solid #a78bfa44', borderRadius: '8px',
-              color: '#a78bfa', fontSize: '12px', fontWeight: '600',
-              cursor: 'pointer', fontFamily: 'inherit',
-            }}
-          >
-            + Document
-          </button>
-        </div>
- 
-        {clubInfo.documents.length === 0 ? (
-          <p style={{ fontSize: '12px', color: '#475569', margin: 0, textAlign: 'center', padding: '12px 0' }}>
-            Nog geen documenten. Klik op "+ Document" om er een toe te voegen.
-          </p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {clubInfo.documents.map((doc) => (
-              <div key={doc.id} style={{
-                backgroundColor: '#1e293b', borderRadius: '10px',
-                border: '1px solid #334155', padding: '12px',
-              }}>
-                {/* Doc header row */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {/* Zichtbaar toggle */}
-                    <button
-                      onClick={() => updateDoc(doc.id, { showOnInfoPage: !doc.showOnInfoPage })}
-                      title={doc.showOnInfoPage ? 'Verberg op infopagina' : 'Toon op infopagina'}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: '4px',
-                        padding: '3px 8px', borderRadius: '6px',
-                        backgroundColor: doc.showOnInfoPage ? '#22c55e22' : '#33415522',
-                        border: `1px solid ${doc.showOnInfoPage ? '#22c55e44' : '#33415544'}`,
-                        color: doc.showOnInfoPage ? '#22c55e' : '#64748b',
-                        fontSize: '10px', fontWeight: '700',
-                        cursor: 'pointer', fontFamily: 'inherit',
-                      }}
-                    >
-                      {doc.showOnInfoPage ? '👁 Zichtbaar' : '👁 Verborgen'}
-                    </button>
-                  </div>
-                  <button
-                    onClick={() => removeDoc(doc.id)}
-                    style={{
-                      background: 'none', border: 'none',
-                      color: '#ef4444', cursor: 'pointer', padding: '2px',
-                      fontSize: '16px', lineHeight: 1,
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
- 
-                {/* Fields */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
-                  <div>
-                    <label style={labelStyle}>Naam *</label>
-                    <input
-                      style={inputStyle}
-                      value={doc.title}
-                      onChange={e => updateDoc(doc.id, { title: e.target.value })}
-                      placeholder="Intern reglement"
-                    />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Type</label>
-                    <select
-                      style={selectStyle}
-                      value={doc.type}
-                      onChange={e => updateDoc(doc.id, { type: e.target.value })}
-                    >
-                      <option value="reglement">Reglement</option>
-                      <option value="privacy">Privacy</option>
-                      <option value="other">Ander</option>
-                    </select>
-                  </div>
-                </div>
-                <div style={{ marginBottom: '8px' }}>
-                  <label style={labelStyle}>Link of URL</label>
-                  <input
-                    style={inputStyle}
-                    value={doc.url}
-                    onChange={e => updateDoc(doc.id, { url: e.target.value })}
-                    placeholder="https://… of /downloads/reglement.pdf"
-                  />
-                </div>
-                <div>
-                  <label style={labelStyle}>Omschrijving (optioneel)</label>
-                  <input
-                    style={inputStyle}
-                    value={doc.description}
-                    onChange={e => updateDoc(doc.id, { description: e.target.value })}
-                    placeholder="Laatste versie goedgekeurd op …"
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
- 
-// ─── Shared input styles (same as rest of clubadmin.js) ───────────────────────
-const labelStyle = {
-  display: 'block', fontSize: '11px', fontWeight: '700',
-  color: '#64748b', textTransform: 'uppercase',
-  letterSpacing: '0.4px', marginBottom: '5px',
-};
- 
-const inputStyle = {
-  width: '100%', padding: '10px 12px', borderRadius: '8px',
-  border: '1px solid #334155', backgroundColor: '#0f172a',
-  color: 'white', fontSize: '14px', fontFamily: 'inherit',
-  boxSizing: 'border-box',
-};
- 
-const selectStyle = {
-  ...inputStyle,
-};
- 
-export { ClubInfoSection };
-                    
-            <button onClick={handleSaveClub} disabled={savingClub} style={{ ...bs.primary, opacity: savingClub ? 0.65 : 1 }}>
-              {clubSaveOk ? <><CheckCircle2 size={15} /> Opgeslagen!</> : <><Save size={15} /> {savingClub ? 'Opslaan…' : 'Wijzigingen opslaan'}</>}
-            </button>
           </div>
         )}
 
         {/* ═══ LEDEN ═══ */}
         {activeTab === 'leden' && (
           <div>
-            {/* Sub-tabs */}
             <div style={{ display: 'flex', borderBottom: '1px solid #334155', marginBottom: '18px' }}>
               {[
                 { key: 'leden',     label: 'Leden' },
@@ -1196,14 +1053,7 @@ export { ClubInfoSection };
               ].map(st => {
                 const isActive = ledenSubTab === st.key;
                 return (
-                  <button key={st.key} onClick={() => setLedenSubTab(st.key)} style={{
-                    display: 'flex', alignItems: 'center', gap: '6px',
-                    padding: '10px 14px', background: 'none', border: 'none',
-                    borderBottom: `2px solid ${isActive ? '#3b82f6' : 'transparent'}`,
-                    cursor: 'pointer', fontSize: '13px', fontWeight: isActive ? '700' : '500',
-                    color: isActive ? '#60a5fa' : '#64748b',
-                    fontFamily: 'inherit', transition: 'color 0.15s',
-                  }}>
+                  <button key={st.key} onClick={() => setLedenSubTab(st.key)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 14px', background: 'none', border: 'none', borderBottom: `2px solid ${isActive ? '#3b82f6' : 'transparent'}`, cursor: 'pointer', fontSize: '13px', fontWeight: isActive ? '700' : '500', color: isActive ? '#60a5fa' : '#64748b', fontFamily: 'inherit', transition: 'color 0.15s' }}>
                     {st.label}
                     {st.badge > 0 && (
                       <span style={{ width: '16px', height: '16px', borderRadius: '50%', backgroundColor: '#ef4444', color: 'white', fontSize: '9px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1215,7 +1065,6 @@ export { ClubInfoSection };
               })}
             </div>
 
-            {/* Sub-tab: Leden */}
             {ledenSubTab === 'leden' && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
@@ -1229,12 +1078,10 @@ export { ClubInfoSection };
                     <UserPlus size={15} /> Nieuw lid
                   </button>
                 </div>
-
                 <div style={{ position: 'relative', marginBottom: '14px' }}>
                   <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
                   <input placeholder="Zoek op naam…" value={ledenSearch} onChange={e => setLedenSearch(e.target.value)} style={{ ...s.searchInput, paddingLeft: '36px', width: '100%' }} />
                 </div>
-
                 {filteredLeden.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '50px 0', color: '#475569' }}>
                     <Users size={36} color="#334155" style={{ marginBottom: '10px' }} />
@@ -1288,7 +1135,6 @@ export { ClubInfoSection };
               </div>
             )}
 
-            {/* Sub-tab: Aanvragen */}
             {ledenSubTab === 'aanvragen' && (
               <div>
                 <div style={{ marginBottom: '14px' }}>
@@ -1312,7 +1158,6 @@ export { ClubInfoSection };
                     </button>
                   ))}
                 </div>
-
                 {filteredRequests.length === 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px 0' }}>
                     <Bell size={36} color="#334155" />
@@ -1426,7 +1271,6 @@ export { ClubInfoSection };
                   </div>
                 </div>
 
-                {/* Unassigned */}
                 <div style={{ backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #334155', padding: '14px', position: 'sticky', top: '80px' }}>
                   <div style={{ fontWeight: '700', fontSize: '13px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <AlertCircle size={13} color="#f59e0b" /> Niet ingedeeld
@@ -1463,7 +1307,6 @@ export { ClubInfoSection };
               </div>
             )}
 
-            {/* Group detail */}
             {selectedGroup && (
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', fontSize: '15px', fontWeight: '700', color: '#f1f5f9' }}>
@@ -1471,12 +1314,10 @@ export { ClubInfoSection };
                   <span>{selectedGroup.name}</span>
                   <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '400' }}>— {groupMembers.length} leden</span>
                 </div>
-
                 <label style={{ display: 'flex', alignItems: 'center', fontSize: '13px', color: '#94a3b8', cursor: 'pointer', marginBottom: '14px' }}>
                   <input type="checkbox" checked={showOnlyActive} onChange={e => setShowOnlyActive(e.target.checked)} style={{ marginRight: '6px' }} />
                   Alleen actieve leden
                 </label>
-
                 <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', overflow: 'hidden', marginBottom: '24px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 110px 110px 80px', padding: '8px 14px', backgroundColor: '#0f172a', fontSize: '10px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid #334155' }}>
                     <span>Naam</span><span style={{ textAlign: 'center' }}>Skipper</span><span style={{ textAlign: 'center' }}>Coach</span><span>Start</span><span>Einde</span><span style={{ textAlign: 'right' }}>Acties</span>
@@ -1523,7 +1364,6 @@ export { ClubInfoSection };
                   })}
                   {groupMembers.length === 0 && <div style={{ padding: '24px', textAlign: 'center', color: '#475569', fontSize: '13px' }}>Geen leden in deze groep.</div>}
                 </div>
-
                 <div style={{ backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #334155', padding: '16px' }}>
                   <div style={{ fontSize: '13px', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>Lid toevoegen</div>
                   <div style={{ position: 'relative', marginBottom: '10px' }}>
@@ -1558,15 +1398,7 @@ export { ClubInfoSection };
         {activeTab === 'labels' && (
           <div>
             <div style={s.sectionTitle}><Award size={16} color="#f59e0b" /> Niveaulabels</div>
-            <LabelGrid
-              clubId={activeClub.id}
-              season={currentSeason}
-              members={clubMemberProfiles}
-              groupMembersMap={groupMembersMap}
-              groups={groups}
-              uid={uid}
-              disciplines={disciplines}
-            />
+            <LabelGrid clubId={activeClub.id} season={currentSeason} members={clubMemberProfiles} groupMembersMap={groupMembersMap} groups={groups} uid={uid} disciplines={disciplines} />
           </div>
         )}
 
@@ -1654,39 +1486,39 @@ const css = `
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const s = {
-  page:        { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif' },
-  spinner:     { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #22c55e', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
-  header:      { backgroundColor: '#1e293b', borderBottom: '1px solid #334155', padding: '12px 16px', position: 'sticky', top: 0, zIndex: 100, display: 'flex', flexDirection: 'column', gap: '8px' },
-  headerTitle: { fontWeight: '800', fontSize: '16px', color: '#f1f5f9' },
-  content:     { padding: '20px 16px', maxWidth: '960px', margin: '0 auto' },
-  sectionTitle:{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800', fontSize: '16px', color: '#f1f5f9', marginBottom: '16px' },
-  fieldCard:   { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '16px', marginBottom: '12px' },
-  backBtn:     { background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px', fontWeight: '600', padding: '0 0 14px 0' },
-  iconBtn:     { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center' },
-  groupCard:   { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '14px', display: 'flex', flexDirection: 'column', transition: 'border-color 0.15s' },
-  countBadge:  { fontSize: '10px', padding: '3px 8px', backgroundColor: '#0f172a', borderRadius: '4px', color: '#94a3b8' },
-  hrmBadge:    { fontSize: '10px', padding: '3px 8px', borderRadius: '4px', color: 'white', display: 'flex', alignItems: 'center', gap: '4px' },
-  memberCard:  { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '14px' },
-  searchInput: { padding: '10px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white', fontSize: '14px' },
-  emptyText:   { color: '#475569', fontSize: '14px', textAlign: 'center', padding: '20px 0' },
-  filterPills: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' },
-  filterPill:  { padding: '6px 12px', borderRadius: '20px', border: '1px solid #334155', backgroundColor: 'transparent', color: '#64748b', cursor: 'pointer', fontSize: '12px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' },
+  page:           { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif' },
+  spinner:        { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #22c55e', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
+  header:         { backgroundColor: '#1e293b', borderBottom: '1px solid #334155', padding: '12px 16px', position: 'sticky', top: 0, zIndex: 100, display: 'flex', flexDirection: 'column', gap: '8px' },
+  headerTitle:    { fontWeight: '800', fontSize: '16px', color: '#f1f5f9' },
+  content:        { padding: '20px 16px', maxWidth: '960px', margin: '0 auto' },
+  sectionTitle:   { display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800', fontSize: '16px', color: '#f1f5f9', marginBottom: '16px' },
+  fieldCard:      { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '16px', marginBottom: '12px' },
+  backBtn:        { background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px', fontWeight: '600', padding: '0 0 14px 0' },
+  iconBtn:        { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center' },
+  groupCard:      { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '14px', display: 'flex', flexDirection: 'column', transition: 'border-color 0.15s' },
+  countBadge:     { fontSize: '10px', padding: '3px 8px', backgroundColor: '#0f172a', borderRadius: '4px', color: '#94a3b8' },
+  hrmBadge:       { fontSize: '10px', padding: '3px 8px', borderRadius: '4px', color: 'white', display: 'flex', alignItems: 'center', gap: '4px' },
+  memberCard:     { backgroundColor: '#1e293b', borderRadius: '12px', border: '1px solid #334155', padding: '14px' },
+  searchInput:    { padding: '10px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: 'white', fontSize: '14px' },
+  emptyText:      { color: '#475569', fontSize: '14px', textAlign: 'center', padding: '20px 0' },
+  filterPills:    { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' },
+  filterPill:     { padding: '6px 12px', borderRadius: '20px', border: '1px solid #334155', backgroundColor: 'transparent', color: '#64748b', cursor: 'pointer', fontSize: '12px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' },
   filterPillActive: { backgroundColor: '#334155', color: '#f1f5f9', borderColor: '#475569' },
-  pillCount:   { padding: '1px 6px', borderRadius: '10px', fontSize: '10px', fontWeight: 'bold' },
+  pillCount:      { padding: '1px 6px', borderRadius: '10px', fontSize: '10px', fontWeight: 'bold' },
   requestCard:    { backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid', padding: '16px' },
   requestAvatar:  { width: '42px', height: '42px', borderRadius: '10px', backgroundColor: '#a78bfa22', border: '1px solid #a78bfa44', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '14px', color: '#a78bfa', flexShrink: 0 },
   statusBadge:    { display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '700' },
   requestMessage: { marginTop: '10px', backgroundColor: '#0f172a', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', color: '#94a3b8', fontStyle: 'italic', borderLeft: '3px solid #334155', display: 'flex', alignItems: 'flex-start', gap: '6px' },
   rejectionReason:{ marginTop: '10px', backgroundColor: '#ef444411', borderRadius: '8px', padding: '10px 12px', fontSize: '13px', color: '#ef4444', borderLeft: '3px solid #ef4444', display: 'flex', alignItems: 'flex-start', gap: '8px' },
-  approveBtn:  { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px', backgroundColor: '#22c55e', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '700', fontSize: '13px', cursor: 'pointer' },
-  rejectBtn:   { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px', backgroundColor: '#ef4444', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '700', fontSize: '13px', cursor: 'pointer' },
-  modalOverlay:{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 500 },
-  modal:       { backgroundColor: '#1e293b', borderRadius: '20px 20px 0 0', padding: '24px', width: '100%', maxWidth: '560px', border: '1px solid #334155', maxHeight: '90vh', overflowY: 'auto' },
-  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', color: '#f1f5f9' },
-  fieldLabel:  { display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: '600' },
-  input:       { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px', fontFamily: 'inherit', boxSizing: 'border-box' },
-  textarea:    { width: '100%', minHeight: '100px', padding: '12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px', resize: 'vertical', lineHeight: 1.5, boxSizing: 'border-box' },
-  saveBtn:     { width: '100%', backgroundColor: '#22c55e', border: 'none', color: 'white', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' },
-  cancelBtn:   { padding: '12px', backgroundColor: '#475569', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '600', cursor: 'pointer', fontSize: '13px' },
-  errorBanner: { display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ef444422', color: '#ef4444', fontSize: '13px', padding: '10px 12px', borderRadius: '8px', marginTop: '10px', border: '1px solid #ef444433' },
+  approveBtn:     { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px', backgroundColor: '#22c55e', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '700', fontSize: '13px', cursor: 'pointer' },
+  rejectBtn:      { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px', backgroundColor: '#ef4444', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '700', fontSize: '13px', cursor: 'pointer' },
+  modalOverlay:   { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 500 },
+  modal:          { backgroundColor: '#1e293b', borderRadius: '20px 20px 0 0', padding: '24px', width: '100%', maxWidth: '560px', border: '1px solid #334155', maxHeight: '90vh', overflowY: 'auto' },
+  modalHeader:    { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', color: '#f1f5f9' },
+  fieldLabel:     { display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: '600' },
+  input:          { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px', fontFamily: 'inherit', boxSizing: 'border-box' },
+  textarea:       { width: '100%', minHeight: '100px', padding: '12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px', resize: 'vertical', lineHeight: 1.5, boxSizing: 'border-box' },
+  saveBtn:        { width: '100%', backgroundColor: '#22c55e', border: 'none', color: 'white', padding: '10px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' },
+  cancelBtn:      { padding: '12px', backgroundColor: '#475569', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '600', cursor: 'pointer', fontSize: '13px' },
+  errorBanner:    { display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ef444422', color: '#ef4444', fontSize: '13px', padding: '10px 12px', borderRadius: '8px', marginTop: '10px', border: '1px solid #ef444433' },
 };
