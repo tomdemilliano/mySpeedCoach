@@ -146,25 +146,41 @@ export default function RegisterPage() {
   // ── Step 0: Create Firebase Auth account ─────────────────────────────────
   const handleCredentials = async () => {
     setError('');
-    if (!email.trim())       { setError('Vul een e-mailadres in.'); return; }
-    if (password.length < 8) { setError('Wachtwoord moet minimaal 8 tekens zijn.'); return; }
-    if (password !== confirm) { setError('Wachtwoorden komen niet overeen.'); return; }
+    if (!email.trim())        { setError('Vul een e-mailadres in.'); return; }
+    if (password.length < 8)  { setError('Wachtwoord moet minimaal 8 tekens zijn.'); return; }
+    if (password !== confirm)  { setError('Wachtwoorden komen niet overeen.'); return; }
     setLoading(true);
     try {
       await AuthFactory.registerWithEmail(email.trim(), password);
-
-      // Persist step 1 immediately so a page-close won't lose progress.
-      // AuthContext will have set uid by now via onAuthStateChanged,
-      // but we use getCurrentUser() as a synchronous fallback.
+      
+      // Wacht tot AuthContext het user-document aangemaakt heeft.
+      // onAuthStateChanged in AuthContext.js doet een setDoc, maar dat is asynchroon.    
+      // We pollen kort tot het document bestaat voor we registrationStep schrijven.
       const currentUid = AuthFactory.getCurrentUser()?.uid;
       if (currentUid) {
-        await UserFactory.updateProfile(currentUid, { registrationStep: 1 });
+        let snap = await UserFactory.get(currentUid);
+        let attempts = 0;
+        while (!snap.exists() && attempts < 10) {
+          await new Promise(r => setTimeout(r, 300));
+          snap = await UserFactory.get(currentUid);
+          attempts++;
+        }
+        
+        if (snap.exists()) {
+          await UserFactory.updateProfile(currentUid, { registrationStep: 1 });
+        } else {
+          // Fallback: document bestaat nog steeds niet, maak het zelf aan
+          await UserFactory.create(currentUid, {
+            firstName: '', lastName: '', email: email.trim(),
+            role: 'user', registrationStep: 1, registrationDone: false,
+          });
+        }
       }
-
+      
       try { await AuthFactory.sendEmailVerification(); } catch (e) {
         console.error('Verificatiemail mislukt:', e.code, e.message);
       }
-
+      
       setStep(1);
     } catch (err) {
       console.error('Registration error:', err.code, err.message);
