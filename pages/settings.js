@@ -189,36 +189,43 @@ function LidmaatschapTab({ uid, currentUser }) {
     return () => u();
   }, [uid]);
 
-  // Resolve active group memberships per club
+    // Resolve active group memberships per club
   useEffect(() => {
     if (!uid || allClubs.length === 0) return;
     const collected = {};
     const allUnsubs = [];
 
     allClubs.forEach(club => {
-      const u = GroupFactory.getGroupsByClub(club.id, (groups) => {
-        groups.forEach(group => {
-          const u2 = GroupFactory.getMembersByGroup(club.id, group.id, (members) => {
-            const me  = members.find(m => m.id === uid);
-            const key = `${club.id}-${group.id}`;
-            if (me) {
-              collected[key] = {
-                clubId:    club.id,
-                clubName:  club.name,
-                groupId:   group.id,
-                groupName: group.name,
-                isSkipper: me.isSkipper,
-                isCoach:   me.isCoach,
-              };
-            } else {
-              delete collected[key];
-            }
-            setMemberships(Object.values(collected));
+      // First resolve the memberId for this user in this club
+      UserMemberLinkFactory.getForUserInClub(uid, club.id).then(links => {
+        const selfLink = links.find(l => l.relationship === 'self');
+        if (!selfLink) return;
+        const memberId = selfLink.memberId;
+
+        const u = GroupFactory.getGroupsByClub(club.id, (groups) => {
+          groups.forEach(group => {
+            const u2 = GroupFactory.getMembersByGroup(club.id, group.id, (members) => {
+              const me  = members.find(m => (m.memberId || m.id) === memberId);
+              const key = `${club.id}-${group.id}`;
+              if (me) {
+                collected[key] = {
+                  clubId:    club.id,
+                  clubName:  club.name,
+                  groupId:   group.id,
+                  groupName: group.name,
+                  isSkipper: me.isSkipper,
+                  isCoach:   me.isCoach,
+                };
+              } else {
+                delete collected[key];
+              }
+              setMemberships(Object.values(collected));
+            });
+            allUnsubs.push(u2);
           });
-          allUnsubs.push(u2);
         });
+        allUnsubs.push(u);
       });
-      allUnsubs.push(u);
     });
 
     return () => allUnsubs.forEach(u => u && u());
