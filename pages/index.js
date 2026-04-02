@@ -3,14 +3,13 @@ import { UserFactory, ClubFactory, GroupFactory, LiveSessionFactory, ClubJoinReq
 import { useAuth } from '../contexts/AuthContext';
 import PushPermissionBanner, { PushSettingsToggle } from '../components/PushPermissionBanner';
 import AnnouncementsWidget from '../components/AnnouncementsWidget';
-import { useDisciplines } from '../hooks/useDisciplines';
 import {
-  Bluetooth, BluetoothOff, Heart, Settings, Trophy,
-  Target, Plus, Edit2, Trash2, Check, X, ChevronRight,
-  Building2, Users, Save, LogOut, Award, Zap, AlertCircle,
-  Clock, TrendingUp, Star, UserPlus, Send, EyeOff, Eye, Bell,
-  CheckCircle2, XCircle, ChevronDown, ChevronUp, MessageSquare,
-  ArrowLeft, Medal, Activity, Hash, Calendar, ArrowRight
+  Bluetooth, BluetoothOff, Heart, Settings,
+  Check, X, ChevronRight,
+  Building2, Save, LogOut, Award,
+  AlertCircle, Clock, Send, EyeOff, Bell,
+  CheckCircle2, XCircle,
+  Medal, Calendar, ArrowRight
 } from 'lucide-react';
 import SeasonBanner from '../components/SeasonBanner';
 import UpcomingEventsWidget from '../components/calendar/UpcomingEventsWidget'
@@ -36,10 +35,6 @@ const getZoneName = (bpm, zones) => {
   const z = (zones || DEFAULT_ZONES).find(z => bpm >= z.min && bpm < z.max);
   return z ? z.name : '—';
 };
-
-const DISC_LABELS  = { '30sec': '30 sec', '2min': '2 min', '3min': '3 min' };
-const DISCIPLINES  = ['30sec', '2min', '3min'];
-const SESSION_TYPES = ['Training', 'Wedstrijd'];
 
 const STATUS_CONFIG = {
   pending:  { label: 'In behandeling', color: '#f59e0b', bg: '#f59e0b22', icon: Clock },
@@ -105,7 +100,7 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
   const isRecord = type === 'record';
   const isGoal   = type === 'goal';
   const accentColor = isBadge ? '#f59e0b' : isRecord ? '#facc15' : '#22c55e';
-  const Icon = isBadge ? Medal : isRecord ? Award : Target;
+  const Icon = isBadge ? Medal : isRecord ? Award : () => null;
 
   return (
     <>
@@ -136,7 +131,7 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
             ) : (
               <>
                 <div style={{ fontSize: '42px', fontWeight: '900', color: 'white', lineHeight: 1 }}>{data.score}</div>
-                <div style={{ color: '#94a3b8', fontSize: '14px', marginTop: '4px' }}>{DISC_LABELS[data.discipline] || data.discipline} · {data.sessionType}</div>
+                <div style={{ color: '#94a3b8', fontSize: '14px', marginTop: '4px' }}>{data.discipline} · {data.sessionType}</div>
                 {isRecord && data.previousBest > 0 && <div style={{ color: '#22c55e', fontSize: '13px', marginTop: '8px' }}>+{data.score - data.previousBest} beter dan vorig record ({data.previousBest})</div>}
                 {isGoal && <div style={{ color: '#94a3b8', fontSize: '13px', marginTop: '8px' }}>Doel was: {data.targetScore} stappen</div>}
               </>
@@ -163,53 +158,6 @@ function CelebrationOverlay({ type, data, onAccept, onDecline }) {
   );
 }
 
-// ─── Quick stat card ──────────────────────────────────────────────────────────
-function StatCard({ icon: Icon, color, label, value, sub, href }) {
-  const inner = (
-    <div style={{ backgroundColor: '#1e293b', borderRadius: '12px', padding: '14px', border: `1px solid ${color}22`, display: 'flex', flexDirection: 'column', gap: '2px', textDecoration: 'none', color: 'inherit', transition: 'border-color 0.15s' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-        <div style={{ width: '26px', height: '26px', borderRadius: '6px', backgroundColor: `${color}22`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon size={13} color={color} /></div>
-        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '600' }}>{label}</span>
-      </div>
-      <div style={{ fontSize: '26px', fontWeight: '900', color: value != null ? color : '#334155', lineHeight: 1 }}>{value ?? '—'}</div>
-      {sub && <div style={{ fontSize: '10px', color: '#475569', marginTop: '2px' }}>{sub}</div>}
-    </div>
-  );
-  return href ? <a href={href} style={{ textDecoration: 'none' }}>{inner}</a> : inner;
-}
-
-// ─── Recent sessions mini list ────────────────────────────────────────────────
-function RecentSessionsList({ memberContext }) {
-  const [sessions, setSessions] = useState([]);
-  const { getLabel } = useDisciplines();
-  useEffect(() => {
-    if (!memberContext) return;
-    const { clubId, memberId } = memberContext;
-    const unsub = ClubMemberFactory.getSessionHistory(clubId, memberId, (data) => setSessions(data.slice(0, 5)));
-    return () => unsub();
-  }, [memberContext]);
-
-  if (!memberContext) return <div style={{ textAlign: 'center', padding: '20px 0', color: '#334155', fontSize: '13px' }}>Koppel je account aan een clubprofiel om sessies te zien.</div>;
-  if (sessions.length === 0) return <div style={{ textAlign: 'center', padding: '20px 0', color: '#334155', fontSize: '13px' }}>Nog geen sessies</div>;
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      {sessions.map((s, i) => {
-        const typeColor = s.sessionType === 'Wedstrijd' ? '#f97316' : '#3b82f6';
-        return (
-          <div key={s.id || i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #1e293b' }}>
-            <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', backgroundColor: `${typeColor}22`, color: typeColor, border: `1px solid ${typeColor}40`, flexShrink: 0 }}>{s.sessionType || 'Training'}</span>
-            <span style={{ fontSize: '12px', color: '#64748b', flexShrink: 0 }}>{DISC_LABELS[s.discipline] || getLabel(s.discipline)}</span>
-            <div style={{ flex: 1 }} />
-            <span style={{ fontSize: '16px', fontWeight: '900', color: '#60a5fa' }}>{s.score}</span>
-            <span style={{ fontSize: '10px', color: '#475569' }}>stps</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════════════════
@@ -217,44 +165,43 @@ export default function IndexPage() {
   // ── Auth ──────────────────────────────────────────────────────────────────
   const { uid, logout: authLogout } = useAuth();
 
-  const [allClubs,     setAllClubs]     = useState([]);
-  const [currentUser,  setCurrentUser]  = useState(null);
+  const [allClubs,      setAllClubs]      = useState([]);
+  const [currentUser,   setCurrentUser]   = useState(null);
   const [memberContext, setMemberContext] = useState(null); // { clubId, memberId }
 
   // HRM
-  const [heartRate,    setHeartRate]    = useState(0);
-  const [hrmConnected, setHrmConnected] = useState(false);
-  const [hrmDeviceName,setHrmDeviceName]= useState('');
+  const [heartRate,     setHeartRate]     = useState(0);
+  const [hrmConnected,  setHrmConnected]  = useState(false);
+  const [hrmDeviceName, setHrmDeviceName] = useState('');
   const lastBpmRef = useRef(0);
 
-  // Records, goals, sessions, badges — from ClubMember path
-  const [records,        setRecords]        = useState([]);
-  const [goals,          setGoals]          = useState([]);
-  const [recentSessions, setRecentSessions] = useState([]);
-  const [earnedBadges,   setEarnedBadges]   = useState([]);
-  const { getLabel } = useDisciplines();
+  // Badges
+  const [earnedBadges, setEarnedBadges] = useState([]);
 
   // Achievements queue
-  const [achievementQueue,        setAchievementQueue]        = useState([]);
-  const [isProcessingAchievements,setIsProcessingAchievements]= useState(false);
+  const [achievementQueue,         setAchievementQueue]         = useState([]);
+  const [isProcessingAchievements, setIsProcessingAchievements] = useState(false);
 
-  // Modals
-  const [showSettings,   setShowSettings]   = useState(false);
-  const [settingsForm,   setSettingsForm]   = useState({ firstName: '', lastName: '', email: '' });
-  const [zonesForm,      setZonesForm]      = useState(DEFAULT_ZONES);
+  // Settings modal
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsForm, setSettingsForm] = useState({ firstName: '', lastName: '', email: '' });
+  const [zonesForm,    setZonesForm]    = useState(DEFAULT_ZONES);
 
-  const [newRejections,  setNewRejections]  = useState(0);
-  const [joinRequests,   setJoinRequests]   = useState([]);
-  const [memberships,    setMemberships]    = useState([]); // { clubName, groupName, isSkipper, isCoach }
-  const [showJoinForm,   setShowJoinForm]   = useState(false);
-  const [joinClubId,     setJoinClubId]     = useState('');
-  const [joinMessage,    setJoinMessage]    = useState('');
-  const [joinSending,    setJoinSending]    = useState(false);
-  const [joinError,      setJoinError]      = useState('');
-  const [viewMode,       setViewMode]       = useState('skipper');
-  const [isCoachInGroup, setIsCoachInGroup] = useState(false);
-  const [primaryClub, setPrimaryClub]       = useState(null);
-  const [memberGroupIds, setMemberGroupIds] = useState([]);
+  // Club membership
+  const [newRejections, setNewRejections] = useState(0);
+  const [joinRequests,  setJoinRequests]  = useState([]);
+  const [memberships,   setMemberships]   = useState([]);
+  const [showJoinForm,  setShowJoinForm]  = useState(false);
+  const [joinClubId,    setJoinClubId]    = useState('');
+  const [joinMessage,   setJoinMessage]   = useState('');
+  const [joinSending,   setJoinSending]   = useState(false);
+  const [joinError,     setJoinError]     = useState('');
+
+  // View mode
+  const [viewMode,      setViewMode]      = useState('skipper');
+  const [isCoachInGroup,setIsCoachInGroup]= useState(false);
+  const [primaryClub,   setPrimaryClub]   = useState(null);
+  const [memberGroupIds,setMemberGroupIds]= useState([]);
 
   // ── Load clubs ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -262,7 +209,7 @@ export default function IndexPage() {
     return () => u();
   }, []);
 
-  // ── Load currentUser from Firestore by uid ─────────────────────────────────
+  // ── Load currentUser ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!uid) { setCurrentUser(null); return; }
     UserFactory.get(uid).then(snap => {
@@ -292,12 +239,11 @@ export default function IndexPage() {
     });
   }, [memberContext?.clubId]);
 
-  // ── Resolve memberGroupIds via GroupFactory ────────────────────────────────
+  // ── Resolve memberGroupIds ─────────────────────────────────────────────────
   useEffect(() => {
     if (!memberContext) return;
     const { clubId, memberId } = memberContext;
     let cancelled = false;
-    
     GroupFactory.getGroupsByClubOnce(clubId).then(async (groups) => {
       const gids = [];
       for (const group of groups) {
@@ -307,39 +253,10 @@ export default function IndexPage() {
       }
       if (!cancelled) setMemberGroupIds(gids);
     });
-    
     return () => { cancelled = true; };
   }, [memberContext?.clubId, memberContext?.memberId]);
 
-  // ── Records, goals, sessions, badges ──────────────────────────────────────
-  useEffect(() => {
-    if (!memberContext) return;
-    const { clubId, memberId } = memberContext;
-    const unsubs = [];
-    DISCIPLINES.forEach(d => SESSION_TYPES.forEach(st => {
-      const u = ClubMemberFactory.subscribeToRecords(clubId, memberId, d, st, (rec) => {
-        if (rec) setRecords(prev => [...prev.filter(r => !(r.discipline === d && r.sessionType === st)), { ...rec, discipline: d, sessionType: st }]);
-        else setRecords(prev => prev.filter(r => !(r.discipline === d && r.sessionType === st)));
-      });
-      unsubs.push(u);
-    }));
-    return () => unsubs.forEach(u => u && u());
-  }, [memberContext]);
-
-  useEffect(() => {
-    if (!memberContext) return;
-    const { clubId, memberId } = memberContext;
-    const unsub = ClubMemberFactory.getGoals(clubId, memberId, setGoals);
-    return () => unsub();
-  }, [memberContext]);
-
-  useEffect(() => {
-    if (!memberContext) return;
-    const { clubId, memberId } = memberContext;
-    const unsub = ClubMemberFactory.getSessionHistory(clubId, memberId, (data) => setRecentSessions(data.slice(0, 5)));
-    return () => unsub();
-  }, [memberContext]);
-
+  // ── Badges ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!memberContext) return;
     const { clubId, memberId } = memberContext;
@@ -366,7 +283,7 @@ export default function IndexPage() {
     return () => unsubs.forEach(u => u && u());
   }, [uid, allClubs]);
 
-  // ── Join requests + memberships (for settings panel) ─────────────────────
+  // ── Join requests + memberships ────────────────────────────────────────────
   useEffect(() => {
     if (!uid) return;
     const unsub = ClubJoinRequestFactory.getByUser(uid, (requests) => {
@@ -388,8 +305,7 @@ export default function IndexPage() {
             const key = `${club.id}-${group.id}`;
             if (mine) collected[key] = { clubId: club.id, clubName: club.name, groupId: group.id, groupName: group.name, isSkipper: mine.isSkipper, isCoach: mine.isCoach };
             else delete collected[key];
-            const vals = Object.values(collected);
-            setMemberships(vals);            
+            setMemberships(Object.values(collected));
           });
           allUnsubs.push(u2);
         });
@@ -485,11 +401,9 @@ export default function IndexPage() {
     disconnectHrm();
     setCurrentUser(null);
     setMemberContext(null);
-    setRecords([]);
-    setGoals([]);
     setEarnedBadges([]);
     achievementFiredRef.current = false;
-    await authLogout(); // Firebase signOut — _app.js will redirect to /login
+    await authLogout();
   };
 
   const advanceAchievementQueue = () => {
@@ -525,18 +439,13 @@ export default function IndexPage() {
   };
 
   // ── Derived ────────────────────────────────────────────────────────────────
-  const zones        = currentUser?.heartrateZones || DEFAULT_ZONES;
-  const bestRecord   = records.reduce((best, r) => r.score > (best?.score || 0) ? r : best, null);
-  const lastSession  = recentSessions[0] || null;
-  const activeGoals  = goals.filter(g => !g.achievedAt);
-  const recentBadges = earnedBadges.slice(0, 4);
+  const zones           = currentUser?.heartrateZones || DEFAULT_ZONES;
+  const recentBadges    = earnedBadges.slice(0, 4);
   const pendingRequests = joinRequests.filter(r => r.status === 'pending');
   const visibleRequests = joinRequests.filter(r => !r.hidden);
+  const hasCoachAccess  = currentUser?.role === 'clubadmin' || currentUser?.role === 'superadmin' || isCoachInGroup;
+  const isCoach         = viewMode === 'coach' && hasCoachAccess;
 
-  const hasCoachAccess = currentUser?.role === 'clubadmin' || currentUser?.role === 'superadmin' || isCoachInGroup;
-  const isCoach        = viewMode === 'coach' && hasCoachAccess;
-
-  // While currentUser is loading, show a minimal spinner
   if (!currentUser) return (
     <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <style>{globalCSS}</style>
@@ -582,8 +491,8 @@ export default function IndexPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
           {newRejections > 0 && (
             <a href="/settings?tab=lidmaatschap" style={{ position: 'relative', display: 'flex', padding: '4px' }}>
-            <Bell size={18} color="#f59e0b" />
-            <span style={{ position: 'absolute', top: '-2px', right: '-2px', backgroundColor: '#ef4444', color: 'white', fontSize: '9px', fontWeight: 'bold', width: '14px', height: '14px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{newRejections}</span>
+              <Bell size={18} color="#f59e0b" />
+              <span style={{ position: 'absolute', top: '-2px', right: '-2px', backgroundColor: '#ef4444', color: 'white', fontSize: '9px', fontWeight: 'bold', width: '14px', height: '14px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{newRejections}</span>
             </a>
           )}
           <HrmHeaderWidget connected={hrmConnected} bpm={heartRate} deviceName={hrmDeviceName} zones={zones} onConnect={connectBluetooth} onDisconnect={disconnectHrm} />
@@ -599,43 +508,16 @@ export default function IndexPage() {
           <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>{isCoach ? 'Klaar om skippers te begeleiden?' : 'Klaar voor de training?'}</p>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '24px' }}>
-          <StatCard icon={Hash} color="#60a5fa" label="Laatste sessie" value={lastSession?.score} sub={lastSession ? `${getLabel(lastSession.discipline)} · ${lastSession.sessionType}` : (memberContext ? 'Nog geen sessies' : 'Koppel clubprofiel')} />
-          <StatCard icon={Trophy} color="#facc15" label="Beste record" value={bestRecord?.score} sub={bestRecord ? `${getLabel(lastSession.discipline)} · ${bestRecord.sessionType}` : (memberContext ? 'Nog geen record' : 'Koppel clubprofiel')} href="/achievements" />
-          <StatCard icon={Target} color="#22c55e" label="Actieve doelen" value={activeGoals.length || null} sub={activeGoals.length > 0 ? `${activeGoals[0].discipline} → ${activeGoals[0].targetScore} stps` : 'Geen doelen'} href="/achievements" />
-        </div>
-
-        {isCoach && (
-          <a href="/dashboard" style={{ textDecoration: 'none', display: 'block', marginBottom: '20px' }}>
-            <div style={{ backgroundColor: '#1e293b', borderRadius: '14px', padding: '16px 20px', border: '1px solid #f59e0b33', display: 'flex', alignItems: 'center', gap: '14px' }}>
-              <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: '#f59e0b22', border: '1px solid #f59e0b44', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Activity size={22} color="#f59e0b" /></div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: '700', fontSize: '15px', color: '#f1f5f9' }}>Live Monitoring</div>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>Bekijk alle skippers live op het dashboard</div>
-              </div>
-              <ArrowRight size={16} color="#f59e0b" />
-            </div>
-          </a>
-        )}
-
         <SeasonBanner
           clubId={memberContext?.clubId}
           club={primaryClub}
           userRole={currentUser?.role}
           coachView={isCoach}
         />
-        
+
         <AnnouncementsWidget memberContext={memberContext} />
-        <UpcomingEventsWidget clubId={memberContext?.clubId}  memberGroupIds={memberGroupIds} ready={memberGroupIds.length > 0} /> 
+        <UpcomingEventsWidget clubId={memberContext?.clubId} memberGroupIds={memberGroupIds} ready={memberGroupIds.length > 0} />
         <PushPermissionBanner uid={uid} />
-        
-        <div style={{ marginBottom: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <div style={{ fontSize: '14px', fontWeight: '700', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '6px' }}><Clock size={14} /> Recente sessies</div>
-            <a href="/history" style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>Alle <ArrowRight size={12} /></a>
-          </div>
-          <RecentSessionsList memberContext={memberContext} />
-        </div>
 
         {recentBadges.length > 0 && (
           <div style={{ marginBottom: '24px' }}>
@@ -670,7 +552,7 @@ export default function IndexPage() {
         )}
       </div>
 
-      {/* ── MODALS ── */}
+      {/* ── SETTINGS MODAL ── */}
       {showSettings && (
         <div style={s.modalOverlay}>
           <div style={s.modal}>
@@ -704,11 +586,8 @@ export default function IndexPage() {
             </div>
             <button style={s.primaryBtn} onClick={saveSettings}><Save size={16} /> Opslaan</button>
 
-            {/* ── Clubs section ── */}
             <div style={{ marginTop: '28px', borderTop: '1px solid #334155', paddingTop: '20px' }}>
               <h4 style={s.sectionLabel}>Clubs</h4>
-
-              {/* Active memberships */}
               {memberships.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
                   {memberships.map((m, i) => (
@@ -726,8 +605,6 @@ export default function IndexPage() {
                   ))}
                 </div>
               )}
-
-              {/* Request statuses */}
               {visibleRequests.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
                   {visibleRequests.map(req => {
@@ -758,8 +635,6 @@ export default function IndexPage() {
                   })}
                 </div>
               )}
-
-              {/* Join form */}
               {!showJoinForm ? (
                 <button onClick={() => { setShowJoinForm(true); setJoinError(''); }} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px', backgroundColor: '#7c3aed22', border: '1px solid #7c3aed44', borderRadius: '8px', color: '#a78bfa', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
                   <Send size={13} /> Aanvraag bij nieuwe club indienen
@@ -810,17 +685,17 @@ const globalCSS = `
 `;
 
 const s = {
-  page:       { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif' },
-  spinner:    { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
-  header:     { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 100 },
-  iconBtn:    { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center' },
-  userAvatar: { width: '44px', height: '44px', borderRadius: '50%', backgroundColor: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '14px', flexShrink: 0, color: 'white' },
-  primaryBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px 20px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '10px', fontWeight: '700', cursor: 'pointer', width: '100%', fontSize: '14px' },
+  page:         { backgroundColor: '#0f172a', minHeight: '100vh', color: 'white', fontFamily: 'system-ui, sans-serif' },
+  spinner:      { width: '36px', height: '36px', border: '3px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
+  header:       { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155', position: 'sticky', top: 0, zIndex: 100 },
+  iconBtn:      { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center' },
+  userAvatar:   { width: '44px', height: '44px', borderRadius: '50%', backgroundColor: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '14px', flexShrink: 0, color: 'white' },
+  primaryBtn:   { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px 20px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '10px', fontWeight: '700', cursor: 'pointer', width: '100%', fontSize: '14px' },
   modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 500 },
-  modal:      { backgroundColor: '#1e293b', borderRadius: '20px 20px 0 0', padding: '24px', width: '100%', maxWidth: '560px', border: '1px solid #334155', maxHeight: '92vh', overflowY: 'auto' },
-  modalHeader:{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', color: '#f1f5f9', fontSize: '16px', fontWeight: '700' },
-  fieldLabel: { display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: '600' },
-  input:      { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '16px', boxSizing: 'border-box' },
-  select:     { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '16px' },
+  modal:        { backgroundColor: '#1e293b', borderRadius: '20px 20px 0 0', padding: '24px', width: '100%', maxWidth: '560px', border: '1px solid #334155', maxHeight: '92vh', overflowY: 'auto' },
+  modalHeader:  { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', color: '#f1f5f9', fontSize: '16px', fontWeight: '700' },
+  fieldLabel:   { display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: '600' },
+  input:        { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '16px', boxSizing: 'border-box' },
+  select:       { width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '16px' },
   sectionLabel: { fontSize: '12px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 12px', fontWeight: '700' },
 };
