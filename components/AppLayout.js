@@ -1,7 +1,7 @@
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import {
-  Zap, Hash, LayoutDashboard, ShieldAlert,
+  Zap, Hash, ShieldAlert,
   X, ChevronRight, Medal, Home,
   MoreHorizontal, Trophy, History,
   Building2, Award, Megaphone, Calendar
@@ -66,7 +66,6 @@ const getSidebarItems = (role, isCoach) => {
   // Coaches + admins
   if (hasAdminAccess) {
     items.push({ href: '/badge-beheer', label: 'Badge beheer', icon: Award,         description: 'Aanmaken & uitreiken', color: '#a78bfa' });
-    items.push({ href: '/dashboard',    label: 'Dashboard',    icon: LayoutDashboard, description: 'Live monitoring',    color: '#22c55e' });
     items.push({ href: '/calendar-admin',  label: 'Kalenderbeheer',  icon: Calendar,        description: 'Trainingen & schema\'s', color: '#22c55e' });
   }
 
