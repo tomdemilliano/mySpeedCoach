@@ -499,6 +499,14 @@ export default function ClubAdmin() {
   const [clubForm,     setClubForm]     = useState({ name: '', logoUrl: '', email: '', street: '', city: '', postalCode: '', seasonStartDay: '', seasonStartMonth: '' });
   const [savingClub,   setSavingClub]   = useState(false);
   const [clubSaveOk,   setClubSaveOk]   = useState(false);
+  const [clubInfo, setClubInfo] = useState({
+     webshopUrl:         club?.clubInfo?.webshopUrl         || '',
+     webshopDescription: club?.clubInfo?.webshopDescription || '',
+     showWebshop:        club?.clubInfo?.showWebshop        ?? false,
+     accidentText:       club?.clubInfo?.accidentText       || '',
+     showAccident:       club?.clubInfo?.showAccident       ?? false,
+     documents:          club?.clubInfo?.documents          || [],
+  });
 
   // Disciplines & season
   const { disciplines } = useDisciplines();
@@ -552,6 +560,14 @@ export default function ClubAdmin() {
       postalCode:       activeClub.postalCode        || '',
       seasonStartDay:   activeClub.seasonStartDay    || '',
       seasonStartMonth: activeClub.seasonStartMonth  || '',
+      setClubInfo({
+        webshopUrl:         activeClub.clubInfo?.webshopUrl         || '',
+        webshopDescription: activeClub.clubInfo?.webshopDescription || '',
+        showWebshop:        activeClub.clubInfo?.showWebshop        ?? false,
+        accidentText:       activeClub.clubInfo?.accidentText       || '',
+        showAccident:       activeClub.clubInfo?.showAccident       ?? false,
+        documents:          activeClub.clubInfo?.documents          || [],
+      });
     });
   }, [activeClub]);
 
@@ -675,6 +691,7 @@ export default function ClubAdmin() {
 
   const handleSaveClub = async () => {
     setSavingClub(true);
+    const newDocId = () => Math.random().toString(36).slice(2, 9);
     try {
       const updates = {
         name:             clubForm.name.trim(),
@@ -685,11 +702,14 @@ export default function ClubAdmin() {
         postalCode:       clubForm.postalCode.trim(),
         seasonStartDay:   clubForm.seasonStartDay   ? parseInt(clubForm.seasonStartDay)   : null,
         seasonStartMonth: clubForm.seasonStartMonth ? parseInt(clubForm.seasonStartMonth) : null,
+        clubInfo,
       };
       await ClubFactory.update(activeClub.id, updates);
+      await ClubFactory.update(clubId, { clubInfo });
       setActiveClubData(prev => ({ ...prev, ...updates }));
       setClubSaveOk(true);
       setTimeout(() => setClubSaveOk(false), 2500);
+      
     } catch (e) { console.error(e); alert('Opslaan mislukt.'); }
     finally { setSavingClub(false); }
   };
@@ -869,6 +889,296 @@ export default function ClubAdmin() {
               </div>
             </div>
 
+const ClubInfoSection = ({ clubInfo, setClubInfo }) => {
+  const newDocId = () => Math.random().toString(36).slice(2, 9);
+ 
+  const addDocument = () => {
+    setClubInfo(prev => ({
+      ...prev,
+      documents: [
+        ...prev.documents,
+        { id: newDocId(), title: '', description: '', url: '', type: 'other', showOnInfoPage: true },
+      ],
+    }));
+  };
+ 
+  const updateDoc = (id, changes) => {
+    setClubInfo(prev => ({
+      ...prev,
+      documents: prev.documents.map(d => d.id === id ? { ...d, ...changes } : d),
+    }));
+  };
+ 
+  const removeDoc = (id) => {
+    setClubInfo(prev => ({
+      ...prev,
+      documents: prev.documents.filter(d => d.id !== id),
+    }));
+  };
+ 
+  return (
+    <div style={{ marginTop: '32px', borderTop: '1px solid #334155', paddingTop: '24px' }}>
+ 
+      {/* ── Section title ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+        <div style={{
+          width: '28px', height: '28px', borderRadius: '7px',
+          backgroundColor: '#3b82f622', border: '1px solid #3b82f644',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {/* Info icon — use lucide Info */}
+          <span style={{ fontSize: '14px' }}>ℹ️</span>
+        </div>
+        <div>
+          <div style={{ fontSize: '14px', fontWeight: '800', color: '#f1f5f9' }}>Clubinfopagina</div>
+          <div style={{ fontSize: '11px', color: '#64748b' }}>
+            Informatie die getoond wordt op de "Mijn Club" pagina voor leden
+          </div>
+        </div>
+      </div>
+ 
+      {/* ── Webshop ── */}
+      <div style={{
+        backgroundColor: '#0f172a', borderRadius: '12px',
+        border: '1px solid #334155', padding: '16px', marginBottom: '14px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '16px' }}>🛒</span>
+            <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>Webshop</span>
+          </div>
+          {/* Toggle */}
+          <button
+            onClick={() => setClubInfo(prev => ({ ...prev, showWebshop: !prev.showWebshop }))}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '6px',
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: 0, fontFamily: 'inherit',
+            }}
+          >
+            <span style={{ fontSize: '11px', color: clubInfo.showWebshop ? '#22c55e' : '#64748b', fontWeight: '600' }}>
+              {clubInfo.showWebshop ? 'Zichtbaar' : 'Verborgen'}
+            </span>
+            <div style={{
+              width: '36px', height: '20px', borderRadius: '10px',
+              backgroundColor: clubInfo.showWebshop ? '#22c55e' : '#334155',
+              position: 'relative', transition: 'background-color 0.2s',
+            }}>
+              <div style={{
+                width: '14px', height: '14px', borderRadius: '50%',
+                backgroundColor: 'white', position: 'absolute', top: '3px',
+                left: clubInfo.showWebshop ? '19px' : '3px',
+                transition: 'left 0.2s',
+              }} />
+            </div>
+          </button>
+        </div>
+        <div style={{ marginBottom: '10px' }}>
+          <label style={labelStyle}>URL</label>
+          <input
+            style={inputStyle}
+            value={clubInfo.webshopUrl}
+            onChange={e => setClubInfo(prev => ({ ...prev, webshopUrl: e.target.value }))}
+            placeholder="https://shop.mijnclub.be"
+          />
+        </div>
+        <div>
+          <label style={labelStyle}>Korte omschrijving (optioneel)</label>
+          <input
+            style={inputStyle}
+            value={clubInfo.webshopDescription}
+            onChange={e => setClubInfo(prev => ({ ...prev, webshopDescription: e.target.value }))}
+            placeholder="Bestel je clubkledij en materiaal"
+          />
+        </div>
+      </div>
+ 
+      {/* ── Bij een ongeval ── */}
+      <div style={{
+        backgroundColor: '#0f172a', borderRadius: '12px',
+        border: '1px solid #334155', padding: '16px', marginBottom: '14px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '16px' }}>🚨</span>
+            <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>Bij een ongeval</span>
+          </div>
+          <button
+            onClick={() => setClubInfo(prev => ({ ...prev, showAccident: !prev.showAccident }))}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '6px',
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: 0, fontFamily: 'inherit',
+            }}
+          >
+            <span style={{ fontSize: '11px', color: clubInfo.showAccident ? '#22c55e' : '#64748b', fontWeight: '600' }}>
+              {clubInfo.showAccident ? 'Zichtbaar' : 'Verborgen'}
+            </span>
+            <div style={{
+              width: '36px', height: '20px', borderRadius: '10px',
+              backgroundColor: clubInfo.showAccident ? '#22c55e' : '#334155',
+              position: 'relative', transition: 'background-color 0.2s',
+            }}>
+              <div style={{
+                width: '14px', height: '14px', borderRadius: '50%',
+                backgroundColor: 'white', position: 'absolute', top: '3px',
+                left: clubInfo.showAccident ? '19px' : '3px',
+                transition: 'left 0.2s',
+              }} />
+            </div>
+          </button>
+        </div>
+        <label style={labelStyle}>Instructies voor leden</label>
+        <textarea
+          style={{
+            ...inputStyle,
+            minHeight: '100px', resize: 'vertical',
+            lineHeight: 1.6, fontFamily: 'inherit',
+          }}
+          value={clubInfo.accidentText}
+          onChange={e => setClubInfo(prev => ({ ...prev, accidentText: e.target.value }))}
+          placeholder={`Stap 1: Blijf kalm en zorg voor veiligheid.\nStap 2: Bel 112 bij ernstig letsel.\nStap 3: Contacteer de trainer (naam, tel).`}
+        />
+      </div>
+ 
+      {/* ── Documenten ── */}
+      <div style={{
+        backgroundColor: '#0f172a', borderRadius: '12px',
+        border: '1px solid #334155', padding: '16px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '16px' }}>📄</span>
+            <span style={{ fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>Clubdocumenten</span>
+          </div>
+          <button
+            onClick={addDocument}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '5px',
+              padding: '6px 12px', backgroundColor: '#a78bfa22',
+              border: '1px solid #a78bfa44', borderRadius: '8px',
+              color: '#a78bfa', fontSize: '12px', fontWeight: '600',
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            + Document
+          </button>
+        </div>
+ 
+        {clubInfo.documents.length === 0 ? (
+          <p style={{ fontSize: '12px', color: '#475569', margin: 0, textAlign: 'center', padding: '12px 0' }}>
+            Nog geen documenten. Klik op "+ Document" om er een toe te voegen.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {clubInfo.documents.map((doc) => (
+              <div key={doc.id} style={{
+                backgroundColor: '#1e293b', borderRadius: '10px',
+                border: '1px solid #334155', padding: '12px',
+              }}>
+                {/* Doc header row */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {/* Zichtbaar toggle */}
+                    <button
+                      onClick={() => updateDoc(doc.id, { showOnInfoPage: !doc.showOnInfoPage })}
+                      title={doc.showOnInfoPage ? 'Verberg op infopagina' : 'Toon op infopagina'}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '4px',
+                        padding: '3px 8px', borderRadius: '6px',
+                        backgroundColor: doc.showOnInfoPage ? '#22c55e22' : '#33415522',
+                        border: `1px solid ${doc.showOnInfoPage ? '#22c55e44' : '#33415544'}`,
+                        color: doc.showOnInfoPage ? '#22c55e' : '#64748b',
+                        fontSize: '10px', fontWeight: '700',
+                        cursor: 'pointer', fontFamily: 'inherit',
+                      }}
+                    >
+                      {doc.showOnInfoPage ? '👁 Zichtbaar' : '👁 Verborgen'}
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => removeDoc(doc.id)}
+                    style={{
+                      background: 'none', border: 'none',
+                      color: '#ef4444', cursor: 'pointer', padding: '2px',
+                      fontSize: '16px', lineHeight: 1,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+ 
+                {/* Fields */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                  <div>
+                    <label style={labelStyle}>Naam *</label>
+                    <input
+                      style={inputStyle}
+                      value={doc.title}
+                      onChange={e => updateDoc(doc.id, { title: e.target.value })}
+                      placeholder="Intern reglement"
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Type</label>
+                    <select
+                      style={selectStyle}
+                      value={doc.type}
+                      onChange={e => updateDoc(doc.id, { type: e.target.value })}
+                    >
+                      <option value="reglement">Reglement</option>
+                      <option value="privacy">Privacy</option>
+                      <option value="other">Ander</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ marginBottom: '8px' }}>
+                  <label style={labelStyle}>Link of URL</label>
+                  <input
+                    style={inputStyle}
+                    value={doc.url}
+                    onChange={e => updateDoc(doc.id, { url: e.target.value })}
+                    placeholder="https://… of /downloads/reglement.pdf"
+                  />
+                </div>
+                <div>
+                  <label style={labelStyle}>Omschrijving (optioneel)</label>
+                  <input
+                    style={inputStyle}
+                    value={doc.description}
+                    onChange={e => updateDoc(doc.id, { description: e.target.value })}
+                    placeholder="Laatste versie goedgekeurd op …"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+ 
+// ─── Shared input styles (same as rest of clubadmin.js) ───────────────────────
+const labelStyle = {
+  display: 'block', fontSize: '11px', fontWeight: '700',
+  color: '#64748b', textTransform: 'uppercase',
+  letterSpacing: '0.4px', marginBottom: '5px',
+};
+ 
+const inputStyle = {
+  width: '100%', padding: '10px 12px', borderRadius: '8px',
+  border: '1px solid #334155', backgroundColor: '#0f172a',
+  color: 'white', fontSize: '14px', fontFamily: 'inherit',
+  boxSizing: 'border-box',
+};
+ 
+const selectStyle = {
+  ...inputStyle,
+};
+ 
+export { ClubInfoSection };
+                    
             <button onClick={handleSaveClub} disabled={savingClub} style={{ ...bs.primary, opacity: savingClub ? 0.65 : 1 }}>
               {clubSaveOk ? <><CheckCircle2 size={15} /> Opgeslagen!</> : <><Save size={15} /> {savingClub ? 'Opslaan…' : 'Wijzigingen opslaan'}</>}
             </button>
