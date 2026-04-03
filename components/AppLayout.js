@@ -109,21 +109,11 @@ function SidebarDrawer({ currentPath, open, onClose, userRole, isCoach }) {
           display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'space-between',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{
-              width: '34px', height: '34px', borderRadius: '9px',
-              backgroundColor: '#1e293b', border: '1px solid #334155',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <Zap size={18} color="#3b82f6" />
-            </div>
-            <div>
-              <div style={{ fontWeight: '800', fontSize: '14px', color: '#f1f5f9', letterSpacing: '-0.2px' }}>
-                MySpeedCoach
-              </div>
-              <div style={{ fontSize: '10px', color: '#475569', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-                v1.0
-              </div>
-            </div>
+            <img
+              src="/icons/skippr-logo-transparant.png"
+              alt="Skippr"
+              style={{ height: '32px', width: 'auto', objectFit: 'contain' }}
+            />
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}>
             <X size={18} />
@@ -176,7 +166,7 @@ function SidebarDrawer({ currentPath, open, onClose, userRole, isCoach }) {
         </nav>
 
         <div style={{ padding: '14px 16px', borderTop: '1px solid #1e293b', fontSize: '10px', color: '#334155', textAlign: 'center', letterSpacing: '0.5px' }}>
-          MYSPEEDCOACH © 2025
+          SKIPPR © 2025
         </div>
       </aside>
     </>
@@ -336,17 +326,11 @@ function DesktopSidebar({ currentPath, userRole, isCoach, announcementCount }) {
         padding: '20px 20px 16px', borderBottom: '1px solid #1e293b',
         display: 'flex', alignItems: 'center', gap: '10px',
       }}>
-        <div style={{
-          width: '34px', height: '34px', borderRadius: '9px',
-          backgroundColor: '#1e293b', border: '1px solid #334155',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Zap size={18} color="#3b82f6" />
-        </div>
-        <div>
-          <div style={{ fontWeight: '800', fontSize: '14px', color: '#f1f5f9' }}>MySpeedCoach</div>
-          <div style={{ fontSize: '10px', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>v1.0</div>
-        </div>
+        <img
+          src="/icons/skippr-logo-transparant.png"
+          alt="Skippr"
+          style={{ height: '32px', width: 'auto', objectFit: 'contain' }}
+        />
       </div>
 
       <nav style={{ flex: 1, padding: '12px 10px', overflowY: 'auto' }}>
@@ -400,7 +384,7 @@ function DesktopSidebar({ currentPath, userRole, isCoach, announcementCount }) {
       </nav>
 
       <div style={{ padding: '14px 16px', borderTop: '1px solid #1e293b', fontSize: '10px', color: '#334155', textAlign: 'center' }}>
-        MYSPEEDCOACH © 2025
+        SKIPPR © 2025
       </div>
     </aside>
   );
