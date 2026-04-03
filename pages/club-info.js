@@ -19,6 +19,7 @@ import {
   ClubFactory, UserMemberLinkFactory,
 } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
+import { RichTextViewer } from '../components/RichTextEditor';
 import {
   ShoppingBag, AlertTriangle, FileText,
   ExternalLink, ChevronRight, Building2,
@@ -117,52 +118,29 @@ function WebshopCard({ url, description }) {
 // ─── Accident card ────────────────────────────────────────────────────────────
 function AccidentCard({ instructions }) {
   const [expanded, setExpanded] = useState(false);
-
   if (!instructions) return null;
-
-  // Show first ~120 chars as preview, rest expandable
-  const preview   = instructions.slice(0, 120);
-  const hasMore   = instructions.length > 120;
-  const displayed = expanded ? instructions : (hasMore ? preview + '…' : instructions);
-
+ 
+  const stripTags = (html) => html.replace(/<[^>]*>/g, '');
+  const plainLength = stripTags(instructions).length;
+  const hasMore = plainLength > 200;
+ 
   return (
-    <div style={{
-      backgroundColor: '#1e293b',
-      borderRadius: '14px',
-      border: '1px solid #ef444433',
-      overflow: 'hidden',
-    }}>
-      {/* Header bar */}
-      <div style={{
-        backgroundColor: '#ef444411',
-        padding: '12px 18px',
-        display: 'flex', alignItems: 'center', gap: '10px',
-        borderBottom: '1px solid #ef444422',
-      }}>
+    <div style={{ backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #ef444433', overflow: 'hidden' }}>
+      <div style={{ backgroundColor: '#ef444411', padding: '12px 18px', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid #ef444422' }}>
         <AlertTriangle size={16} color="#ef4444" />
-        <span style={{ fontSize: '13px', fontWeight: '800', color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-          Bij een ongeval
-        </span>
+        <span style={{ fontSize: '13px', fontWeight: '800', color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Bij een ongeval</span>
       </div>
-
-      {/* Body */}
       <div style={{ padding: '14px 18px' }}>
-        <p style={{
-          margin: 0, fontSize: '14px', color: '#94a3b8',
-          lineHeight: 1.7, whiteSpace: 'pre-wrap',
-        }}>
-          {displayed}
-        </p>
+        <div style={{ maxHeight: expanded || !hasMore ? 'none' : '120px', overflow: 'hidden', position: 'relative' }}>
+          <RichTextViewer html={instructions} />
+          {!expanded && hasMore && (
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '40px', background: 'linear-gradient(transparent, #1e293b)' }} />
+          )}
+        </div>
         {hasMore && (
           <button
             onClick={() => setExpanded(v => !v)}
-            style={{
-              marginTop: '10px',
-              display: 'flex', alignItems: 'center', gap: '5px',
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: '#ef4444', fontSize: '12px', fontWeight: '700',
-              padding: 0, fontFamily: 'inherit',
-            }}
+            style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '5px', background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: '12px', fontWeight: '700', padding: 0, fontFamily: 'inherit' }}
           >
             {expanded ? <><ChevronUp size={13} /> Minder tonen</> : <><ChevronDown size={13} /> Volledig tonen</>}
           </button>
