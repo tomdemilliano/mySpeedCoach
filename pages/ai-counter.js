@@ -141,7 +141,7 @@ const getCookie = () => {
   return m ? m[1] : null;
 };
 const fmtTime = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-const lastPoseResultsRef = useRef(null);
+const lastPoseResults = useRef(null);
 
 function waitForVideoReady(video, ms = 12000) {
   return new Promise((resolve, reject) => {
