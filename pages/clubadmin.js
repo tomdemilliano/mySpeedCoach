@@ -10,6 +10,7 @@ import { useDisciplines }   from '../hooks/useDisciplines';
 import ClubLogoUploader  from '../components/ClubLogoUploader';
 import SeasonManager     from '../components/SeasonManager';
 import LabelGrid         from '../components/LabelGrid';
+import RichTextEditor from '../components/RichTextEditor';
 import {
   ShieldAlert, UserPlus, Building2, Users, Trash2, Search,
   Edit2, X, Save, ArrowLeft, Plus, Heart, HeartOff, PlusCircle,
@@ -148,11 +149,11 @@ function ClubInfoSection({ clubInfo, setClubInfo }) {
           </button>
         </div>
         <label style={ciLabelStyle}>Instructies voor leden</label>
-        <textarea
-          style={{ ...ciInputStyle, minHeight: '100px', resize: 'vertical', lineHeight: 1.6, fontFamily: 'inherit' }}
+        <RichTextEditor
           value={clubInfo.accidentText}
-          onChange={e => setClubInfo(prev => ({ ...prev, accidentText: e.target.value }))}
-          placeholder={'Stap 1: Blijf kalm en zorg voor veiligheid.\nStap 2: Bel 112 bij ernstig letsel.\nStap 3: Contacteer de trainer (naam, tel).'}
+          onChange={html => setClubInfo(prev => ({ ...prev, accidentText: html }))}
+          placeholder="Stap 1: Blijf kalm en zorg voor veiligheid.&#10;Stap 2: Bel 112 bij ernstig letsel.&#10;Stap 3: Contacteer de trainer (naam, tel)."
+          minHeight="130px"
         />
       </div>
 
