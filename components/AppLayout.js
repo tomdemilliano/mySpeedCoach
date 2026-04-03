@@ -4,7 +4,7 @@ import {
   Zap, Hash, ShieldAlert,
   X, ChevronRight, Medal, Home,
   MoreHorizontal, Trophy, History,
-  Building2, Award, Megaphone, Calendar, Building2
+  Building2, Award, Megaphone, Calendar
 } from 'lucide-react';
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
