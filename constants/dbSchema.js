@@ -140,6 +140,26 @@ export const SCHEMA = {
           startMembership: "timestamp",
           endMembership:   "timestamp"
         }
+      },
+      clubInfo: {
+        // Webshop
+        webshopUrl:         "string",
+        webshopDescription: "string",
+        showWebshop:        "boolean",
+        
+        // Noodprocedure
+        accidentText:       "string",
+        showAccident:       "boolean",
+        
+        // Documenten
+        documents: [{
+          id:            "string",    // random local ID
+          title:         "string",
+          description:   "string",
+          url:           "string",
+          type:          "reglement|privacy|other",
+          showOnInfoPage: "boolean",
+        }],      
       }
     },
 
