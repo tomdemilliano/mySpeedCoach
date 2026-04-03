@@ -141,7 +141,6 @@ const getCookie = () => {
   return m ? m[1] : null;
 };
 const fmtTime = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-const lastPoseResults = useRef(null);
 
 function waitForVideoReady(video, ms = 12000) {
   return new Promise((resolve, reject) => {
@@ -975,7 +974,7 @@ export default function AiCounterPage() {
           if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
             canvas.width = videoEl.videoWidth; 
             canvas.height = videoEl.videoHeight;
-            const ctx = canvas.getcontext('2d');
+            const ctx = canvas.getContext('2d');
             ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
             
             const now = performance.now();
@@ -994,7 +993,7 @@ export default function AiCounterPage() {
               
               lastPoseResults.current = results;
               onMpResults(results, now);
-            } else if (LastPoseResult.Current) {
+            } else if (LastPoseResults.Current) {
               // Herteken het vorige skelet op het verse frame
               onMpResults(lastPoseResults.current, performance.now());
             }
