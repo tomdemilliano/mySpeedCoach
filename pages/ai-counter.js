@@ -141,6 +141,7 @@ const getCookie = () => {
   return m ? m[1] : null;
 };
 const fmtTime = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+const lastPoseResultsRef = useRef(null);
 
 function waitForVideoReady(video, ms = 12000) {
   return new Promise((resolve, reject) => {
@@ -941,21 +942,61 @@ export default function AiCounterPage() {
       if (isLive) {
         try {
           const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
-          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode, width: { ideal: isMobile ? 480 : 640 }, height: { ideal: isMobile ? 640 : 480 } } });
-          videoEl.srcObject = stream; await videoEl.play();
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+              facingMode, 
+              width: { ideal: isMobile ? 480 : 640 }, 
+              height: { ideal: isMobile ? 640 : 480 },
+            } 
+          });
+          videoEl.srcObject = stream; 
+          await videoEl.play();
+
+          // NIEUW: wacht tot werkelijke dimensies beschikbaar zijn
+          await new Promise(resolve => {
+            const check = () => {
+              if (videoEl.videoWidth > 0 && videoEl.videoHeight > 0) resolve();
+              else requestAnimationFrame(check);
+            };
+            check();
+          });
+
+          // Stel canvas in op de WERKELIJKE video-dimensies
+          canvas.width = videoEl.videoWidth;
+          canvas.height = videoEl.videoHeight;
+          
         } catch (e) { setBackendError(`Camera toegang mislukt: ${e.message}`); return false; }
         const canvas = canvasRef.current;
         const INFER_INTERVAL_MS = 80; let lastInferTime = 0;
+        let LastPoseResults = null;
+        
         const runLoop = () => {
           if (!videoEl.srcObject) return;
           if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
-            canvas.width = videoEl.videoWidth; canvas.height = videoEl.videoHeight;
+            canvas.width = videoEl.videoWidth; 
+            canvas.height = videoEl.videoHeight;
+            const ctx = canvas.getcontext('2d');
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+            
             const now = performance.now();
-            canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
             if (now - lastInferTime >= INFER_INTERVAL_MS) {
               lastInferTime = now;
-              const results = poseLandmarker.detectForVideo(videoEl, now);
+              
+              // Downscale voor inferentie (zoals bij upload-modus)
+              if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
+              const scale = Math.min(1, 480 / videoEl.videoWidth);
+              offscreenRef.current.width = Math.round(videoEl.videoWidth * scale);
+              offscreenRef.current.height = Math.round(videoEl.videoHeight * scale);
+              offscreenRef.current.getContext('2d').drawImage(
+                videoEl, 0, 0, offscreenRef.current.width, offscreenRef.current.height
+              );
+              const results = poseLandmarker.detectForVideo(offscreenRef.current, now);
+              
+              lastPoseResults.current = results;
               onMpResults(results, now);
+            } else if (LastPoseResult.Current) {
+              // Herteken het vorige skelet op het verse frame
+              onMpResults(lastPoseResults.current, performance.now());
             }
           }
           frameRef.current = requestAnimationFrame(runLoop);
