@@ -515,6 +515,38 @@ export default function IndexPage() {
           coachView={isCoach}
         />
 
+        {memberContext && (
+           <a href="/club-info" style={{ textDecoration: 'none', display: 'block', marginBottom: '16px' }}>
+             <div style={{
+                backgroundColor: '#1e293b',
+                borderRadius: '14px',
+                padding: '14px 18px',
+                border: '1px solid #3b82f633',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '14px',
+             }}>
+                <div style={{
+                  width: '40px', height: '40px', borderRadius: '11px',
+                  backgroundColor: '#3b82f622', border: '1px solid #3b82f644',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <Building2 size={20} color="#60a5fa" />
+                </div>
+                <div style={{ flex: 1 }}>
+                   <div style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9', marginBottom: '2px' }}>
+                      Mijn Club
+                   </div>
+                   <div style={{ fontSize: '12px', color: '#64748b' }}>
+                      Webshop, documenten & clubinfo
+                   </div>
+                </div>
+                <ChevronRight size={16} color="#3b82f6" />
+              </div>
+           </a>
+        )}
+
         <AnnouncementsWidget memberContext={memberContext} />
         <UpcomingEventsWidget clubId={memberContext?.clubId} memberGroupIds={memberGroupIds} ready={memberGroupIds.length > 0} />
         <PushPermissionBanner uid={uid} />
