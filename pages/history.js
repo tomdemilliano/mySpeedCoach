@@ -147,6 +147,9 @@ function AiAnalysis({ session, user, onClose }) {
 **ZONES:** ${zoneBreakdown || 'n/a'}
 **FASE-TEMPO (stps/30s):** begin ${p1s}@${p1b}bpm · midden ${p2s}@${p2b}bpm · einde ${p3s}@${p3b}bpm
 
+- Voor het totaal aantal stappen wordt er slechts 1 voet geteld
+- bij de onderdelen Double unders en Triple unders worden geen stappen geteld maar sprongen
+
 Geef: 1) Prestatiebeoordeling 2) Fase-analyse 3) Verbeterpunten 4) 2 oefeningen 5) Prioriteit volgende sessie. Nederlands, max 300 woorden.`;
 
     try {
