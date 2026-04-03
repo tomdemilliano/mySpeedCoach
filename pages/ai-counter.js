@@ -950,20 +950,7 @@ export default function AiCounterPage() {
           });
           videoEl.srcObject = stream; 
           await videoEl.play();
-
-          // NIEUW: wacht tot werkelijke dimensies beschikbaar zijn
-          await new Promise(resolve => {
-            const check = () => {
-              if (videoEl.videoWidth > 0 && videoEl.videoHeight > 0) resolve();
-              else requestAnimationFrame(check);
-            };
-            check();
-          });
-
-          // Stel canvas in op de WERKELIJKE video-dimensies
-          canvas.width = videoEl.videoWidth;
-          canvas.height = videoEl.videoHeight;
-          
+        
         } catch (e) { setBackendError(`Camera toegang mislukt: ${e.message}`); return false; }
         const canvas = canvasRef.current;
         const INFER_INTERVAL_MS = 80; let lastInferTime = 0;
