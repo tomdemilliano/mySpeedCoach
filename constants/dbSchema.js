@@ -180,6 +180,7 @@ export const SCHEMA = {
       createdAt:   "timestamp",
       createdBy:   "uid",
       isAbandoned: "boolean",
+      isPublished: "boolean",
     },
  
     "clubs/{clubId}/seasons/{seasonId}/memberLabels/{memberId}": {
@@ -1858,6 +1859,7 @@ export const SeasonFactory = {
       createdAt:   serverTimestamp(),
       createdBy:   data.createdBy   || null,
       isAbandoned: false,
+      isPublished: false,
     }),
  
   update: (clubId, seasonId, data) =>
@@ -1889,6 +1891,16 @@ export const SeasonFactory = {
       return start && end && start <= now && now <= end;
     }) || null;
   },
+  
+  publish: (clubId, seasonId) =>
+    updateDoc(doc(db, `clubs/${clubId}/seasons`, seasonId), {
+      isPublished: true,
+    }),
+  
+  unpublish: (clubId, seasonId) =>
+    updateDoc(doc(db, `clubs/${clubId}/seasons`, seasonId), {
+      isPublished: false,
+    }),
 };
 
 // ==========================================
