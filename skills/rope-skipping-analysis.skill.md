@@ -5,6 +5,46 @@ It is injected into the system prompt of `/api/ai-analysis` calls.
 
 ---
 
+## Leeftijdscategorieën
+
+Prestaties moeten altijd beoordeeld worden in de context van de leeftijdscategorie van de sporter.
+Gebruik de onderstaande indeling bij elke analyse:
+
+| Categorie | Leeftijd | Verwachting |
+|---|---|---|
+| Mini      | < 12 jaar  | Techniek staat centraal; scores zijn secundair |
+| Belofte   | 12–14 jaar | Snelle ontwikkeling; vergelijk met beloften-benchmarks |
+| Junior    | 15–17 jaar | Dichter bij senior prestaties; competitief niveau realistisch |
+| Senior    | 18+ jaar   | Volledige prestatiemeting; vergelijk met senior benchmarks |
+
+### Belofte-benchmarks Speed Sprint (12–14 jaar, stappen in 30s)
+| Niveau | Stappen |
+|---|---|
+| Beginner | < 35 |
+| Club | 35–49 |
+| Regionaal | 50–64 |
+| Nationaal | 65–79 |
+| Internationaal | 80–94 |
+| Wereldklasse | 95+ |
+
+### Junior-benchmarks Speed Sprint (15–17 jaar, stappen in 30s)
+| Niveau | Stappen |
+|---|---|
+| Beginner | < 38 |
+| Club | 38–54 |
+| Regionaal | 55–69 |
+| Nationaal | 70–84 |
+| Internationaal | 85–99 |
+| Wereldklasse | 100+ |
+
+### Instructie voor de coach-AI
+- Als de leeftijdscategorie bekend is: gebruik ALTIJD de bijhorende benchmarks, niet de senior-benchmarks
+- Benoem de categorie expliciet in de prestatiebeoordeling ("Voor een belofte van 13 jaar is dit een sterk resultaat…")
+- Voor Mini's: leg de nadruk op technische progressie en plezier, niet op scores
+- Als geen leeftijd bekend is: gebruik senior-benchmarks maar vermeld dat leeftijd onbekend is
+
+---
+
 ## Discipline Reference
 
 ### Speed Sprint — Single Rope Speed Sprint (SRSS)
