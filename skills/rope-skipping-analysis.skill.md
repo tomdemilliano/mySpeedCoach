@@ -5,44 +5,62 @@ It is injected into the system prompt of `/api/ai-analysis` calls.
 
 ---
 
-## Leeftijdscategorieën
+## Age Categories
 
-Prestaties moeten altijd beoordeeld worden in de context van de leeftijdscategorie van de sporter.
-Gebruik de onderstaande indeling bij elke analyse:
+Performances must always be evaluated in the context of the athlete's age category.
+Use the classification below in every analysis:
 
-| Categorie | Leeftijd | Verwachting |
+| Category | Age      | Expectation |
 |---|---|---|
-| Mini      | < 12 jaar  | Techniek staat centraal; scores zijn secundair |
-| Belofte   | 12–14 jaar | Snelle ontwikkeling; vergelijk met beloften-benchmarks |
-| Junior    | 15–17 jaar | Dichter bij senior prestaties; competitief niveau realistisch |
-| Senior    | 18+ jaar   | Volledige prestatiemeting; vergelijk met senior benchmarks |
+| Mini      | < 12 yrs  | Technique is paramount; scores are secondary |
+| Promise   | 12–14 yrs | Rapid development phase; use promise benchmarks |
+| Junior    | 15–17 yrs | Approaching senior performance; competitive level realistic |
+| Senior    | 18+ yrs   | Full performance assessment; use senior benchmarks |
 
-### Belofte-benchmarks Speed Sprint (12–14 jaar, stappen in 30s)
-| Niveau | Stappen |
+### Promise Benchmarks — Speed Sprint (age 12–14, steps in 30s)
+| Level | Steps |
 |---|---|
 | Beginner | < 35 |
 | Club | 35–49 |
-| Regionaal | 50–64 |
-| Nationaal | 65–79 |
-| Internationaal | 80–94 |
-| Wereldklasse | 95+ |
+| Regional | 50–64 |
+| National | 65–79 |
+| International | 80–94 |
+| World class | 95+ |
 
-### Junior-benchmarks Speed Sprint (15–17 jaar, stappen in 30s)
-| Niveau | Stappen |
+### Junior Benchmarks — Speed Sprint (age 15–17, steps in 30s)
+| Level | Steps |
 |---|---|
 | Beginner | < 38 |
 | Club | 38–54 |
-| Regionaal | 55–69 |
-| Nationaal | 70–84 |
-| Internationaal | 85–99 |
-| Wereldklasse | 100+ |
+| Regional | 55–69 |
+| National | 70–84 |
+| International | 85–99 |
+| World class | 100+ |
 
-### Instructie voor de coach-AI
-- Als de leeftijdscategorie bekend is: gebruik ALTIJD de bijhorende benchmarks, niet de senior-benchmarks
-- Benoem de categorie expliciet in de prestatiebeoordeling ("Voor een belofte van 13 jaar is dit een sterk resultaat…")
-- Voor Mini's: leg de nadruk op technische progressie en plezier, niet op scores
-- Als geen leeftijd bekend is: gebruik senior-benchmarks maar vermeld dat leeftijd onbekend is
+### Promise Benchmarks — Endurance 3 min (age 12–14, steps in 180s)
+| Level | Steps |
+|---|---|
+| Beginner | < 80 |
+| Club | 80–149 |
+| Regional | 150–239 |
+| National | 240–349 |
+| International | 350–450 |
 
+### Junior Benchmarks — Endurance 3 min (age 15–17, steps in 180s)
+| Level | Steps |
+|---|---|
+| Beginner | < 100 |
+| Club | 100–179 |
+| Regional | 180–269 |
+| National | 270–389 |
+| International | 390–499 |
+
+### Instructions for the coach AI
+- If the age category is known: ALWAYS use the corresponding benchmarks, not the senior benchmarks
+- Explicitly name the category in the performance assessment (e.g. "For a 13-year-old promise athlete, this is a strong result…")
+- For Mini athletes: emphasise technical progression and enjoyment, not scores
+- Scale encouragement appropriately — a promise athlete achieving regional-level scores deserves the same recognition as a senior achieving national-level scores
+- If age is unknown: fall back to senior benchmarks but note that age is unavailable
 ---
 
 ## Discipline Reference
