@@ -138,11 +138,33 @@ function SessionChart({ session, zones, durationSeconds }) {
 }
 
 // ─── AI Analysis Panel ────────────────────────────────────────────────────────
-function AiAnalysis({ session, user, discipline, onClose }) {
+function AiAnalysis({ session, user, member, discipline, onClose }) {
   const [analysis, setAnalysis] = useState(null);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState('');
 
+  // Bereken leeftijd uit birthDate (ClubMember veld)
+  const leeftijd = (() => {
+    const bd = member?.birthDate;
+    if (!bd) return null;
+    const ms = bd?.seconds ? bd.seconds * 1000 : new Date(bd).getTime();
+    if (isNaN(ms)) return null;
+    const today = new Date();
+    const birth = new Date(ms);
+    let age = today.getFullYear() - birth.getFullYear();
+    const m = today.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+    return age;
+  })();
+
+  const leeftijdscategorie = (() => {
+    if (leeftijd === null) return null;
+    if (leeftijd < 12)  return `Mini (${leeftijd} jaar, onder 12)`;
+    if (leeftijd <= 14) return `Belofte (${leeftijd} jaar, 12–14)`;
+    if (leeftijd <= 17) return `Junior (${leeftijd} jaar, 15–17)`;
+    return `Senior (${leeftijd} jaar, 18+)`;
+  })();  
+  
   const runAnalysis = useCallback(async () => {
     setLoading(true); setError('');
     const telemetry = normaliseTelemetry(session.telemetry);
@@ -184,7 +206,7 @@ DISCIPLINE CONTEXT:
 - Stappen worden geteld op 1 voet (×2 = totaal sprongen). Bij Double Under en Triple Under gaat het om sprongen (niet stappen).
 - Benchmarks: zie domeinkennis hieronder.
 
-SPORTER: ${user?.firstName || ''} ${user?.lastName || ''}
+SPORTER: ${user?.firstName || ''} ${user?.lastName || ''}${leeftijdscategorie ? ` — ${leeftijdscategorie}` : ''}
 SESSIE: ${discName} — ${session.sessionType || 'Training'}
 SCORE: ${session.score || 0} stappen/sprongen in ${duration}s
 HARTSLAG: gem ${avgBpm} BPM, max ${maxBpm} BPM, trend: ${bpmTrend}
@@ -259,7 +281,7 @@ Geef in het Nederlands (max 300 woorden):
 }
 
 // ─── Session Row ──────────────────────────────────────────────────────────────
-function SessionRow({ session, user, disciplines, index }) {
+function SessionRow({ session, user, member, disciplines, index }) {
   const [expanded, setExpanded] = useState(false);
   const [showAi,   setShowAi]   = useState(false);
 
@@ -366,7 +388,7 @@ function SessionRow({ session, user, disciplines, index }) {
                 <ChevronRight size={12} color="#7c3aed" style={{ marginLeft: 'auto' }} />
               </button>
             ) : (
-              <AiAnalysis session={session} user={user} discipline={discipline} onClose={() => setShowAi(false)} />
+              <AiAnalysis session={session} user={user} member={member} discipline={discipline} onClose={() => setShowAi(false)} />
             )}
           </div>
         </div>
@@ -376,7 +398,7 @@ function SessionRow({ session, user, disciplines, index }) {
 }
 
 // ─── Sessions list (shared between member and coach-detail view) ──────────────
-function SessionsList({ sessions, user, disciplines, filterDisc, filterType, onFilterDiscChange, onFilterTypeChange }) {
+function SessionsList({ sessions, user, member, disciplines, filterDisc, filterType, onFilterDiscChange, onFilterTypeChange }) {
   const totalSessions = sessions.length;
   const bestScore     = sessions.reduce((m, s) => s.score > m ? s.score : m, 0);
   const avgScore      = sessions.length
@@ -463,6 +485,7 @@ function SessionsList({ sessions, user, disciplines, filterDisc, filterType, onF
               key={session.id}
               session={session}
               user={user}
+              member={member}
               disciplines={disciplines}
               index={i}
             />
@@ -555,7 +578,12 @@ function CoachView({ uid, user, disciplines }) {
   useEffect(() => {
     if (!selectedMember) return;
     setLoadingSessions(true);
-    setMemberSessions([]);
+    // Laad het volledige profiel (inclusief birthDate)
+    ClubMemberFactory.getById(clubId, memberId).then(snap => {
+      if (snap.exists()) setSelectedMemberProfile({ id: snap.id, ...snap.data() });
+    });
+
+    setMemberSessions([]);   
     const { clubId, memberId } = selectedMember;
     const unsub = ClubMemberFactory.getSessionHistory(clubId, memberId, (sessions) => {
       setMemberSessions(sessions);
@@ -610,6 +638,7 @@ function CoachView({ uid, user, disciplines }) {
           <SessionsList
             sessions={memberSessions}
             user={memberUser || user}
+            member={memberProfile}
             disciplines={disciplines}
             filterDisc={filterDisc}
             filterType={filterType}
@@ -667,6 +696,7 @@ export default function HistoryPage() {
   const [loading,        setLoading]        = useState(true);
   const [filterDisc,     setFilterDisc]     = useState('');
   const [filterType,     setFilterType]     = useState('');
+  const [memberProfile, setMemberProfile]   = useState(null);
 
   // Resolve user + member context
   useEffect(() => {
@@ -690,6 +720,13 @@ export default function HistoryPage() {
     return () => unsub();
   }, [memberContext]);
 
+  // Laad het ClubMember profiel wanneer memberContext bekend is
+  useEffect(() => {
+    if (!memberContext) return;
+    ClubMemberFactory.getById(memberContext.clubId, memberContext.memberId)
+      .then(snap => { if (snap.exists()) setMemberProfile({ id: snap.id, ...snap.data() }); });
+  }, [memberContext]);
+          
   // Detect coach status from sessionStorage (set by _app.js)
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -759,6 +796,7 @@ export default function HistoryPage() {
           <SessionsList
             sessions={sessions}
             user={currentUser}
+            member={memberProfile}
             disciplines={disciplines}
             filterDisc={filterDisc}
             filterType={filterType}
