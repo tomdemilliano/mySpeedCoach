@@ -605,7 +605,7 @@ export function LabelsTab({ uid, currentUser }) {
  
     const unsub = SeasonFactory.getAll(clubId, async (allSeasons) => {
       if (cancelled) return;
-      const active = allSeasons.filter(s => !s.isAbandoned);
+      const active = allSeasons.filter(s => !s.isAbandoned && s.isPublished);
       setSeasons(active);
  
       // Auto-expand current season
@@ -621,7 +621,7 @@ export function LabelsTab({ uid, currentUser }) {
       const map = {};
       await Promise.all(active.map(async season => {
         const labelDoc = await MemberLabelFactory.getForMember(clubId, season.id, memberId);
-        map[season.id] = labelDoc || null;
+        map[season.id] = (labelDoc && season.isPublished) ? labelDoc : null;
       }));
       if (!cancelled) {
         setLabelsBySeasonId(map);
