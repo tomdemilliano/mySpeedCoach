@@ -61,6 +61,7 @@ The primary club using the app is **Antwerp Ropes**.
 │   ├── register.js         # Multi-step registration flow
 │   ├── verify-email.js     # Email verification gate
 │   ├── no-club.js          # Shown to verified users without a club membership
+│   ├── club-info.js        # "Mijn Club" member info page (webshop, accident procedure, documents, contact)
 │   ├── training-plan/
 │   │   └── [planId].js     # Training plan detail page (skippers + coaches)
 │   └── agenda/
@@ -81,6 +82,7 @@ The primary club using the app is **Antwerp Ropes**.
 │   ├── PushPermissionBanner.js # Push opt-in banner + settings toggle
 │   ├── SeasonBanner.js         # Admin reminder banner when a new season is approaching
 │   ├── SeasonManager.js        # Season CRUD UI for clubadmin
+│   ├── RichTextEditor.js       # Lightweight contentEditable rich text editor (bold/italic/underline/lists/links/mailto) + RichTextViewer export
 │   └── calendar/
 │       ├── AttendanceList.js       # Coach tick-list for marking attendance per event
 │       ├── AttendanceReport.js     # Attendance matrix + coach overview reports
@@ -499,13 +501,46 @@ The `ClubMember` document (`clubs/{clubId}/members/{memberId}`) now includes:
 
 `clubadmin.js` is organised into five tabs (in order):
 
-1. **Algemeen** — club name, logo (`ClubLogoUploader`), contact info, season start day/month
+1. **Algemeen** — club name, logo (`ClubLogoUploader`), contact info, season start day/month, and the **Clubinfopagina** section (`ClubInfoSection` component, inline in the tab):
+   - **Webshop** — URL + description + toggle (visible/hidden on info page)
+   - **Bij een ongeval** — rich text instructions via `RichTextEditor` + toggle
+   - **Clubdocumenten** — dynamic list of documents with title, type, URL and per-item toggle
+   - All `clubInfo` fields are stored as a nested `clubInfo` object on the `clubs/{clubId}` document and saved via the existing `ClubFactory.update()` call in `handleSaveClub`
 2. **Leden** — member list + CRUD (`ClubMemberFormModal`), with sub-tabs:
    - **Leden** — full member list with group tags, type badges, award/edit/delete actions
    - **Aanvragen** — join request approval flow (`ApproveMemberModal`, reject modal)
 3. **Groepen** — group list with drag-and-drop member assignment; group detail shows membership table with skipper/coach toggles
 4. **Seizoenen** — `SeasonManager` component; create/abandon seasons with prefill logic
 5. **Labels** — `LabelGrid` component; assign A/B/C competitive labels per member per season
+
+---
+
+## Club Info Page
+
+`pages/club-info.js` — member-facing page accessible via "Mijn Club" in the sidebar / home screen shortcut. Resolves the user's club via `UserMemberLinkFactory` and renders only items where the admin has set the corresponding toggle to visible:
+
+| Section | Source field | Notes |
+|---|---|---|
+| Webshop | `clubInfo.webshopUrl` + `showWebshop` | External link card |
+| Noodprocedure | `clubInfo.accidentText` + `showAccident` | Rendered via `RichTextViewer`; collapsible if long |
+| Documenten | `clubInfo.documents[]` filtered by `showOnInfoPage` | Link/download per item with type icon |
+| Contact | `club.contactEmail`, `contactPhone`, `street`, `city` | Always shown if present; no separate toggle |
+
+---
+
+## RichTextEditor Component
+
+`components/RichTextEditor.js` — lightweight rich text editor built on `contentEditable` + `document.execCommand`. No external dependencies.
+
+**Toolbar features:** bold · italic · underline · ordered list · unordered list · hyperlink (URL) · e-mailadres (`mailto:`)
+
+The link/email modal has a tab switcher: "Weblink" adds `https://` if missing and sets `target="_blank"`; "E-mailadres" strips any existing `mailto:` prefix and wraps the address in `mailto:`. If text is selected when the link is inserted, that text becomes the link label; if nothing is selected, the URL or address itself is inserted as the label.
+
+Paste is always stripped to plain text to prevent external formatting from leaking in.
+
+The file exports two symbols:
+- **`default` — `RichTextEditor`** — the editor itself; `value` / `onChange` props work with an HTML string
+- **`RichTextViewer`** — read-only `dangerouslySetInnerHTML` wrapper with matching list/link/bold/italic styles; used in `club-info.js`
 
 ---
 
