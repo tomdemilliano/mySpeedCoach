@@ -110,9 +110,9 @@ function SidebarDrawer({ currentPath, open, onClose, userRole, isCoach }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <img
-              src="/icons/skippr-logo-transparant.png"
+              src="/icons/"
               alt="Skippr"
-              style={{ height: '80px', width: 'auto', objectFit: 'contain' }}
+              style={{ height: '44px', width: 'auto', objectFit: 'contain' }}
             />
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}>
@@ -329,7 +329,7 @@ function DesktopSidebar({ currentPath, userRole, isCoach, announcementCount }) {
         <img
           src="/icons/skippr-logo-transparant.png"
           alt="Skippr"
-          style={{ height: '32px', width: 'auto', objectFit: 'contain' }}
+          style={{ height: '44px', width: 'auto', objectFit: 'contain' }}
         />
       </div>
 
