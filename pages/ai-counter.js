@@ -954,7 +954,7 @@ export default function AiCounterPage() {
         } catch (e) { setBackendError(`Camera toegang mislukt: ${e.message}`); return false; }
         const canvas = canvasRef.current;
         const INFER_INTERVAL_MS = 80; let lastInferTime = 0;
-        let LastPoseResults = null;
+        let lastPoseResults = null;
         
         const runLoop = () => {
           if (!videoEl.srcObject) return;
@@ -978,11 +978,11 @@ export default function AiCounterPage() {
               );
               const results = poseLandmarker.detectForVideo(offscreenRef.current, now);
               
-              lastPoseResults.current = results;
+              lastPoseResults = results;
               onMpResults(results, now);
-            } else if (LastPoseResults.Current) {
+            } else if (lastPoseResults) {
               // Herteken het vorige skelet op het verse frame
-              onMpResults(lastPoseResults.current, performance.now());
+              onMpResults(lastPoseResults, performance.now());
             }
           }
           frameRef.current = requestAnimationFrame(runLoop);
