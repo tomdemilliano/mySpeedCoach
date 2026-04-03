@@ -112,7 +112,7 @@ function SidebarDrawer({ currentPath, open, onClose, userRole, isCoach }) {
             <img
               src="/icons/skippr-logo-transparant.png"
               alt="Skippr"
-              style={{ height: '64px', width: 'auto', objectFit: 'contain' }}
+              style={{ height: '80px', width: 'auto', objectFit: 'contain' }}
             />
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}>
