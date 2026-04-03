@@ -5,7 +5,7 @@
  * Geen externe dependencies — werkt volledig met inline CSS (CLAUDE.md §9).
  *
  * Ondersteunde opmaak:
- *   Bold · Italic · Underline · Ordered list · Unordered list · Hyperlink
+ *   Bold · Italic · Underline · Ordered list · Unordered list · Hyperlink · E-mailadres (mailto:)
  *
  * Props:
  *   value      : string  — HTML string (geserialiseerde inhoud)
@@ -60,57 +60,111 @@ function ToolbarDivider() {
 }
 
 // ─── Link modal ───────────────────────────────────────────────────────────────
-function LinkModal({ onConfirm, onClose, initialUrl = '' }) {
-  const [url, setUrl] = useState(initialUrl);
+function LinkModal({ onConfirm, onClose }) {
+  const [tab,   setTab]   = useState('url');   // 'url' | 'email'
+  const [url,   setUrl]   = useState('');
+  const [email, setEmail] = useState('');
   const inputRef = useRef(null);
 
   useEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
 
+  // Wanneer van tab gewisseld wordt, focus het nieuwe input
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 30);
+  }, [tab]);
+
   const handleConfirm = () => {
-    const trimmed = url.trim();
-    if (!trimmed) return;
-    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-    onConfirm(withProtocol);
+    if (tab === 'url') {
+      const trimmed = url.trim();
+      if (!trimmed) return;
+      const href = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+      onConfirm(href, '_blank');
+    } else {
+      const trimmed = email.trim();
+      if (!trimmed) return;
+      // Verwijder eventueel al ingeplakt mailto: prefix
+      const address = trimmed.replace(/^mailto:/i, '');
+      onConfirm(`mailto:${address}`, null);
+    }
   };
+
+  const isValid = tab === 'url' ? url.trim().length > 0 : email.trim().length > 0;
 
   return (
     <div
-      style={{
-        position: 'fixed', inset: 0,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 600, padding: '16px',
-      }}
+      style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 600, padding: '16px' }}
       onMouseDown={e => e.target === e.currentTarget && onClose()}
     >
-      <div style={{
-        backgroundColor: '#1e293b', borderRadius: '14px',
-        border: '1px solid #334155', padding: '20px',
-        width: '100%', maxWidth: '380px',
-      }}>
-        <div style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9', marginBottom: '12px' }}>
-          🔗 Link invoegen
+      <div style={{ backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #334155', padding: '20px', width: '100%', maxWidth: '380px' }}>
+
+        {/* Tab switcher */}
+        <div style={{ display: 'flex', backgroundColor: '#0f172a', borderRadius: '8px', padding: '3px', border: '1px solid #334155', marginBottom: '16px' }}>
+          {[
+            { key: 'url',   label: '🔗 Weblink' },
+            { key: 'email', label: '✉️ E-mailadres' },
+          ].map(t => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              style={{
+                flex: 1, padding: '7px 10px', borderRadius: '5px', border: 'none',
+                backgroundColor: tab === t.key ? '#1e293b' : 'transparent',
+                color: tab === t.key ? '#f1f5f9' : '#64748b',
+                fontSize: '12px', fontWeight: tab === t.key ? '700' : '500',
+                cursor: 'pointer', fontFamily: 'inherit',
+                transition: 'all 0.15s',
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
-        <input
-          ref={inputRef}
-          value={url}
-          onChange={e => setUrl(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleConfirm(); } if (e.key === 'Escape') onClose(); }}
-          placeholder="https://www.voorbeeld.be"
-          style={{
-            width: '100%', padding: '10px 12px', borderRadius: '8px',
-            border: '1px solid #334155', backgroundColor: '#0f172a',
-            color: 'white', fontSize: '14px', fontFamily: 'inherit',
-            boxSizing: 'border-box', marginBottom: '14px',
-          }}
-        />
+
+        {tab === 'url' && (
+          <>
+            <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '6px' }}>
+              URL
+            </label>
+            <input
+              ref={inputRef}
+              value={url}
+              onChange={e => setUrl(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleConfirm(); } if (e.key === 'Escape') onClose(); }}
+              placeholder="https://www.voorbeeld.be"
+              style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px', fontFamily: 'inherit', boxSizing: 'border-box', marginBottom: '14px' }}
+            />
+          </>
+        )}
+
+        {tab === 'email' && (
+          <>
+            <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '6px' }}>
+              E-mailadres
+            </label>
+            <input
+              ref={inputRef}
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleConfirm(); } if (e.key === 'Escape') onClose(); }}
+              placeholder="coach@mijnclub.be"
+              style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '14px', fontFamily: 'inherit', boxSizing: 'border-box', marginBottom: '6px' }}
+            />
+            <div style={{ fontSize: '11px', color: '#475569', marginBottom: '14px' }}>
+              Opent het e-mailprogramma van de gebruiker bij klikken.
+            </div>
+          </>
+        )}
+
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             type="button"
             onClick={handleConfirm}
-            style={{ flex: 1, padding: '9px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '700', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' }}
+            disabled={!isValid}
+            style={{ flex: 1, padding: '9px', backgroundColor: '#3b82f6', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '700', fontSize: '13px', cursor: isValid ? 'pointer' : 'default', fontFamily: 'inherit', opacity: isValid ? 1 : 0.45 }}
           >
             Invoegen
           </button>
@@ -200,24 +254,32 @@ export default function RichTextEditor({
     setShowLinkModal(true);
   };
 
-  const handleLinkConfirm = (url) => {
+  const handleLinkConfirm = (href, target) => {
     setShowLinkModal(false);
     restoreSelection();
     editorRef.current?.focus();
-    // Als er niets geselecteerd is, voeg de URL zelf in als tekst
+
+    const isMailto = href.startsWith('mailto:');
+    const targetAttr = target ? `target="${target}" rel="noopener noreferrer"` : '';
+    // Leesbare weergavetekst: voor mailto toon het adres, voor URL toon de URL
+    const displayText = isMailto ? href.replace('mailto:', '') : href;
+
     const sel = window.getSelection();
     if (sel && sel.toString().trim() === '') {
-      document.execCommand('insertHTML', false, `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;text-decoration:underline">${url}</a>`);
+      // Geen selectie — voeg link in met weergavetekst
+      document.execCommand('insertHTML', false,
+        `<a href="${href}" ${targetAttr} style="color:#60a5fa;text-decoration:underline">${displayText}</a>`
+      );
     } else {
-      document.execCommand('createLink', false, url);
-      // Style de link
+      // Selectie aanwezig — wrap de selectie in een link
+      document.execCommand('createLink', false, href);
       const links = editorRef.current?.querySelectorAll('a');
       links?.forEach(a => {
-        if (a.href === url || a.getAttribute('href') === url) {
+        const ah = a.getAttribute('href');
+        if (ah === href) {
           a.style.color = '#60a5fa';
           a.style.textDecoration = 'underline';
-          a.target = '_blank';
-          a.rel = 'noopener noreferrer';
+          if (target) { a.target = target; a.rel = 'noopener noreferrer'; }
         }
       });
     }
