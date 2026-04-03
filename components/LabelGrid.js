@@ -3,29 +3,29 @@
  *
  * Grid for assigning competitive level labels (A / B / C) to skippers.
  * Rows = competitive skippers, columns = active disciplines + Allround (last).
- * Group filter above the grid. Group tags on each member row.
+ * Group column + filter above the grid.
+ * Publish / unpublish button: labels are only visible to members after publishing.
  *
  * Props:
- *   clubId      : string
- *   season      : season object { id, name }
- *   members     : ClubMember[]  — all club members (all types)
- *   groups      : group[]       — all groups for this club { id, name }
- *   groupMemberMap : { [groupId]: string[] } — memberId[] per group
- *   uid         : string
- *   disciplines : discipline[]
+ *   clubId         : string
+ *   season         : season object { id, name }
+ *   members        : ClubMember[]  — all club members (all types)
+ *   groups         : group[]       — all groups for this club { id, name }
+ *   groupMemberMap : { [groupId]: groupMember[] } — group members per group
+ *   uid            : string
+ *   disciplines    : discipline[]
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { MemberLabelFactory, SeasonFactory } from '../constants/dbSchema';
-import { Save, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Save, CheckCircle2, AlertCircle, RefreshCw, Eye, EyeOff } from 'lucide-react';
 
 const LABEL_OPTIONS = ['A', 'B', 'C'];
 
-// Neutral, non-judgmental color palette for A / B / C
 const LABEL_COLORS = {
-  A: '#3b82f6',  // blue
-  B: '#a78bfa',  // purple
-  C: '#06b6d4',  // teal
+  A: '#3b82f6',
+  B: '#a78bfa',
+  C: '#06b6d4',
 };
 
 function labelColor(label) {
@@ -64,15 +64,12 @@ function LabelCell({ value, onChange }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function LabelGrid({ clubId, season: initialSeason, members, groups, groupMemberMap, uid, disciplines }) {
   const eligibleDiscs = disciplines.filter(d => d.hasCompetitiveLabel && d.isActive !== false);
-
-  // Only competitive skippers
   const competitiveMembers = members.filter(m => m.skipperType === 'competitive');
 
   // ── Season selector ───────────────────────────────────────────────────────
   const [allSeasons,     setAllSeasons]     = useState([]);
   const [selectedSeason, setSelectedSeason] = useState(initialSeason || null);
 
-  // Load all seasons for this club
   useEffect(() => {
     if (!clubId) return;
     const unsub = SeasonFactory.getAll(clubId, (seasons) => {
@@ -82,39 +79,62 @@ export default function LabelGrid({ clubId, season: initialSeason, members, grou
     return () => unsub();
   }, [clubId]);
 
-  // When the externally-provided current season changes (initial load), set it
   useEffect(() => {
-    if (initialSeason && !selectedSeason) {
-      setSelectedSeason(initialSeason);
-    }
-  }, [initialSeason?.id]);
+    if (initialSeason && !selectedSeason) setSelectedSeason(initialSeason);
+  }, [initialSeason?.id]); // eslint-disable-line
 
   const season = selectedSeason;
 
-  // Group filter state
+  // ── Group filter ──────────────────────────────────────────────────────────
   const [filterGroupId, setFilterGroupId] = useState('');
 
-  // Build a map of memberId → group names (where they are skipper)
+  // Set of competitive member IDs for fast lookup
+  const competitiveMemberIds = new Set(competitiveMembers.map(m => m.id));
+
+  // Only show groups that contain at least one competitive skipper
+  const groupsWithCompetitiveSkippers = (groups || []).filter(g => {
+    const gMembers = groupMemberMap?.[g.id] || [];
+    return gMembers.some(gm =>
+      competitiveMemberIds.has(typeof gm === 'string' ? gm : (gm.memberId || gm.id))
+    );
+  });
+
+  // Build memberId → group names map (all groups, for display in rows)
   const memberGroupNames = {};
   competitiveMembers.forEach(m => {
     const names = [];
     (groups || []).forEach(g => {
-      if ((groupMemberMap?.[g.id] || []).includes(m.id)) names.push(g.name);
+      const gMembers = groupMemberMap?.[g.id] || [];
+      const inGroup = gMembers.some(gm =>
+        (typeof gm === 'string' ? gm : (gm.memberId || gm.id)) === m.id
+      );
+      if (inGroup) names.push(g.name);
     });
     memberGroupNames[m.id] = names;
   });
 
   // Filtered members based on group selection
   const filteredMembers = filterGroupId
-    ? competitiveMembers.filter(m => (groupMemberMap?.[filterGroupId] || []).includes(m.id))
+    ? competitiveMembers.filter(m => {
+        const gMembers = groupMemberMap?.[filterGroupId] || [];
+        return gMembers.some(gm =>
+          (typeof gm === 'string' ? gm : (gm.memberId || gm.id)) === m.id
+        );
+      })
     : competitiveMembers;
 
-  // grid: { [memberId]: { allround: string|null, disciplines: { [discId]: string|null } } }
+  // ── Grid state ────────────────────────────────────────────────────────────
   const [grid,    setGrid]    = useState({});
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
   const [saveOk,  setSaveOk]  = useState(false);
   const [error,   setError]   = useState('');
+
+  // ── Publish state ─────────────────────────────────────────────────────────
+  const [publishing,   setPublishing]   = useState(false);
+  const [publishError, setPublishError] = useState('');
+  // isPublished is read from the selected season document
+  const isPublished = selectedSeason?.isPublished ?? false;
 
   // Load existing labels for this season
   useEffect(() => {
@@ -149,7 +169,7 @@ export default function LabelGrid({ clubId, season: initialSeason, members, grou
 
     load();
     return () => { cancelled = true; };
-  }, [clubId, season?.id, competitiveMembers.length, eligibleDiscs.length]);
+  }, [clubId, season?.id, competitiveMembers.length, eligibleDiscs.length]); // eslint-disable-line
 
   const setAllround = useCallback((memberId, value) => {
     setGrid(prev => ({ ...prev, [memberId]: { ...prev[memberId], allround: value } }));
@@ -162,6 +182,7 @@ export default function LabelGrid({ clubId, season: initialSeason, members, grou
     }));
   }, []);
 
+  // ── Save labels ───────────────────────────────────────────────────────────
   const handleSave = async () => {
     setError('');
     setSaving(true);
@@ -196,7 +217,35 @@ export default function LabelGrid({ clubId, season: initialSeason, members, grou
     }
   };
 
+  // ── Publish / unpublish ───────────────────────────────────────────────────
+  const handleTogglePublish = async () => {
+    if (!season?.id) return;
+    setPublishError('');
+    setPublishing(true);
+    try {
+      if (isPublished) {
+        await SeasonFactory.unpublish(clubId, season.id);
+        setSelectedSeason(prev => ({ ...prev, isPublished: false }));
+      } else {
+        await SeasonFactory.publish(clubId, season.id);
+        setSelectedSeason(prev => ({ ...prev, isPublished: true }));
+      }
+    } catch (e) {
+      console.error('[LabelGrid] publish error:', e);
+      setPublishError(isPublished ? 'Intrekken mislukt.' : 'Publiceren mislukt.');
+    } finally {
+      setPublishing(false);
+    }
+  };
 
+  // ── Keep selectedSeason in sync with allSeasons (for isPublished) ─────────
+  useEffect(() => {
+    if (!selectedSeason?.id || allSeasons.length === 0) return;
+    const fresh = allSeasons.find(s => s.id === selectedSeason.id);
+    if (fresh) setSelectedSeason(fresh);
+  }, [allSeasons]); // eslint-disable-line
+
+  // ── Render guards ─────────────────────────────────────────────────────────
   if (!season) return (
     <div style={emptyState}>
       <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>
@@ -222,75 +271,122 @@ export default function LabelGrid({ clubId, season: initialSeason, members, grou
 
   return (
     <div>
-      {/* Season + filter row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
+      {/* ── Season + filter row ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
 
-          {/* Season selector */}
+        {/* Season selector */}
+        <select
+          value={selectedSeason?.id || ''}
+          onChange={e => {
+            const s = allSeasons.find(s => s.id === e.target.value);
+            setSelectedSeason(s || null);
+          }}
+          style={{
+            padding: '6px 10px', borderRadius: '8px',
+            border: `1px solid ${selectedSeason ? '#3b82f666' : '#334155'}`,
+            backgroundColor: '#0f172a',
+            color: selectedSeason ? '#f1f5f9' : '#64748b',
+            fontSize: '12px', fontFamily: 'inherit', cursor: 'pointer',
+          }}
+        >
+          <option value="">— Kies seizoen —</option>
+          {allSeasons.map(s => {
+            const now   = Date.now();
+            const start = s.startDate?.seconds ? s.startDate.seconds * 1000 : null;
+            const end   = s.endDate?.seconds   ? s.endDate.seconds   * 1000 : null;
+            const isCur = start && end && start <= now && now <= end;
+            return (
+              <option key={s.id} value={s.id}>
+                {s.name}{isCur ? ' (huidig)' : ''}
+              </option>
+            );
+          })}
+        </select>
+
+        {selectedSeason && (
+          <span style={{ fontSize: '11px', color: '#475569' }}>
+            {filteredMembers.length} van {competitiveMembers.length} skipper{competitiveMembers.length !== 1 ? 's' : ''}
+          </span>
+        )}
+
+        {/* Group filter — only groups with competitive skippers */}
+        {groupsWithCompetitiveSkippers.length > 0 && (
           <select
-            value={selectedSeason?.id || ''}
-            onChange={e => {
-              const s = allSeasons.find(s => s.id === e.target.value);
-              setSelectedSeason(s || null);
-            }}
+            value={filterGroupId}
+            onChange={e => setFilterGroupId(e.target.value)}
             style={{
+              marginLeft: 'auto',
               padding: '6px 10px', borderRadius: '8px',
-              border: `1px solid ${selectedSeason ? '#3b82f666' : '#334155'}`,
-              backgroundColor: '#0f172a',
-              color: selectedSeason ? '#f1f5f9' : '#64748b',
+              border: '1px solid #334155', backgroundColor: '#0f172a',
+              color: filterGroupId ? '#f1f5f9' : '#64748b',
               fontSize: '12px', fontFamily: 'inherit', cursor: 'pointer',
             }}
           >
-            <option value="">— Kies seizoen —</option>
-            {allSeasons.map(s => {
-              const now   = Date.now();
-              const start = s.startDate?.seconds ? s.startDate.seconds * 1000 : null;
-              const end   = s.endDate?.seconds   ? s.endDate.seconds   * 1000 : null;
-              const isCur = start && end && start <= now && now <= end;
-              return (
-                <option key={s.id} value={s.id}>
-                  {s.name}{isCur ? ' (huidig)' : ''}
-                </option>
-              );
-            })}
+            <option value="">Alle groepen</option>
+            {groupsWithCompetitiveSkippers.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
+        )}
+      </div>
 
-          {selectedSeason && (
-            <div style={{ fontSize: '13px', color: '#64748b' }}>
-              <span style={{ marginLeft: '4px', fontSize: '11px', color: '#475569' }}>
-                {filteredMembers.length} van {competitiveMembers.length} skipper{competitiveMembers.length !== 1 ? 's' : ''}
+      {/* ── Publish status banner ── */}
+      {selectedSeason && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
+          backgroundColor: isPublished ? '#22c55e11' : '#f59e0b11',
+          border: `1px solid ${isPublished ? '#22c55e33' : '#f59e0b33'}`,
+          borderRadius: '10px', padding: '10px 14px', marginBottom: '14px',
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+              {isPublished
+                ? <Eye size={14} color="#22c55e" />
+                : <EyeOff size={14} color="#f59e0b" />}
+              <span style={{ fontSize: '13px', fontWeight: '700', color: isPublished ? '#22c55e' : '#f59e0b' }}>
+                {isPublished ? 'Labels zijn zichtbaar voor leden' : 'Labels zijn nog niet vrijgegeven'}
               </span>
             </div>
-          )}
-
-          {/* Group filter */}
-          {(groups || []).length > 0 && (
-            <select
-              value={filterGroupId}
-              onChange={e => setFilterGroupId(e.target.value)}
-              style={{
-                marginLeft: 'auto',
-                padding: '6px 10px', borderRadius: '8px',
-                border: '1px solid #334155', backgroundColor: '#0f172a',
-                color: filterGroupId ? '#f1f5f9' : '#64748b',
-                fontSize: '12px', fontFamily: 'inherit', cursor: 'pointer',
-              }}
-            >
-              <option value="">Alle groepen</option>
-                {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', paddingLeft: '21px' }}>
+              {isPublished
+                ? 'Leden kunnen hun niveaulabels zien in hun instellingen. Trek in om opnieuw aan te passen.'
+                : 'Sla de labels op en geef ze vrij wanneer je klaar bent. Leden zien niets tot je publiceert.'}
+            </div>
+          </div>
+          <button
+            onClick={handleTogglePublish}
+            disabled={publishing}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '6px',
+              padding: '8px 14px', borderRadius: '8px', border: 'none',
+              backgroundColor: isPublished ? '#ef444422' : '#22c55e',
+              color: isPublished ? '#ef4444' : 'white',
+              fontWeight: '700', fontSize: '12px', cursor: publishing ? 'default' : 'pointer',
+              opacity: publishing ? 0.6 : 1, fontFamily: 'inherit',
+              border: isPublished ? '1px solid #ef444433' : 'none',
+            }}
+          >
+            {publishing
+              ? <RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} />
+              : isPublished ? <EyeOff size={13} /> : <Eye size={13} />}
+            {publishing ? 'Bezig…' : isPublished ? 'Intrekken' : 'Vrijgeven voor leden'}
+          </button>
+          {publishError && (
+            <div style={{ width: '100%', fontSize: '11px', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <AlertCircle size={11} /> {publishError}
+            </div>
           )}
         </div>
+      )}
 
-      {/* Scrollable table */}
+      {/* ── Scrollable table ── */}
       <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #334155', marginBottom: '16px' }}>
-        <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '400px' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '460px' }}>
           <thead>
             <tr style={{ backgroundColor: '#0f172a' }}>
-              {/* Member name */}
-              <th style={{ ...th, textAlign: 'left', paddingLeft: '14px', minWidth: '160px' }}>
+              {/* Member name + group */}
+              <th style={{ ...th, textAlign: 'left', paddingLeft: '14px', minWidth: '180px' }}>
                 Skipper
               </th>
-              {/* Discipline columns — Allround last */}
+              {/* Discipline columns */}
               {eligibleDiscs.map(d => (
                 <th key={d.id} style={{ ...th, width: '58px', minWidth: '58px' }}>
                   <div style={{
@@ -318,23 +414,33 @@ export default function LabelGrid({ clubId, season: initialSeason, members, grou
                 </td>
               </tr>
             ) : filteredMembers.map((member, idx) => {
-              const row       = grid[member.id] || { allround: null, disciplines: {} };
+              const row        = grid[member.id] || { allround: null, disciplines: {} };
               const groupNames = memberGroupNames[member.id] || [];
               return (
                 <tr key={member.id} style={{ backgroundColor: idx % 2 === 0 ? '#1e293b' : '#1a2535' }}>
                   {/* Name + group tags */}
                   <td style={{ ...td, paddingLeft: '14px', borderRight: '1px solid #334155' }}>
-                    <div style={{ fontWeight: '600', fontSize: '13px', color: '#f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '150px' }}>
+                    <div style={{ fontWeight: '600', fontSize: '13px', color: '#f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
                       {member.firstName} {member.lastName}
                     </div>
-                    {groupNames.length > 0 && (
+                    {groupNames.length > 0 ? (
                       <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', marginTop: '3px' }}>
                         {groupNames.map(name => (
-                          <span key={name} style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#3b82f611', border: '1px solid #3b82f633', color: '#60a5fa', fontWeight: '600', whiteSpace: 'nowrap' }}>
+                          <span key={name} style={{
+                            fontSize: '9px', padding: '1px 5px', borderRadius: '4px',
+                            backgroundColor: name === (groups.find(g => g.id === filterGroupId)?.name) && filterGroupId
+                              ? '#3b82f633' : '#3b82f611',
+                            border: '1px solid #3b82f633',
+                            color: '#60a5fa', fontWeight: '600', whiteSpace: 'nowrap',
+                          }}>
                             {name}
                           </span>
                         ))}
                       </div>
+                    ) : (
+                      <span style={{ fontSize: '9px', color: '#475569', marginTop: '2px', display: 'inline-block' }}>
+                        Geen groep
+                      </span>
                     )}
                   </td>
                   {/* Discipline cells */}
@@ -346,7 +452,7 @@ export default function LabelGrid({ clubId, season: initialSeason, members, grou
                       />
                     </td>
                   ))}
-                  {/* Allround — last column */}
+                  {/* Allround */}
                   <td style={{ ...td, borderRight: '1px solid #1e293b' }}>
                     <LabelCell
                       value={row.allround}
@@ -395,5 +501,5 @@ const th = {
   color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px',
   textAlign: 'center', borderBottom: '1px solid #334155',
 };
-const td          = { padding: '8px 4px', verticalAlign: 'middle' };
-const emptyState  = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', textAlign: 'center' };
+const td         = { padding: '8px 4px', verticalAlign: 'middle' };
+const emptyState = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', textAlign: 'center' };
