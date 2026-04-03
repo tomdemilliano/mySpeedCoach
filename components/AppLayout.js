@@ -4,7 +4,7 @@ import {
   Zap, Hash, ShieldAlert,
   X, ChevronRight, Medal, Home,
   MoreHorizontal, Trophy, History,
-  Building2, Award, Megaphone, Calendar
+  Building2, Award, Megaphone, Calendar, Building2
 } from 'lucide-react';
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
@@ -58,15 +58,16 @@ const getSidebarItems = (role, isCoach) => {
   const items = [];
 
   // Everyone
-  items.push({ href: '/achievements', label: 'Prestaties',    icon: Trophy,        description: 'PR\'s & doelen',       color: '#f59e0b' });
-  items.push({ href: '/badges',   label: 'Badge leaderboard', icon: Medal,         description: 'Club klassement',      color: '#f59e0b' });
-  items.push({ href: '/history',  label: 'Geschiedenis',      icon: History,       description: 'Sessies & AI analyse', color: '#60a5fa' });
+  items.push({ href: '/club-info',    label: 'Mijn Club',         icon: Building2, description: 'Webshop, documenten & info', color: '#3b82f6' });
+  items.push({ href: '/achievements', label: 'Prestaties',        icon: Trophy,    description: 'PR\'s & doelen',             color: '#f59e0b' });
+  items.push({ href: '/badges',       label: 'Badge leaderboard', icon: Medal,     description: 'Club klassement',            color: '#f59e0b' });
+  items.push({ href: '/history',      label: 'Geschiedenis',      icon: History,   description: 'Sessies & AI analyse',       color: '#60a5fa' });
   
 
   // Coaches + admins
   if (hasAdminAccess) {
-    items.push({ href: '/badge-beheer', label: 'Badge beheer', icon: Award,         description: 'Aanmaken & uitreiken', color: '#a78bfa' });
-    items.push({ href: '/calendar-admin',  label: 'Kalenderbeheer',  icon: Calendar,        description: 'Trainingen & schema\'s', color: '#22c55e' });
+    items.push({ href: '/badge-beheer',    label: 'Badge beheer',   icon: Award,    description: 'Aanmaken & uitreiken',   color: '#a78bfa' });
+    items.push({ href: '/calendar-admin',  label: 'Kalenderbeheer', icon: Calendar, description: 'Trainingen & schema\'s', color: '#22c55e' });
   }
 
   // Admins only
