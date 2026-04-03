@@ -106,16 +106,15 @@ function SidebarDrawer({ currentPath, open, onClose, userRole, isCoach }) {
         {/* Logo row */}
         <div style={{
           padding: '20px 20px 16px', borderBottom: '1px solid #1e293b',
-          display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'space-between',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          position: 'relative',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <img
-              src="/icons/"
-              alt="Skippr"
-              style={{ height: '44px', width: 'auto', objectFit: 'contain' }}
-            />
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}>
+          <img
+            src="/icons/skippr-logo-transparant.png"
+            alt="Skippr"
+            style={{ height: '56px', width: 'auto', objectFit: 'contain' }}
+          />
+          <button onClick={onClose} style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}>
             <X size={18} />
           </button>
         </div>
@@ -324,12 +323,12 @@ function DesktopSidebar({ currentPath, userRole, isCoach, announcementCount }) {
     <aside className="desktop-sidebar">
       <div style={{
         padding: '20px 20px 16px', borderBottom: '1px solid #1e293b',
-        display: 'flex', alignItems: 'center', gap: '10px',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
         <img
           src="/icons/skippr-logo-transparant.png"
           alt="Skippr"
-          style={{ height: '44px', width: 'auto', objectFit: 'contain' }}
+          style={{ height: '56px', width: 'auto', objectFit: 'contain' }}
         />
       </div>
 
