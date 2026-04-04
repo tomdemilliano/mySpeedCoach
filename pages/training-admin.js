@@ -1,5 +1,5 @@
 /**
- * pages/training-beheer.js
+ * pages/training-admin.js
  *
  * Trainingbeheer — toegankelijk voor coaches, clubadmin en superadmin.
  *
