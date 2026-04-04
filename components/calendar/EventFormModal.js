@@ -36,6 +36,13 @@ const TYPE_OPTIONS = [
   { value: 'competition',label: 'Wedstrijd',       icon: Trophy,   color: '#f97316' },
 ];
 
+const COMPETITION_TYPES = [
+  { value: 'recrea',  label: 'Recrea' },
+  { value: 'masters', label: 'Masters' },
+  { value: 'teams',   label: 'Teams' },
+  { value: 'demo',    label: 'Demo' },
+];
+
 const DURATION_OPTIONS = [
   { value: 45,  label: '45 min' },
   { value: 60,  label: '1 uur' },
@@ -174,35 +181,54 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
   const isEdit = mode === 'edit' && !!event;
   const today  = new Date().toISOString().split('T')[0];
 
-  // Bepaal initieel einduur als het type geen vaste duur heeft
   const initEndTime = () => {
     if (!isEdit || !event?.endAt) return '';
+    // Geen einduur tonen als endAt === startAt (punt-event)
+    if (event.endAt?.seconds === event.startAt?.seconds) return '';
     return tsToTimeStr(event.endAt);
   };
 
+  // Herstel manuele locatievelden uit de opgeslagen locationNote (formaat: "Naam|Adres|Postcode|Gemeente")
+  const parseManualLoc = (note) => {
+    if (!note) return { name: '', address: '', postalCode: '', city: '' };
+    const parts = note.split('|');
+    return {
+      name:       parts[0] || '',
+      address:    parts[1] || '',
+      postalCode: parts[2] || '',
+      city:       parts[3] || '',
+    };
+  };
+  const savedManual = parseManualLoc(
+    (!event?.locationId && event?.locationNote) ? event.locationNote : ''
+  );
+
   const [form, setForm] = useState({
-    type:         event?.type         || 'training',
-    title:        event?.title        || '',
-    groupIds:     event?.groupIds     || [],
-    // Locatie: keuze uit lijst (locationId) OF vrij veld (manualLocation)
-    locationId:      event?.locationId      || '',
-    manualLocation:  event?.locationNote    || '',  // vrij tekstveld
-    useManualLoc:    !event?.locationId && !!(event?.locationNote),
-    date:         isEdit ? tsToDateStr(event.startAt) : today,
-    startTime:    isEdit ? tsToTimeStr(event.startAt) : '09:00',
-    // Voor training: vaste duur
-    durationMin:  isEdit && needsDuration(event?.type)
+    type:         event?.type      || 'training',
+    title:        event?.title     || '',
+    groupIds:     event?.groupIds  || [],
+    // Locatie
+    locationId:       event?.locationId || '',
+    useManualLoc:     !event?.locationId && !!(event?.locationNote),
+    manualName:       savedManual.name,
+    manualAddress:    savedManual.address,
+    manualPostalCode: savedManual.postalCode,
+    manualCity:       savedManual.city,
+    // Datum & tijd
+    date:        isEdit ? tsToDateStr(event.startAt) : today,
+    startTime:   isEdit ? tsToTimeStr(event.startAt) : '09:00',
+    durationMin: isEdit && needsDuration(event?.type)
       ? Math.round(((event.endAt?.seconds || 0) - (event.startAt?.seconds || 0)) / 60)
       : 90,
-    // Voor club_event / competition: optioneel einduur
-    endTime:      initEndTime(),
+    endTime:     initEndTime(),
+    // Overige
     isSpecial:    event?.isSpecial    || false,
     specialLabel: event?.specialLabel || '',
     memberNotes:  event?.memberNotes  || '',
     notes:        event?.notes        || '',
-    // Competition: alleen labels, geen niveau/link
-    compLabels:   event?.competitionDetails?.requiredLabels || [],
-    compLocation: event?.competitionDetails?.location       || '',
+    // Competition
+    compType:   event?.competitionDetails?.competitionType || '',
+    compLabels: event?.competitionDetails?.requiredLabels  || [],
   });
 
   const [saving, setSaving] = useState(false);
@@ -224,9 +250,9 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
 
   const handleSave = async () => {
     setError('');
-    if (!form.title.trim())  { setError('Titel is verplicht.'); return; }
-    if (!form.date)           { setError('Datum is verplicht.'); return; }
-    if (!form.startTime)      { setError('Starttijd is verplicht.'); return; }
+    if (!form.title.trim()) { setError('Titel is verplicht.'); return; }
+    if (!form.date)          { setError('Datum is verplicht.'); return; }
+    if (!form.startTime)     { setError('Startuur is verplicht.'); return; }
     if (form.groupIds.length === 0 && form.type !== 'competition') {
       setError('Kies minstens één groep.'); return;
     }
@@ -235,24 +261,27 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
     try {
       const startAt = buildTimestamp(form.date, form.startTime);
 
-      // Eindtijdstip bepalen
       let endAt;
       if (isTraining) {
         endAt = computeEndTs(form.date, form.startTime, form.durationMin);
       } else if (form.endTime) {
         endAt = buildTimestamp(form.date, form.endTime);
-        // Eindtijd mag niet voor begintijd liggen
         if (endAt && startAt && endAt.seconds <= startAt.seconds) {
           setError('Einduur moet na het startuur liggen.'); setSaving(false); return;
         }
       } else {
-        // Geen eindtijd opgegeven — stel in op startAt (punt-event)
         endAt = startAt;
       }
 
-      // Locatie: lijst of vrij veld
-      const locationId   = form.useManualLoc ? null : (form.locationId || null);
-      const locationNote = form.useManualLoc ? form.manualLocation.trim() : '';
+      // Locatie opbouwen
+      const locationId = form.useManualLoc ? null : (form.locationId || null);
+      // Sla manuele locatie op als pipe-gescheiden string: "Naam|Adres|Postcode|Gemeente"
+      const locationNote = form.useManualLoc
+        ? [form.manualName, form.manualAddress, form.manualPostalCode, form.manualCity]
+            .map(s => s.trim())
+            .join('|')
+            .replace(/\|+$/, '') // verwijder trailing pipes als achterste velden leeg zijn
+        : '';
 
       const data = {
         type:         form.type,
@@ -262,20 +291,19 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
         locationNote,
         startAt,
         endAt,
-        status:       'scheduled',
-        isSpecial:    form.isSpecial,
-        specialLabel: form.isSpecial ? form.specialLabel.trim() : '',
-        memberNotes:  form.memberNotes.trim(),
-        notes:        form.notes.trim(),
-        cancelReason: '',
+        status:          'scheduled',
+        isSpecial:       form.isSpecial,
+        specialLabel:    form.isSpecial ? form.specialLabel.trim() : '',
+        memberNotes:     form.memberNotes.trim(),
+        notes:           form.notes.trim(),
+        cancelReason:    '',
         coachMemberIds:  [],
         substituteNotes: '',
-        prepId:       null,
-        templateId:   null,
+        prepId:          null,
+        templateId:      null,
         competitionDetails: form.type === 'competition' ? {
-          level:           null,
+          competitionType: form.compType || null,
           registrationUrl: null,
-          location:        form.compLocation.trim(),
           requiredLabels:  form.compLabels,
           disciplines:     [],
         } : null,
@@ -310,7 +338,7 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           <button onClick={onClose} style={iconBtnStyle}><X size={18} /></button>
         </div>
 
-        {/* Uitzondering-banner voor recurring events */}
+        {/* Uitzondering-banner */}
         {isEdit && event?.templateId && (
           <div style={{ backgroundColor: '#f59e0b11', border: '1px solid #f59e0b33', borderRadius: '10px', padding: '10px 12px', marginBottom: '16px', fontSize: '12px', color: '#f59e0b', display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
             <span style={{ fontSize: '14px', flexShrink: 0 }}>ℹ️</span>
@@ -318,7 +346,7 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           </div>
         )}
 
-        {/* ── Type selector ── */}
+        {/* ── Type ── */}
         <div style={{ marginBottom: '16px' }}>
           <FieldLabel>Type</FieldLabel>
           <div style={{ display: 'flex', gap: '8px' }}>
@@ -349,46 +377,48 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
             style={inputStyle}
             value={form.title}
             onChange={e => set('title', e.target.value)}
-            placeholder={form.type === 'competition' ? 'BK Springtouw 2025' : form.type === 'club_event' ? 'Clubfeest / uitstap…' : 'Extra training'}
+            placeholder={
+              form.type === 'competition' ? 'BK Springtouw 2025' :
+              form.type === 'club_event'  ? 'Clubfeest / uitstap…' :
+              'Extra training'
+            }
             autoFocus
           />
         </div>
 
-        {/* ── Datum + Starttijd ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
-          <div>
-            <FieldLabel>Datum *</FieldLabel>
-            <input type="date" style={inputStyle} value={form.date} onChange={e => set('date', e.target.value)} />
-          </div>
-          <div>
-            <FieldLabel>Starttijd *</FieldLabel>
-            <input type="time" style={inputStyle} value={form.startTime} onChange={e => set('startTime', e.target.value)} />
-          </div>
+        {/* ── Datum ── */}
+        <div style={{ marginBottom: '14px' }}>
+          <FieldLabel>Datum *</FieldLabel>
+          <input type="date" style={inputStyle} value={form.date} onChange={e => set('date', e.target.value)} />
         </div>
 
-        {/* ── Tijdsindicatie: duur (training) of optioneel einduur (overige) ── */}
-        {isTraining ? (
-          <div style={{ marginBottom: '14px' }}>
-            <FieldLabel>Duur</FieldLabel>
-            <select style={selectStyle} value={form.durationMin} onChange={e => set('durationMin', parseInt(e.target.value))}>
-              {DURATION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+        {/* ── Startuur + Duur/Einduur op één rij ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+          <div>
+            <FieldLabel>Startuur *</FieldLabel>
+            <input type="time" style={inputStyle} value={form.startTime} onChange={e => set('startTime', e.target.value)} />
           </div>
-        ) : (
-          <div style={{ marginBottom: '14px' }}>
-            <FieldLabel>Einduur (optioneel)</FieldLabel>
-            <input
-              type="time"
-              style={inputStyle}
-              value={form.endTime}
-              onChange={e => set('endTime', e.target.value)}
-              placeholder="—"
-            />
-            <div style={{ fontSize: '11px', color: '#475569', marginTop: '4px' }}>
-              Laat leeg als het einduur niet van toepassing is.
-            </div>
+          <div>
+            {isTraining ? (
+              <>
+                <FieldLabel>Duur</FieldLabel>
+                <select style={selectStyle} value={form.durationMin} onChange={e => set('durationMin', parseInt(e.target.value))}>
+                  {DURATION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </>
+            ) : (
+              <>
+                <FieldLabel>Einduur (optioneel)</FieldLabel>
+                <input
+                  type="time"
+                  style={inputStyle}
+                  value={form.endTime}
+                  onChange={e => set('endTime', e.target.value)}
+                />
+              </>
+            )}
           </div>
-        )}
+        </div>
 
         {/* ── Groepen ── */}
         <div style={{ marginBottom: '14px' }}>
@@ -414,12 +444,10 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
         {/* ── Locatie ── */}
         <div style={{ marginBottom: '14px' }}>
           <FieldLabel>Locatie</FieldLabel>
-
-          {/* Toggle: lijst vs. vrij veld */}
           <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
             {[
               { key: false, label: 'Kies uit lijst' },
-              { key: true,  label: 'Vrij invullen' },
+              { key: true,  label: 'Vrij invullen'  },
             ].map(opt => (
               <button
                 key={String(opt.key)}
@@ -439,12 +467,34 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           </div>
 
           {form.useManualLoc ? (
-            <input
-              style={inputStyle}
-              value={form.manualLocation}
-              onChange={e => set('manualLocation', e.target.value)}
-              placeholder="bijv. Sporthal Olympia, Brussel"
-            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <input
+                style={inputStyle}
+                value={form.manualName}
+                onChange={e => set('manualName', e.target.value)}
+                placeholder="Naam (bijv. Sporthal Olympia)"
+              />
+              <input
+                style={inputStyle}
+                value={form.manualAddress}
+                onChange={e => set('manualAddress', e.target.value)}
+                placeholder="Adres (bijv. Olympialaan 1)"
+              />
+              <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '8px' }}>
+                <input
+                  style={inputStyle}
+                  value={form.manualPostalCode}
+                  onChange={e => set('manualPostalCode', e.target.value)}
+                  placeholder="Postcode"
+                />
+                <input
+                  style={inputStyle}
+                  value={form.manualCity}
+                  onChange={e => set('manualCity', e.target.value)}
+                  placeholder="Gemeente"
+                />
+              </div>
+            </div>
           ) : (
             <select
               style={selectStyle}
@@ -459,7 +509,7 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           )}
         </div>
 
-        {/* ── Speciale training (alleen voor type training) ── */}
+        {/* ── Speciale training toggle (alleen training) ── */}
         {form.type === 'training' && (
           <div style={{ marginBottom: '14px', backgroundColor: '#0f172a', borderRadius: '10px', padding: '12px', border: '1px solid #334155' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: form.isSpecial ? '10px' : 0 }}>
@@ -494,25 +544,39 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
         {/* ── Wedstrijddetails (competition only) ── */}
         {form.type === 'competition' && (
           <div style={{ backgroundColor: '#f9731611', border: '1px solid #f9731633', borderRadius: '12px', padding: '14px', marginBottom: '14px' }}>
-            <div style={{ fontSize: '12px', fontWeight: '700', color: '#f97316', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ fontSize: '12px', fontWeight: '700', color: '#f97316', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Trophy size={13} /> Wedstrijdinfo
             </div>
 
-            {/* Locatie wedstrijd (apart veld naast de algemene locatie-sectie) */}
-            <div style={{ marginBottom: '10px' }}>
-              <FieldLabel>Naam locatie wedstrijd</FieldLabel>
-              <input
-                style={inputStyle}
-                value={form.compLocation}
-                onChange={e => set('compLocation', e.target.value)}
-                placeholder="bijv. Sporthal Olympia, Brussel"
-              />
+            {/* Type wedstrijd */}
+            <div style={{ marginBottom: '12px' }}>
+              <FieldLabel>Type wedstrijd</FieldLabel>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {COMPETITION_TYPES.map(opt => {
+                  const active = form.compType === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => set('compType', active ? '' : opt.value)}
+                      style={{
+                        padding: '6px 14px', borderRadius: '20px', fontFamily: 'inherit',
+                        border: `1px solid ${active ? '#f97316' : '#334155'}`,
+                        backgroundColor: active ? '#f9731622' : 'transparent',
+                        color: active ? '#f97316' : '#64748b',
+                        fontSize: '12px', fontWeight: active ? '700' : '500', cursor: 'pointer',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Vereiste labels */}
             <div>
               <FieldLabel>Vereist niveau (labels)</FieldLabel>
-              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                 {['A', 'B', 'C'].map(lbl => {
                   const active = form.compLabels.includes(lbl);
                   return (
@@ -527,7 +591,7 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
                     </button>
                   );
                 })}
-                <span style={{ fontSize: '11px', color: '#475569', marginLeft: '4px' }}>
+                <span style={{ fontSize: '11px', color: '#475569' }}>
                   Leeg = iedereen welkom
                 </span>
               </div>
