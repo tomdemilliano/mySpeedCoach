@@ -5,6 +5,12 @@
  * Ondersteunt drie types: training, club_event, competition.
  * Kan ook gebruikt worden voor annuleren van een bestaand event.
  *
+ * Gedrag per type:
+ *   training    — duur verplicht, locatie uit lijst + vrij veld
+ *   club_event  — geen duur, optioneel einduur, locatie uit lijst + vrij veld
+ *   competition — geen duur, optioneel einduur, locatie uit lijst + vrij veld,
+ *                 geen niveau/inschrijvingslink, wel vereiste labels
+ *
  * Props:
  *   event       : calendarEvent | null   — null = nieuw event
  *   clubId      : string
@@ -19,18 +25,15 @@ import { useState } from 'react';
 import {
   X, Save, Trash2, AlertCircle, MapPin, Calendar,
   Clock, Users, Dumbbell, Star, Trophy, AlertTriangle,
-  ExternalLink,
 } from 'lucide-react';
-import {
-  CalendarEventFactory,
-} from '../../constants/dbSchema';
+import { CalendarEventFactory } from '../../constants/dbSchema';
 import { applyTimeToDate } from '../../utils/calendarUtils';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const TYPE_OPTIONS = [
-  { value: 'training',    label: 'Training',        icon: Dumbbell, color: '#3b82f6' },
-  { value: 'club_event',  label: 'Club evenement',  icon: Star,     color: '#a78bfa' },
-  { value: 'competition', label: 'Wedstrijd',        icon: Trophy,   color: '#f97316' },
+  { value: 'training',   label: 'Training',       icon: Dumbbell, color: '#3b82f6' },
+  { value: 'club_event', label: 'Club evenement',  icon: Star,     color: '#a78bfa' },
+  { value: 'competition',label: 'Wedstrijd',       icon: Trophy,   color: '#f97316' },
 ];
 
 const DURATION_OPTIONS = [
@@ -44,12 +47,6 @@ const DURATION_OPTIONS = [
   { value: 180, label: '3 uur' },
 ];
 
-const COMP_LEVELS = [
-  { value: 'club',      label: 'Club' },
-  { value: 'regionaal', label: 'Regionaal' },
-  { value: 'nationaal', label: 'Nationaal' },
-];
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function tsToDateStr(ts) {
   if (!ts) return '';
@@ -57,7 +54,7 @@ function tsToDateStr(ts) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 function tsToTimeStr(ts) {
-  if (!ts) return '19:00';
+  if (!ts) return '';
   const d = new Date((ts.seconds || 0) * 1000);
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
@@ -72,10 +69,12 @@ function computeEndTs(dateStr, timeStr, durationMin) {
   return { seconds: start.seconds + (durationMin || 90) * 60 };
 }
 
-// ─── Small reusable input parts ───────────────────────────────────────────────
-const label = (text) => (
+// Bepaal of het type een vaste duur vereist (alleen training)
+const needsDuration = (type) => type === 'training';
+
+const FieldLabel = ({ children }) => (
   <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '5px' }}>
-    {text}
+    {children}
   </div>
 );
 
@@ -88,19 +87,15 @@ const selectStyle = { ...inputStyle };
 
 // ─── Cancel Mode ──────────────────────────────────────────────────────────────
 function CancelForm({ event, clubId, onClose }) {
-  const [reason,  setReason]  = useState('');
-  const [saving,  setSaving]  = useState(false);
-  const [error,   setError]   = useState('');
+  const [reason, setReason]  = useState('');
+  const [saving, setSaving]  = useState(false);
+  const [error,  setError]   = useState('');
 
   const handleCancel = async () => {
     setSaving(true); setError('');
     try {
-      // Virtuele recurring events bestaan nog niet als Firestore doc.
-      // Materialiseer eerst zodat we een exception-doc kunnen aanmaken.
       if (event._virtual) {
-        await CalendarEventFactory.materializeVirtual(
-          clubId, event, {}, null
-        );
+        await CalendarEventFactory.materializeVirtual(clubId, event, {}, null);
       }
       await CalendarEventFactory.cancel(clubId, event.id, reason.trim());
       onClose();
@@ -118,7 +113,7 @@ function CancelForm({ event, clubId, onClose }) {
         <div style={headerStyle}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444' }}>
             <AlertTriangle size={18} />
-            <span style={{ fontWeight: '800', fontSize: '16px' }}>Event annuleren</span>
+            <span style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9' }}>Event annuleren</span>
           </div>
           <button onClick={onClose} style={iconBtnStyle}><X size={18} /></button>
         </div>
@@ -131,7 +126,7 @@ function CancelForm({ event, clubId, onClose }) {
         </div>
 
         <div style={{ marginBottom: '16px' }}>
-          {label('Reden van annulering (optioneel)')}
+          <FieldLabel>Reden van annulering (optioneel)</FieldLabel>
           <textarea
             value={reason}
             onChange={e => setReason(e.target.value)}
@@ -143,11 +138,7 @@ function CancelForm({ event, clubId, onClose }) {
           </div>
         </div>
 
-        {error && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ef444422', color: '#ef4444', fontSize: '13px', padding: '10px 12px', borderRadius: '8px', border: '1px solid #ef444433', marginBottom: '12px' }}>
-            <AlertCircle size={14} /> {error}
-          </div>
-        )}
+        {error && <ErrorBanner message={error} />}
 
         <div style={{ display: 'flex', gap: '10px' }}>
           <button onClick={handleCancel} disabled={saving} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px', backgroundColor: '#ef4444', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', opacity: saving ? 0.65 : 1, fontFamily: 'inherit' }}>
@@ -162,8 +153,15 @@ function CancelForm({ event, clubId, onClose }) {
   );
 }
 
-// ─── Main form ────────────────────────────────────────────────────────────────
-// ─── Router wrapper (avoids conditional hook calls) ──────────────────────────
+function ErrorBanner({ message }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ef444422', color: '#ef4444', fontSize: '13px', padding: '10px 12px', borderRadius: '8px', border: '1px solid #ef444433', marginBottom: '12px' }}>
+      <AlertCircle size={14} style={{ flexShrink: 0 }} /> {message}
+    </div>
+  );
+}
+
+// ─── Router wrapper ───────────────────────────────────────────────────────────
 export default function EventFormModal(props) {
   if (props.mode === 'cancel' && props.event) {
     return <CancelForm event={props.event} clubId={props.clubId} onClose={props.onClose} />;
@@ -171,28 +169,40 @@ export default function EventFormModal(props) {
   return <EventForm {...props} />;
 }
 
+// ─── Main form ────────────────────────────────────────────────────────────────
 function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, mode = 'create' }) {
   const isEdit = mode === 'edit' && !!event;
   const today  = new Date().toISOString().split('T')[0];
+
+  // Bepaal initieel einduur als het type geen vaste duur heeft
+  const initEndTime = () => {
+    if (!isEdit || !event?.endAt) return '';
+    return tsToTimeStr(event.endAt);
+  };
 
   const [form, setForm] = useState({
     type:         event?.type         || 'training',
     title:        event?.title        || '',
     groupIds:     event?.groupIds     || [],
-    locationId:   event?.locationId   || '',
-    locationNote: event?.locationNote || '',
+    // Locatie: keuze uit lijst (locationId) OF vrij veld (manualLocation)
+    locationId:      event?.locationId      || '',
+    manualLocation:  event?.locationNote    || '',  // vrij tekstveld
+    useManualLoc:    !event?.locationId && !!(event?.locationNote),
     date:         isEdit ? tsToDateStr(event.startAt) : today,
-    startTime:    isEdit ? tsToTimeStr(event.startAt) : '19:00',
-    durationMin:  isEdit ? Math.round(((event.endAt?.seconds || 0) - (event.startAt?.seconds || 0)) / 60) : 90,
+    startTime:    isEdit ? tsToTimeStr(event.startAt) : '09:00',
+    // Voor training: vaste duur
+    durationMin:  isEdit && needsDuration(event?.type)
+      ? Math.round(((event.endAt?.seconds || 0) - (event.startAt?.seconds || 0)) / 60)
+      : 90,
+    // Voor club_event / competition: optioneel einduur
+    endTime:      initEndTime(),
     isSpecial:    event?.isSpecial    || false,
     specialLabel: event?.specialLabel || '',
     memberNotes:  event?.memberNotes  || '',
     notes:        event?.notes        || '',
-    // Competition
-    compLevel:    event?.competitionDetails?.level           || 'regionaal',
-    compRegUrl:   event?.competitionDetails?.registrationUrl || '',
-    compLocation: event?.competitionDetails?.location        || '',
-    compLabels:   event?.competitionDetails?.requiredLabels  || [],
+    // Competition: alleen labels, geen niveau/link
+    compLabels:   event?.competitionDetails?.requiredLabels || [],
+    compLocation: event?.competitionDetails?.location       || '',
   });
 
   const [saving, setSaving] = useState(false);
@@ -210,11 +220,13 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
       ? form.compLabels.filter(l => l !== lbl)
       : [...form.compLabels, lbl]);
 
+  const isTraining = form.type === 'training';
+
   const handleSave = async () => {
     setError('');
-    if (!form.title.trim()) { setError('Titel is verplicht.'); return; }
-    if (!form.date)          { setError('Datum is verplicht.'); return; }
-    if (!form.startTime)     { setError('Starttijd is verplicht.'); return; }
+    if (!form.title.trim())  { setError('Titel is verplicht.'); return; }
+    if (!form.date)           { setError('Datum is verplicht.'); return; }
+    if (!form.startTime)      { setError('Starttijd is verplicht.'); return; }
     if (form.groupIds.length === 0 && form.type !== 'competition') {
       setError('Kies minstens één groep.'); return;
     }
@@ -222,14 +234,32 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
     setSaving(true);
     try {
       const startAt = buildTimestamp(form.date, form.startTime);
-      const endAt   = computeEndTs(form.date, form.startTime, form.durationMin);
+
+      // Eindtijdstip bepalen
+      let endAt;
+      if (isTraining) {
+        endAt = computeEndTs(form.date, form.startTime, form.durationMin);
+      } else if (form.endTime) {
+        endAt = buildTimestamp(form.date, form.endTime);
+        // Eindtijd mag niet voor begintijd liggen
+        if (endAt && startAt && endAt.seconds <= startAt.seconds) {
+          setError('Einduur moet na het startuur liggen.'); setSaving(false); return;
+        }
+      } else {
+        // Geen eindtijd opgegeven — stel in op startAt (punt-event)
+        endAt = startAt;
+      }
+
+      // Locatie: lijst of vrij veld
+      const locationId   = form.useManualLoc ? null : (form.locationId || null);
+      const locationNote = form.useManualLoc ? form.manualLocation.trim() : '';
 
       const data = {
         type:         form.type,
         title:        form.title.trim(),
         groupIds:     form.groupIds,
-        locationId:   form.locationId   || null,
-        locationNote: form.locationNote.trim(),
+        locationId,
+        locationNote,
         startAt,
         endAt,
         status:       'scheduled',
@@ -243,8 +273,8 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
         prepId:       null,
         templateId:   null,
         competitionDetails: form.type === 'competition' ? {
-          level:           form.compLevel,
-          registrationUrl: form.compRegUrl.trim() || null,
+          level:           null,
+          registrationUrl: null,
           location:        form.compLocation.trim(),
           requiredLabels:  form.compLabels,
           disciplines:     [],
@@ -288,12 +318,12 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           </div>
         )}
 
-        {/* Type selector */}
+        {/* ── Type selector ── */}
         <div style={{ marginBottom: '16px' }}>
-          {label('Type')}
+          <FieldLabel>Type</FieldLabel>
           <div style={{ display: 'flex', gap: '8px' }}>
             {TYPE_OPTIONS.map(opt => {
-              const Icon = opt.icon;
+              const Icon   = opt.icon;
               const active = form.type === opt.value;
               return (
                 <button key={opt.value} onClick={() => set('type', opt.value)} style={{
@@ -301,7 +331,8 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
                   padding: '10px 6px', borderRadius: '10px', fontFamily: 'inherit',
                   border: `1.5px solid ${active ? opt.color : '#334155'}`,
                   backgroundColor: active ? opt.color + '22' : 'transparent',
-                  color: active ? opt.color : '#64748b', cursor: 'pointer', transition: 'all 0.12s',
+                  color: active ? opt.color : '#64748b',
+                  cursor: 'pointer', transition: 'all 0.12s',
                 }}>
                   <Icon size={16} />
                   <span style={{ fontSize: '11px', fontWeight: active ? '700' : '500' }}>{opt.label}</span>
@@ -311,39 +342,57 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           </div>
         </div>
 
-        {/* Title */}
+        {/* ── Titel ── */}
         <div style={{ marginBottom: '14px' }}>
-          {label('Titel *')}
+          <FieldLabel>Titel *</FieldLabel>
           <input
             style={inputStyle}
             value={form.title}
             onChange={e => set('title', e.target.value)}
-            placeholder={form.type === 'competition' ? 'BK Springtouw 2025' : 'Extra training'}
+            placeholder={form.type === 'competition' ? 'BK Springtouw 2025' : form.type === 'club_event' ? 'Clubfeest / uitstap…' : 'Extra training'}
             autoFocus
           />
         </div>
 
-        {/* Date + time + duration */}
+        {/* ── Datum + Starttijd ── */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
           <div>
-            {label('Datum *')}
+            <FieldLabel>Datum *</FieldLabel>
             <input type="date" style={inputStyle} value={form.date} onChange={e => set('date', e.target.value)} />
           </div>
           <div>
-            {label('Starttijd *')}
+            <FieldLabel>Starttijd *</FieldLabel>
             <input type="time" style={inputStyle} value={form.startTime} onChange={e => set('startTime', e.target.value)} />
           </div>
         </div>
-        <div style={{ marginBottom: '14px' }}>
-          {label('Duur')}
-          <select style={selectStyle} value={form.durationMin} onChange={e => set('durationMin', parseInt(e.target.value))}>
-            {DURATION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
 
-        {/* Groups */}
+        {/* ── Tijdsindicatie: duur (training) of optioneel einduur (overige) ── */}
+        {isTraining ? (
+          <div style={{ marginBottom: '14px' }}>
+            <FieldLabel>Duur</FieldLabel>
+            <select style={selectStyle} value={form.durationMin} onChange={e => set('durationMin', parseInt(e.target.value))}>
+              {DURATION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+        ) : (
+          <div style={{ marginBottom: '14px' }}>
+            <FieldLabel>Einduur (optioneel)</FieldLabel>
+            <input
+              type="time"
+              style={inputStyle}
+              value={form.endTime}
+              onChange={e => set('endTime', e.target.value)}
+              placeholder="—"
+            />
+            <div style={{ fontSize: '11px', color: '#475569', marginTop: '4px' }}>
+              Laat leeg als het einduur niet van toepassing is.
+            </div>
+          </div>
+        )}
+
+        {/* ── Groepen ── */}
         <div style={{ marginBottom: '14px' }}>
-          {label(form.type === 'competition' ? 'Groepen (leeg = clubbreed)' : 'Groepen *')}
+          <FieldLabel>{form.type === 'competition' ? 'Groepen (leeg = clubbreed)' : 'Groepen *'}</FieldLabel>
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             {groups.map(g => {
               const active = form.groupIds.includes(g.id);
@@ -362,27 +411,55 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           </div>
         </div>
 
-        {/* Location */}
+        {/* ── Locatie ── */}
         <div style={{ marginBottom: '14px' }}>
-          {label('Locatie')}
-          <select style={selectStyle} value={form.locationId} onChange={e => set('locationId', e.target.value)}>
-            <option value="">— Geen / later bepalen —</option>
-            {locations.map(loc => (
-              <option key={loc.id} value={loc.id}>{loc.name} — {loc.city}</option>
+          <FieldLabel>Locatie</FieldLabel>
+
+          {/* Toggle: lijst vs. vrij veld */}
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+            {[
+              { key: false, label: 'Kies uit lijst' },
+              { key: true,  label: 'Vrij invullen' },
+            ].map(opt => (
+              <button
+                key={String(opt.key)}
+                onClick={() => set('useManualLoc', opt.key)}
+                style={{
+                  padding: '5px 12px', borderRadius: '20px', fontFamily: 'inherit',
+                  border: `1px solid ${form.useManualLoc === opt.key ? '#3b82f6' : '#334155'}`,
+                  backgroundColor: form.useManualLoc === opt.key ? '#3b82f622' : 'transparent',
+                  color: form.useManualLoc === opt.key ? '#60a5fa' : '#64748b',
+                  fontSize: '12px', fontWeight: form.useManualLoc === opt.key ? '700' : '500',
+                  cursor: 'pointer',
+                }}
+              >
+                {opt.label}
+              </button>
             ))}
-          </select>
-        </div>
-        <div style={{ marginBottom: '14px' }}>
-          {label('Locatie-opmerking')}
-          <input
-            style={inputStyle}
-            value={form.locationNote}
-            onChange={e => set('locationNote', e.target.value)}
-            placeholder="bijv. ingang via zijdeur"
-          />
+          </div>
+
+          {form.useManualLoc ? (
+            <input
+              style={inputStyle}
+              value={form.manualLocation}
+              onChange={e => set('manualLocation', e.target.value)}
+              placeholder="bijv. Sporthal Olympia, Brussel"
+            />
+          ) : (
+            <select
+              style={selectStyle}
+              value={form.locationId}
+              onChange={e => set('locationId', e.target.value)}
+            >
+              <option value="">— Geen / later bepalen —</option>
+              {locations.map(loc => (
+                <option key={loc.id} value={loc.id}>{loc.name} — {loc.city}</option>
+              ))}
+            </select>
+          )}
         </div>
 
-        {/* Special label */}
+        {/* ── Speciale training (alleen voor type training) ── */}
         {form.type === 'training' && (
           <div style={{ marginBottom: '14px', backgroundColor: '#0f172a', borderRadius: '10px', padding: '12px', border: '1px solid #334155' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: form.isSpecial ? '10px' : 0 }}>
@@ -414,37 +491,28 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           </div>
         )}
 
-        {/* Competition details */}
+        {/* ── Wedstrijddetails (competition only) ── */}
         {form.type === 'competition' && (
           <div style={{ backgroundColor: '#f9731611', border: '1px solid #f9731633', borderRadius: '12px', padding: '14px', marginBottom: '14px' }}>
-            {label('Wedstrijddetails')}
-            <div style={{ marginBottom: '10px' }}>
-              {label('Niveau')}
-              <div style={{ display: 'flex', gap: '6px' }}>
-                {COMP_LEVELS.map(lvl => (
-                  <button key={lvl.value} onClick={() => set('compLevel', lvl.value)} style={{
-                    flex: 1, padding: '7px', borderRadius: '8px', fontFamily: 'inherit',
-                    border: `1px solid ${form.compLevel === lvl.value ? '#f97316' : '#334155'}`,
-                    backgroundColor: form.compLevel === lvl.value ? '#f9731622' : 'transparent',
-                    color: form.compLevel === lvl.value ? '#f97316' : '#64748b',
-                    fontSize: '12px', fontWeight: form.compLevel === lvl.value ? '700' : '500', cursor: 'pointer',
-                  }}>
-                    {lvl.label}
-                  </button>
-                ))}
-              </div>
+            <div style={{ fontSize: '12px', fontWeight: '700', color: '#f97316', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Trophy size={13} /> Wedstrijdinfo
             </div>
+
+            {/* Locatie wedstrijd (apart veld naast de algemene locatie-sectie) */}
             <div style={{ marginBottom: '10px' }}>
-              {label('Locatie wedstrijd')}
-              <input style={inputStyle} value={form.compLocation} onChange={e => set('compLocation', e.target.value)} placeholder="Sporthal Olympia, Brussel" />
+              <FieldLabel>Naam locatie wedstrijd</FieldLabel>
+              <input
+                style={inputStyle}
+                value={form.compLocation}
+                onChange={e => set('compLocation', e.target.value)}
+                placeholder="bijv. Sporthal Olympia, Brussel"
+              />
             </div>
-            <div style={{ marginBottom: '10px' }}>
-              {label('Inschrijvingslink (optioneel)')}
-              <input style={inputStyle} value={form.compRegUrl} onChange={e => set('compRegUrl', e.target.value)} placeholder="https://skippingbelgium.be/..." />
-            </div>
+
+            {/* Vereiste labels */}
             <div>
-              {label('Vereist niveau (labels)')}
-              <div style={{ display: 'flex', gap: '6px' }}>
+              <FieldLabel>Vereist niveau (labels)</FieldLabel>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                 {['A', 'B', 'C'].map(lbl => {
                   const active = form.compLabels.includes(lbl);
                   return (
@@ -459,7 +527,7 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
                     </button>
                   );
                 })}
-                <span style={{ fontSize: '11px', color: '#475569', alignSelf: 'center', marginLeft: '4px' }}>
+                <span style={{ fontSize: '11px', color: '#475569', marginLeft: '4px' }}>
                   Leeg = iedereen welkom
                 </span>
               </div>
@@ -467,9 +535,9 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           </div>
         )}
 
-        {/* Member notes */}
+        {/* ── Info voor leden ── */}
         <div style={{ marginBottom: '14px' }}>
-          {label('Info voor leden (optioneel)')}
+          <FieldLabel>Info voor leden (optioneel)</FieldLabel>
           <textarea
             style={{ ...inputStyle, minHeight: '70px', resize: 'vertical', lineHeight: 1.5 }}
             value={form.memberNotes}
@@ -478,9 +546,9 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           />
         </div>
 
-        {/* Internal notes (coach only) */}
+        {/* ── Interne notities ── */}
         <div style={{ marginBottom: '16px' }}>
-          {label('Interne notities (enkel coach/admin)')}
+          <FieldLabel>Interne notities (enkel coach/admin)</FieldLabel>
           <textarea
             style={{ ...inputStyle, minHeight: '60px', resize: 'vertical', lineHeight: 1.5 }}
             value={form.notes}
@@ -489,11 +557,7 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           />
         </div>
 
-        {error && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ef444422', color: '#ef4444', fontSize: '13px', padding: '10px 12px', borderRadius: '8px', border: '1px solid #ef444433', marginBottom: '12px' }}>
-            <AlertCircle size={14} /> {error}
-          </div>
-        )}
+        {error && <ErrorBanner message={error} />}
 
         <div style={{ display: 'flex', gap: '10px' }}>
           <button onClick={handleSave} disabled={saving} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px', backgroundColor: '#22c55e', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', opacity: saving ? 0.65 : 1, fontFamily: 'inherit' }}>
