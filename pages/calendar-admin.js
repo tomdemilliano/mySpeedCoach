@@ -20,7 +20,7 @@
 import { useState, useEffect } from 'react';
 import {
   UserFactory, ClubFactory, GroupFactory,
-  UserMemberLinkFactory,
+  UserMemberLinkFactory, SeasonFactory,
   LocationFactory, EventTemplateFactory, CalendarEventFactory,
 } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
@@ -729,130 +729,302 @@ function TemplatesTab({ clubId, uid, groups = [], locations = [] }) {
 }
 
 // ─── Tab: Evenementen ─────────────────────────────────────────────────────────
+// Vervang de volledige functie `EventenTab` in pages/calendar-admin.js
+// door onderstaande code.
+//
+// Stap 1: voeg SeasonFactory toe aan de import bovenaan:
+//   import { ..., SeasonFactory } from '../constants/dbSchema';
+//
+// Stap 2: vervang de volledige `function EventenTab(...)` hieronder.
+
 function EventenTab({ clubId, uid, groups = [], locations = [] }) {
-  const [events,    setEvents]    = useState([]);
-  const [templates, setTemplates] = useState([]);
-  const [loading,   setLoading]   = useState(true);
-  const [formOpen,  setFormOpen]  = useState(false);
-  const [formMode,  setFormMode]  = useState('create');
-  const [editing,   setEditing]   = useState(null);
-  const [daysAhead, setDaysAhead] = useState(30);
+  const [events,       setEvents]       = useState([]);
+  const [seasons,      setSeasons]      = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [formOpen,     setFormOpen]     = useState(false);
+  const [formMode,     setFormMode]     = useState('create');
+  const [editing,      setEditing]      = useState(null);
+
+  // Filters
+  const [selectedSeasonId, setSelectedSeasonId] = useState(''); // '' = alles
+  const [typeFilter,       setTypeFilter]        = useState(''); // '' = alle types
+  const [showPast,         setShowPast]          = useState(false);
 
   const TYPE_ICONS = { training: Dumbbell, club_event: Star, competition: Trophy };
 
+  // ── Load seasons ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!clubId) return;
-    const start   = startOfDay(new Date());
-    const end     = endOfDay(addDays(new Date(), daysAhead));
-    const startTs = { seconds: Math.floor(start.getTime() / 1000) };
-    const endTs   = { seconds: Math.floor(end.getTime()   / 1000) };
+    const unsub = SeasonFactory.getAll(clubId, (data) => {
+      // Sorteer seizoenen van nieuw naar oud
+      const sorted = [...data].sort((a, b) => {
+        const aStart = a.startDate || '';
+        const bStart = b.startDate || '';
+        return bStart.localeCompare(aStart);
+      });
+      setSeasons(sorted);
+      // Selecteer automatisch het actieve seizoen als er nog geen keuze is
+      setSelectedSeasonId(prev => {
+        if (prev !== '') return prev;
+        const today = new Date().toISOString().split('T')[0];
+        const active = sorted.find(s => s.startDate <= today && (!s.endDate || s.endDate >= today));
+        return active ? active.id : (sorted[0]?.id || '');
+      });
+    });
+    return () => unsub();
+  }, [clubId]);
+
+  // ── Bepaal datum-range op basis van seizoen en showPast ─────────────────────
+  const { startTs, endTs } = (() => {
+    const today = startOfDay(new Date());
+    const todayTs = { seconds: Math.floor(today.getTime() / 1000) };
+
+    if (selectedSeasonId) {
+      const season = seasons.find(s => s.id === selectedSeasonId);
+      if (season) {
+        const seasonStart = startOfDay(new Date((season.startDate || '2020-01-01') + 'T00:00:00'));
+        const seasonEnd   = endOfDay(  new Date((season.endDate   || '2099-12-31') + 'T00:00:00'));
+        return {
+          startTs: { seconds: Math.floor((showPast ? seasonStart : today).getTime() / 1000) },
+          endTs:   { seconds: Math.floor(seasonEnd.getTime() / 1000) },
+        };
+      }
+    }
+
+    // Geen seizoen geselecteerd: toon komende 365 dagen (+ verleden indien gewenst)
+    const farPast   = startOfDay(addDays(new Date(), -365));
+    const farFuture = endOfDay(  addDays(new Date(),  365));
+    return {
+      startTs: { seconds: Math.floor((showPast ? farPast : today).getTime() / 1000) },
+      endTs:   { seconds: Math.floor(farFuture.getTime() / 1000) },
+    };
+  })();
+
+  // ── Load events (alleen real events, geen virtuals) ─────────────────────────
+  useEffect(() => {
+    if (!clubId || !startTs || !endTs) return;
     setLoading(true);
     const unsub = CalendarEventFactory.getEventsInRange(clubId, startTs, endTs, (docs) => {
       setEvents(docs.sort((a, b) => (a.startAt?.seconds || 0) - (b.startAt?.seconds || 0)));
       setLoading(false);
     });
     return () => unsub();
-  }, [clubId, daysAhead]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clubId, startTs?.seconds, endTs?.seconds]);
 
-  useEffect(() => {
-    if (!clubId) return;
-    EventTemplateFactory.getAllOnce(clubId).then(setTemplates).catch(console.error);
-  }, [clubId]);
-
-  const allEvents = (() => {
-    const start   = startOfDay(new Date());
-    const end     = endOfDay(addDays(new Date(), daysAhead));
-    const virtual = generateVirtualEvents(templates, start, end);
-    return mergeWithExceptions(virtual, events);
-  })();
+  // ── Filter op type ──────────────────────────────────────────────────────────
+  const filteredEvents = typeFilter
+    ? events.filter(e => e.type === typeFilter)
+    : events;
 
   const openCancel = (event) => { setEditing(event); setFormMode('cancel'); setFormOpen(true); };
-  const openEdit   = (event) => { if (event._virtual) return; setEditing(event); setFormMode('edit'); setFormOpen(true); };
+  const openEdit   = (event) => { setEditing(event); setFormMode('edit'); setFormOpen(true); };
 
   const handleFormClose = () => {
-    setFormOpen(false); setEditing(null);
-    EventTemplateFactory.getAllOnce(clubId).then(setTemplates).catch(console.error);
+    setFormOpen(false);
+    setEditing(null);
   };
 
   const getGroupNames = (groupIds) =>
     (groupIds || []).map(gid => groups.find(g => g.id === gid)?.name).filter(Boolean).join(', ');
 
+  const selectedSeason = seasons.find(s => s.id === selectedSeasonId);
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
           <div style={{ fontWeight: '800', fontSize: '15px', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Calendar size={16} color="#3b82f6" /> Eenmalige events
           </div>
           <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-            Komende {daysAhead} dagen
+            {selectedSeason
+              ? `${selectedSeason.name}${showPast ? '' : ' · vanaf vandaag'}`
+              : showPast ? 'Alle events' : 'Vanaf vandaag'}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <select value={daysAhead} onChange={e => setDaysAhead(parseInt(e.target.value))} style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#94a3b8', fontSize: '12px', fontFamily: 'inherit', cursor: 'pointer' }}>
-            <option value={7}>7 dagen</option>
-            <option value={14}>14 dagen</option>
-            <option value={30}>30 dagen</option>
-            <option value={60}>60 dagen</option>
+        <button
+          onClick={() => { setEditing(null); setFormMode('create'); setFormOpen(true); }}
+          style={bs.primary}
+        >
+          <Plus size={15} /> Nieuw event
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '16px', alignItems: 'center' }}>
+
+        {/* Seizoensfilter */}
+        <div>
+          <div style={{ fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '4px' }}>Seizoen</div>
+          <select
+            value={selectedSeasonId}
+            onChange={e => setSelectedSeasonId(e.target.value)}
+            style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontSize: '13px', fontFamily: 'inherit', cursor: 'pointer', minWidth: '160px' }}
+          >
+            <option value="">— Alle seizoenen —</option>
+            {seasons.map(s => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
           </select>
-          <button onClick={() => { setEditing(null); setFormMode('create'); setFormOpen(true); }} style={bs.primary}>
-            <Plus size={15} /> Nieuw event
+        </div>
+
+        {/* Type-filter */}
+        <div>
+          <div style={{ fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '4px' }}>Type</div>
+          <div style={{ display: 'flex', gap: '5px' }}>
+            {[
+              { value: '',            label: 'Alle',          icon: null,     color: '#64748b' },
+              { value: 'training',    label: 'Training',      icon: Dumbbell, color: '#3b82f6' },
+              { value: 'club_event',  label: 'Club event',    icon: Star,     color: '#a78bfa' },
+              { value: 'competition', label: 'Wedstrijd',     icon: Trophy,   color: '#f97316' },
+            ].map(opt => {
+              const Icon   = opt.icon;
+              const active = typeFilter === opt.value;
+              return (
+                <button
+                  key={opt.value || 'all'}
+                  onClick={() => setTypeFilter(opt.value)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '5px',
+                    padding: '7px 11px', borderRadius: '8px', fontFamily: 'inherit',
+                    border: `1px solid ${active ? opt.color : '#334155'}`,
+                    backgroundColor: active ? opt.color + '22' : 'transparent',
+                    color: active ? opt.color : '#64748b',
+                    fontSize: '12px', fontWeight: active ? '700' : '500', cursor: 'pointer',
+                    transition: 'all 0.12s',
+                  }}
+                >
+                  {Icon && <Icon size={12} />}
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Verleden toggle */}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>Verleden tonen</span>
+          <button
+            onClick={() => setShowPast(p => !p)}
+            style={{
+              width: '38px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer',
+              backgroundColor: showPast ? '#3b82f6' : '#334155',
+              position: 'relative', transition: 'background-color 0.2s', flexShrink: 0,
+            }}
+          >
+            <div style={{
+              width: '16px', height: '16px', borderRadius: '50%', backgroundColor: 'white',
+              position: 'absolute', top: '3px',
+              left: showPast ? '19px' : '3px',
+              transition: 'left 0.2s',
+            }} />
           </button>
         </div>
       </div>
 
+      {/* Lijst */}
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
           <div style={{ ...s.spinner, borderTopColor: '#3b82f6' }} />
         </div>
-      ) : allEvents.length === 0 ? (
+      ) : filteredEvents.length === 0 ? (
         <EmptyState
           icon={Calendar}
-          text={`Geen events de komende ${daysAhead} dagen.`}
+          text={typeFilter
+            ? `Geen ${TYPE_OPTIONS.find(t => t.value === typeFilter)?.label.toLowerCase() || 'events'} gevonden.`
+            : 'Geen events gevonden voor deze periode.'}
           action={
-            <button onClick={() => { setEditing(null); setFormMode('create'); setFormOpen(true); }} style={bs.primary}>
-              <Plus size={14} /> Eerste event aanmaken
+            <button
+              onClick={() => { setEditing(null); setFormMode('create'); setFormOpen(true); }}
+              style={bs.primary}
+            >
+              <Plus size={14} /> Nieuw event aanmaken
             </button>
           }
         />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {allEvents.map(event => {
-            const color     = getEventColor(event);
-            const TypeIcon  = TYPE_ICONS[event.type] || Calendar;
+          {filteredEvents.map(event => {
+            const typeConfig  = TYPE_OPTIONS.find(t => t.value === event.type) || TYPE_OPTIONS[0];
+            const color       = getEventColor(event);
+            const TypeIcon    = TYPE_ICONS[event.type] || Calendar;
             const isCancelled = event.status === 'cancelled';
-            const startMs   = (event.startAt?.seconds || 0) * 1000;
-            const d         = new Date(startMs);
-            const dateStr   = d.toLocaleDateString('nl-BE', { weekday: 'short', day: '2-digit', month: 'short' });
-            const timeStr   = d.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
-            const loc       = event.locationId ? locations.find(l => l.id === event.locationId) : null;
+            const isPast      = (event.startAt?.seconds || 0) * 1000 < Date.now();
+            const startMs     = (event.startAt?.seconds || 0) * 1000;
+            const d           = new Date(startMs);
+            const dateStr     = d.toLocaleDateString('nl-BE', { weekday: 'short', day: '2-digit', month: 'short', year: '2-digit' });
+            const timeStr     = d.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
+            const loc         = event.locationId ? locations.find(l => l.id === event.locationId) : null;
 
             return (
-              <div key={event.id} style={{ backgroundColor: '#1e293b', borderRadius: '12px', border: `1px solid ${isCancelled ? '#ef444433' : color + '33'}`, borderLeft: `3px solid ${isCancelled ? '#ef4444' : color}`, padding: '12px 14px', opacity: isCancelled ? 0.7 : 1 }}>
+              <div
+                key={event.id}
+                style={{
+                  backgroundColor: '#1e293b',
+                  borderRadius: '12px',
+                  border: `1px solid ${isCancelled ? '#ef444433' : color + '33'}`,
+                  borderLeft: `3px solid ${isCancelled ? '#ef4444' : color}`,
+                  padding: '12px 14px',
+                  opacity: (isCancelled || isPast) ? 0.65 : 1,
+                }}
+              >
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
                   <div style={{ width: '34px', height: '34px', borderRadius: '8px', backgroundColor: color + '22', border: `1px solid ${color}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <TypeIcon size={15} color={color} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '3px' }}>
-                      <span style={{ fontWeight: '700', fontSize: '14px', color: isCancelled ? '#475569' : '#f1f5f9', textDecoration: isCancelled ? 'line-through' : 'none' }}>{event.title}</span>
-                      {isCancelled && <span style={{ fontSize: '9px', fontWeight: '800', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#ef444422', color: '#ef4444', border: '1px solid #ef444433' }}>GEANNULEERD</span>}
-                      {event.isSpecial && <span style={{ fontSize: '9px', fontWeight: '800', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44' }}>{event.specialLabel || 'Speciaal'}</span>}
-                      {event._virtual && <span style={{ fontSize: '9px', fontWeight: '600', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#334155', color: '#64748b' }}>Recurring</span>}
+                      <span style={{ fontWeight: '700', fontSize: '14px', color: isCancelled ? '#475569' : '#f1f5f9', textDecoration: isCancelled ? 'line-through' : 'none' }}>
+                        {event.title}
+                      </span>
+                      {isCancelled && (
+                        <span style={{ fontSize: '9px', fontWeight: '800', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#ef444422', color: '#ef4444', border: '1px solid #ef444433' }}>
+                          GEANNULEERD
+                        </span>
+                      )}
+                      {isPast && !isCancelled && (
+                        <span style={{ fontSize: '9px', fontWeight: '600', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#33415540', color: '#64748b' }}>
+                          Verleden
+                        </span>
+                      )}
+                      {event.isSpecial && (
+                        <span style={{ fontSize: '9px', fontWeight: '800', padding: '1px 5px', borderRadius: '4px', backgroundColor: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44' }}>
+                          {event.specialLabel || 'Speciaal'}
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                       <span>{dateStr} · {timeStr}</span>
-                      {loc && <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><MapPin size={10} /> {loc.name}</span>}
-                      {event.groupIds?.length > 0 && <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><Users size={10} /> {getGroupNames(event.groupIds)}</span>}
+                      {loc && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                          <MapPin size={10} /> {loc.name}
+                        </span>
+                      )}
+                      {event.groupIds?.length > 0 && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                          <Users size={10} /> {getGroupNames(event.groupIds)}
+                        </span>
+                      )}
                     </div>
-                    {isCancelled && event.cancelReason && <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '4px', fontStyle: 'italic' }}>{event.cancelReason}</div>}
+                    {isCancelled && event.cancelReason && (
+                      <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '4px', fontStyle: 'italic' }}>
+                        {event.cancelReason}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                    {!event._virtual && !isCancelled && (
-                      <button onClick={() => openEdit(event)} style={s.iconBtn} title="Bewerken"><Edit2 size={14} /></button>
+                    {!isCancelled && (
+                      <button onClick={() => openEdit(event)} style={s.iconBtn} title="Bewerken">
+                        <Edit2 size={14} />
+                      </button>
                     )}
                     {!isCancelled && (
-                      <button onClick={() => openCancel(event)} style={{ ...s.iconBtn, color: '#ef4444' }} title="Annuleren"><Trash2 size={14} /></button>
+                      <button onClick={() => openCancel(event)} style={{ ...s.iconBtn, color: '#ef4444' }} title="Annuleren">
+                        <Trash2 size={14} />
+                      </button>
                     )}
                   </div>
                 </div>
@@ -876,7 +1048,6 @@ function EventenTab({ clubId, uid, groups = [], locations = [] }) {
     </div>
   );
 }
-
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════
