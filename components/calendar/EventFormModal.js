@@ -219,7 +219,7 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
     startTime:   isEdit ? tsToTimeStr(event.startAt) : '09:00',
     durationMin: isEdit && needsDuration(event?.type)
       ? Math.round(((event.endAt?.seconds || 0) - (event.startAt?.seconds || 0)) / 60)
-      : 90,
+      : 120,
     endTime:     initEndTime(),
     // Overige
     isSpecial:    event?.isSpecial    || false,
@@ -420,53 +420,81 @@ function EventForm({ event, clubId, uid, groups = [], locations = [], onClose, m
           </div>
         </div>
 
-        {/* ── Groepen ── */}
+{/* ── Groepen — tag-input ── */}
         <div style={{ marginBottom: '14px' }}>
           <FieldLabel>{form.type === 'competition' ? 'Groepen (leeg = clubbreed)' : 'Groepen *'}</FieldLabel>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {groups.map(g => {
-              const active = form.groupIds.includes(g.id);
-              return (
-                <button key={g.id} onClick={() => toggleGroup(g.id)} style={{
-                  padding: '6px 12px', borderRadius: '20px', fontFamily: 'inherit',
-                  border: `1px solid ${active ? '#3b82f6' : '#334155'}`,
-                  backgroundColor: active ? '#3b82f622' : 'transparent',
-                  color: active ? '#60a5fa' : '#64748b',
-                  fontSize: '12px', fontWeight: active ? '700' : '500', cursor: 'pointer',
-                }}>
-                  {g.name} {active ? '✓' : ''}
-                </button>
-              );
-            })}
-          </div>
+          {form.groupIds.length > 0 && (
+            <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginBottom: '8px' }}>
+              {form.groupIds.map(gid => {
+                const g = groups.find(x => x.id === gid);
+                if (!g) return null;
+                return (
+                  <span key={gid} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '5px',
+                    padding: '3px 8px 3px 10px', borderRadius: '20px',
+                    backgroundColor: '#3b82f622', border: '1px solid #3b82f644',
+                    color: '#60a5fa', fontSize: '12px', fontWeight: '700',
+                  }}>
+                    {g.name}
+                    <button
+                      onClick={() => toggleGroup(gid)}
+                      style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', padding: '0', lineHeight: 1, fontSize: '13px', display: 'flex', alignItems: 'center' }}
+                    >×</button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          {groups.filter(g => !form.groupIds.includes(g.id)).length > 0 && (
+            <select
+              value=""
+              onChange={e => { if (e.target.value) toggleGroup(e.target.value); }}
+              style={{ ...selectStyle, color: '#94a3b8' }}
+            >
+              <option value="">+ Groep toevoegen…</option>
+              {groups
+                .filter(g => !form.groupIds.includes(g.id))
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(g => <option key={g.id} value={g.id}>{g.name}</option>)
+              }
+            </select>
+          )}
+          {form.groupIds.length === 0 && form.type !== 'competition' && (
+            <div style={{ fontSize: '11px', color: '#ef444488', marginTop: '4px' }}>Kies minstens één groep</div>
+          )}
         </div>
 
-        {/* ── Locatie ── */}
+{/* ── Locatie ── */}
         <div style={{ marginBottom: '14px' }}>
           <FieldLabel>Locatie</FieldLabel>
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
-            {[
-              { key: false, label: 'Kies uit lijst' },
-              { key: true,  label: 'Vrij invullen'  },
-            ].map(opt => (
-              <button
-                key={String(opt.key)}
-                onClick={() => set('useManualLoc', opt.key)}
-                style={{
-                  padding: '5px 12px', borderRadius: '20px', fontFamily: 'inherit',
-                  border: `1px solid ${form.useManualLoc === opt.key ? '#3b82f6' : '#334155'}`,
-                  backgroundColor: form.useManualLoc === opt.key ? '#3b82f622' : 'transparent',
-                  color: form.useManualLoc === opt.key ? '#60a5fa' : '#64748b',
-                  fontSize: '12px', fontWeight: form.useManualLoc === opt.key ? '700' : '500',
-                  cursor: 'pointer',
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
 
-          {form.useManualLoc ? (
+          {/* Toggle alleen tonen als het type NIET competition is */}
+          {form.type !== 'competition' && (
+            <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+              {[
+                { key: false, label: 'Kies uit lijst' },
+                { key: true,  label: 'Vrij invullen'  },
+              ].map(opt => (
+                <button
+                  key={String(opt.key)}
+                  onClick={() => set('useManualLoc', opt.key)}
+                  style={{
+                    padding: '5px 12px', borderRadius: '20px', fontFamily: 'inherit',
+                    border: `1px solid ${form.useManualLoc === opt.key ? '#3b82f6' : '#334155'}`,
+                    backgroundColor: form.useManualLoc === opt.key ? '#3b82f622' : 'transparent',
+                    color: form.useManualLoc === opt.key ? '#60a5fa' : '#64748b',
+                    fontSize: '12px', fontWeight: form.useManualLoc === opt.key ? '700' : '500',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Competition: altijd manueel invullen, geen toggle, geen dropdown */}
+          {(form.useManualLoc || form.type === 'competition') ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <input
                 style={inputStyle}
