@@ -354,6 +354,24 @@ export const SCHEMA = {
       createdAt:   "timestamp",
       createdBy:   "uid",
       updatedAt:   "timestamp",
+    },
+
+    "clubs/{clubId}/speedChallengeResults/{resultId}": {
+      type:              "member | visitor",
+      memberId:          "string | null",       // ClubMember ID — alleen als type === 'member'
+      firstName:         "string | null",       // voor leden: naam uit ClubMember
+      lastName:          "string | null",
+      visitorName:       "string | null",       // voor bezoekers: voornaam vrij invulveld
+      visitorLastName:   "string | null",
+      visitorAge:        "u12 | u16 | senior | null",
+      groupId:           "string | null",
+      groupName:         "string",              // denormalised voor weergave
+      challengeSteps:    "number",              // 20 | 30 | 50 | 100 | custom
+      timeMs:            "number",              // behaalde tijd in milliseconden
+      seasonId:          "string | null",
+      date:              "string",              // YYYY-MM-DD
+      countedByMemberId: "string | null",
+      createdAt:         "timestamp",
     },    
   },
   rtdb: {
@@ -2361,7 +2379,6 @@ export const TrainingPrepFactory = {
 // ─────────────────────────────────────────────────────────────────────────────
 // 20. TRAINING PLAN FACTORY
 // ─────────────────────────────────────────────────────────────────────────────
-// Plak dit na TrainingPrepFactory in dbSchema.js
  
 export const TrainingPlanFactory = {
   create: (clubId, data, createdByUid) =>
@@ -2425,4 +2442,78 @@ export const TrainingPlanFactory = {
  
   delete: (clubId, planId) =>
     deleteDoc(doc(db, `clubs/${clubId}/trainingPlans`, planId)),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 20. SPEED CHALLENGE FACTORY
+// ─────────────────────────────────────────────────────────────────────────────
+export const SpeedChallengeFactory = {
+  // Create a new result
+  create: (clubId, data) =>
+    addDoc(collection(db, `clubs/${clubId}/speedChallengeResults`), {
+      type:              data.type              || 'member',
+      memberId:          data.memberId          || null,
+      firstName:         data.firstName         || null,
+      lastName:          data.lastName          || null,
+      visitorName:       data.visitorName       || null,
+      visitorLastName:   data.visitorLastName   || null,
+      visitorAge:        data.visitorAge        || null,
+      groupId:           data.groupId           || null,
+      groupName:         data.groupName         || '',
+      challengeSteps:    data.challengeSteps    || 30,
+      timeMs:            data.timeMs            || 0,
+      seasonId:          data.seasonId          || null,
+      date:              data.date              || '',
+      countedByMemberId: data.countedByMemberId || null,
+      createdAt:         serverTimestamp(),
+    }),
+ 
+  // Real-time leaderboard — sorted by timeMs ascending, filters optional
+  // filters: { challengeSteps, groupId, seasonId, date }
+  getLeaderboard: (clubId, filters = {}, callback) => {
+    let q = query(
+      collection(db, `clubs/${clubId}/speedChallengeResults`),
+      where('challengeSteps', '==', filters.challengeSteps || 30),
+      orderBy('timeMs', 'asc'),
+      limit(50),
+    );
+ 
+    // Firestore compound queries require composite indexes for
+    // additional where-clauses on top of the ordered field.
+    // Apply in-memory filtering for optional groupId / seasonId / date
+    // to avoid requiring N composite indexes.
+    return onSnapshot(q, (snap) => {
+      let results = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+ 
+      if (filters.groupId)  results = results.filter(r => r.groupId  === filters.groupId);
+      if (filters.seasonId) results = results.filter(r => r.seasonId === filters.seasonId);
+      if (filters.date)     results = results.filter(r => r.date     === filters.date);
+ 
+      callback(results);
+    });
+  },
+ 
+  // One-shot fetch for a single member's personal bests
+  getPersonalBests: async (clubId, memberId) => {
+    const snap = await getDocs(
+      query(
+        collection(db, `clubs/${clubId}/speedChallengeResults`),
+        where('memberId', '==', memberId),
+        orderBy('timeMs', 'asc'),
+      )
+    );
+    // Return best time per challengeSteps
+    const bests = {};
+    snap.docs.forEach(d => {
+      const r = { id: d.id, ...d.data() };
+      if (!bests[r.challengeSteps] || r.timeMs < bests[r.challengeSteps].timeMs) {
+        bests[r.challengeSteps] = r;
+      }
+    });
+    return bests;
+  },
+ 
+  // Delete a result (admin use)
+  delete: (clubId, resultId) =>
+    deleteDoc(doc(db, `clubs/${clubId}/speedChallengeResults`, resultId)),
 };
