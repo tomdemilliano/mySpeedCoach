@@ -11,7 +11,7 @@
  *   - Dutch UI strings (CLAUDE.md §9)
  */
 
-import { Zap, Hash, Camera, Upload, Heart, LayoutDashboard, ChevronRight } from 'lucide-react';
+import { Zap, Hash, Camera, Upload, Heart, LayoutDashboard, ChevronRight, Timer } from 'lucide-react';
 
 function FeatureCard({ icon: Icon, color, title, subtitle, href, disabled, badge }) {
   const inner = (
@@ -58,11 +58,12 @@ function FeatureCard({ icon: Icon, color, title, subtitle, href, disabled, badge
 
 export default function LivePage() {
   const cards = [
-    { icon: Hash,          color: '#3b82f6', title: 'Manueel tellen',  subtitle: 'Tel stappen handmatig met live hartslag en badgeverificatie', href: '/skipper-select?mode=manual&return=/counter' },
-    { icon: Camera,        color: '#f59e0b', title: 'Camera tellen',   subtitle: 'AI-stapteller via live camera',                               href: '/skipper-select?mode=camera&return=/ai-counter', badge: 'BETA' },
-    { icon: Upload,        color: '#a78bfa', title: 'Video uploaden',  subtitle: 'Upload een opgenomen video voor automatische staptelling',     href: '/ai-counter?mode=upload', badge: 'BETA' },
-    { icon: Heart,         color: '#ef4444', title: 'Hartslag',        subtitle: 'Volledig scherm hartslagweergave via Bluetooth HRM',          href: '/heart-rate' },
-    { icon: LayoutDashboard, color: '#22c55e', title: 'Dashboard',     subtitle: 'Live monitoring van skippers tijdens de training',            href: '/dashboard' },
+    { icon: Hash,            color: '#3b82f6', title: 'Manueel tellen',  subtitle: 'Tel stappen handmatig met live hartslag en badgeverificatie', href: '/skipper-select?mode=manual&return=/counter' },
+    { icon: Camera,          color: '#f59e0b', title: 'Camera tellen',   subtitle: 'AI-stapteller via live camera',                               href: '/skipper-select?mode=camera&return=/ai-counter', badge: 'BETA' },
+    { icon: Upload,          color: '#a78bfa', title: 'Video uploaden',  subtitle: 'Upload een opgenomen video voor automatische staptelling',     href: '/ai-counter?mode=upload', badge: 'BETA' },
+    { icon: Heart,           color: '#ef4444', title: 'Hartslag',        subtitle: 'Volledig scherm hartslagweergave via Bluetooth HRM',          href: '/heart-rate' },
+    { icon: LayoutDashboard, color: '#22c55e', title: 'Dashboard',       subtitle: 'Live monitoring van skippers tijdens de training',            href: '/dashboard' },
+    { icon: Timer,           color: '#f97316', title: 'Speed Challenge', subtitle: 'Hoe snel haal jij 20, 30, 50 of 100 stappen? Meet je tijd en bekijk het leaderboard.', href: '/speed-challenge', badge: 'BETA' },
     { icon: Zap,           color: '#64748b', title: 'Live Training',   subtitle: 'AI-coach die je automatisch begeleidt in intervallen, zone 2, …', badge: 'Binnenkort', disabled: true },
   ];
 
