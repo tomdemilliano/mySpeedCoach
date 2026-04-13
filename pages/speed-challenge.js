@@ -28,7 +28,8 @@ import {
 import {
   ArrowLeft, Play, Trophy, Timer, Users, ChevronRight,
   Star, Zap, Medal, RefreshCw, CheckCircle2, Camera,
-  FlipHorizontal, User, Filter,
+  FlipHorizontal, User, Filter, Square, SlidersHorizontal,
+  ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 // ─── MediaPipe config ─────────────────────────────────────────────────────────
@@ -155,11 +156,12 @@ class StepDetector {
 }
 
 // ─── Audio helper ─────────────────────────────────────────────────────────────
-function playBeep(freq = 880, durationMs = 120, volume = 0.5) {
+function playBeep(freq = 880, durationMs = 150, volume = 0.8, type = 'sine') {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
+    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const osc  = ctx.createOscillator();
     const gain = ctx.createGain();
+    osc.type = type;
     osc.connect(gain); gain.connect(ctx.destination);
     osc.frequency.value = freq;
     gain.gain.setValueAtTime(volume, ctx.currentTime);
@@ -170,20 +172,23 @@ function playBeep(freq = 880, durationMs = 120, volume = 0.5) {
   } catch (e) { /* AudioContext not available */ }
 }
 
-function playStartSignal() {
-  // Korte stijgende toon — "go!"
-  playBeep(660, 80, 0.4);
-  setTimeout(() => playBeep(880, 150, 0.6), 80);
+function playCountdownBeep() {
+  // Duidelijke lage tik
+  playBeep(440, 120, 0.9, 'square');
 }
 
-function playCountdownBeep() {
-  playBeep(440, 100, 0.3);
+function playStartSignal() {
+  // Drie snelle oplopende tonen — onmiskenbaar "GO!"
+  playBeep(523, 80, 0.9, 'square');
+  setTimeout(() => playBeep(659, 80, 0.9, 'square'), 90);
+  setTimeout(() => playBeep(1047, 300, 1.0, 'square'), 180);
 }
 
 function playFinishSignal() {
-  // Dubbele hoge toon — "klaar!"
-  playBeep(1047, 120, 0.6);
-  setTimeout(() => playBeep(1319, 200, 0.7), 130);
+  // Fanfare-achtig — duidelijk einde
+  playBeep(784, 120, 1.0, 'square');
+  setTimeout(() => playBeep(1047, 120, 1.0, 'square'), 130);
+  setTimeout(() => playBeep(1319, 400, 1.0, 'square'), 260);
 }
 
 // ─── Skipper picker ───────────────────────────────────────────────────────────
@@ -304,6 +309,72 @@ function CountdownOverlay({ count }) {
       {count > 0 && (
         <div style={{ fontSize: '16px', color: '#64748b', marginTop: '12px', fontWeight: '600' }}>
           Klaar zetten…
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Detection Tuning Panel (same presets as ai-counter.js) ──────────────────
+function DetectionTuningPanel({ config, onChange }) {
+  const [open, setOpen] = useState(false);
+
+  const sliders = [
+    { key: 'peakMinProminence', label: 'Pieksensitiviteit',  hint: 'Lager = gevoeliger. Verhoog bij dubbeltelling.', min: 0.003, max: 0.05,  step: 0.001, fmt: v => v.toFixed(3) },
+    { key: 'peakMinAmplitude',  label: 'Min. sprong-hoogte', hint: 'Min. enkelhoogte t.o.v. beginpunt van de piek.',  min: 0.005, max: 0.08,  step: 0.005, fmt: v => v.toFixed(3) },
+    { key: 'peakMinIntervalMs', label: 'Min. interval (ms)', hint: 'Min. tijd tussen stappen.',                       min: 60,    max: 400,   step: 10,    fmt: v => `${v} ms` },
+  ];
+
+  const presets = [
+    { label: 'Snel (sprint)', config: { peakMinProminence: 0.008, peakMinIntervalMs: 80,  peakMinAmplitude: 0.012 } },
+    { label: 'Normaal',       config: { peakMinProminence: 0.012, peakMinIntervalMs: 120, peakMinAmplitude: 0.015 } },
+    { label: 'Langzaam',      config: { peakMinProminence: 0.018, peakMinIntervalMs: 180, peakMinAmplitude: 0.020 } },
+  ];
+
+  return (
+    <div style={{ backgroundColor: '#1e293b', borderRadius: '14px', border: '1px solid #334155', overflow: 'hidden' }}>
+      <button onClick={() => setOpen(v => !v)} style={{ width: '100%', padding: '12px 16px', background: 'none', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'inherit' }}>
+        <SlidersHorizontal size={15} color="#60a5fa" />
+        <span style={{ flex: 1, textAlign: 'left', fontSize: '13px', fontWeight: '700', color: '#f1f5f9' }}>Detectie-instellingen</span>
+        <span style={{ fontSize: '11px', color: '#475569', marginRight: '6px' }}>beta fine-tuning</span>
+        {open ? <ChevronUp size={14} color="#64748b" /> : <ChevronDown size={14} color="#64748b" />}
+      </button>
+
+      {open && (
+        <div style={{ padding: '0 16px 16px', borderTop: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {/* Kalman toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '12px' }}>
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: '700', color: config.kalmanEnabled ? '#60a5fa' : '#64748b' }}>Kalman-filter</div>
+              <div style={{ fontSize: '10px', color: '#475569' }}>Smootht de enkelpositie (aanbevolen)</div>
+            </div>
+            <button onClick={() => onChange({ kalmanEnabled: !config.kalmanEnabled })} style={{ width: '44px', height: '24px', borderRadius: '12px', border: 'none', cursor: 'pointer', backgroundColor: config.kalmanEnabled ? '#3b82f6' : '#334155', position: 'relative', transition: 'background-color 0.2s', flexShrink: 0 }}>
+              <div style={{ width: '18px', height: '18px', borderRadius: '50%', backgroundColor: 'white', position: 'absolute', top: '3px', left: config.kalmanEnabled ? '23px' : '3px', transition: 'left 0.2s' }} />
+            </button>
+          </div>
+
+          {/* Presets */}
+          <div>
+            <div style={{ fontSize: '10px', color: '#475569', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '7px' }}>Snelkeuze</div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {presets.map(p => (
+                <button key={p.label} onClick={() => onChange(p.config)} style={{ padding: '5px 11px', borderRadius: '14px', border: '1px solid #334155', background: 'transparent', color: '#94a3b8', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }}>{p.label}</button>
+              ))}
+              <button onClick={() => onChange({ ...DEFAULT_DET_CFG })} style={{ padding: '5px 11px', borderRadius: '14px', border: '1px solid #334155', background: 'transparent', color: '#64748b', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit' }}>Reset</button>
+            </div>
+          </div>
+
+          {/* Sliders */}
+          {sliders.map(sl => (
+            <div key={sl.key}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '600', color: '#94a3b8' }}>{sl.label}</span>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: '#60a5fa', fontFamily: 'monospace' }}>{sl.fmt(config[sl.key])}</span>
+              </div>
+              <input type="range" min={sl.min} max={sl.max} step={sl.step} value={config[sl.key]} onChange={e => onChange({ [sl.key]: Number(e.target.value) })} style={{ width: '100%', accentColor: '#3b82f6' }} />
+              <div style={{ fontSize: '10px', color: '#475569', marginTop: '2px' }}>{sl.hint}</div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -507,6 +578,7 @@ export default function SpeedChallengePage() {
   const [challengeSteps, setChallengeSteps] = useState(30);
   const [customSteps, setCustomSteps] = useState('');
   const [useCustom,   setUseCustom]   = useState(false);
+  const [countdownSecs, setCountdownSecs] = useState(3); // instelbaar aftellen
 
   // ── Camera / AI state ────────────────────────────────────────────────────
   const [cameraReady,    setCameraReady]    = useState(false);
@@ -519,6 +591,7 @@ export default function SpeedChallengePage() {
   const [finalTimeMs,    setFinalTimeMs]    = useState(0);
   const [saving,         setSaving]         = useState(false);
   const [savedOk,        setSavedOk]        = useState(false);
+  const [detCfg,         setDetCfg]         = useState({ ...DEFAULT_DET_CFG });
 
   // ── Refs ──────────────────────────────────────────────────────────────────
   const videoRef     = useRef(null);
@@ -534,8 +607,10 @@ export default function SpeedChallengePage() {
   const stepsRef     = useRef(0);
   const goalRef      = useRef(challengeSteps);
   const wakeLockRef  = useRef(null);
+  const detCfgRef    = useRef(detCfg);
 
-  useEffect(() => { goalRef.current = effectiveGoal; });
+  useEffect(() => { goalRef.current  = effectiveGoal; });
+  useEffect(() => { detCfgRef.current = detCfg; detectorRef.current.config = { ...detCfg }; }, [detCfg]);
 
   const effectiveGoal = useCustom
     ? (parseInt(customSteps) || 0)
@@ -711,10 +786,21 @@ export default function SpeedChallengePage() {
     initCamera();
   }, [initCamera]);
 
+  // ── Stop running challenge ────────────────────────────────────────────────
+  const stopChallenge = useCallback(() => {
+    isRunRef.current = false;
+    clearInterval(timerRef.current);
+    releaseWakeLock();
+    setPhase('camera');
+    stepsRef.current = 0;
+    setSteps(0); setElapsedMs(0);
+    detectorRef.current.reset(); kalmanRef.current.reset();
+  }, [releaseWakeLock]);
+
   // ── Start countdown ───────────────────────────────────────────────────────
   const startCountdown = useCallback(() => {
     setPhase('countdown');
-    let count = 3;
+    let count = countdownSecs;
     setCountdownNum(count);
     playCountdownBeep();
 
@@ -728,7 +814,8 @@ export default function SpeedChallengePage() {
         setCountdownNum(0);
         setTimeout(() => {
           playStartSignal();
-          detectorRef.current.reset(); kalmanRef.current.reset();
+          detectorRef.current.reset(); detectorRef.current.config = { ...detCfgRef.current };
+          kalmanRef.current.reset();
           stepsRef.current = 0; setSteps(0);
           startTimeRef.current = Date.now();
           isRunRef.current = true;
@@ -741,7 +828,7 @@ export default function SpeedChallengePage() {
         }, 400);
       }
     }, 1000);
-  }, [effectiveGoal, requestWakeLock]);
+  }, [countdownSecs, effectiveGoal, requestWakeLock]);
 
   // ── Save result ───────────────────────────────────────────────────────────
   const saveResult = useCallback(async () => {
@@ -787,8 +874,8 @@ export default function SpeedChallengePage() {
     setCameraReady(false);
     setSteps(0); setElapsedMs(0); setFinalTimeMs(0);
     setSavedOk(false);
-    setCountdownNum(3);
-  }, [stopCamera]);
+    setCountdownNum(countdownSecs);
+  }, [stopCamera, countdownSecs]);
 
   // ── Validation ────────────────────────────────────────────────────────────
   const canStart = (() => {
@@ -977,6 +1064,38 @@ export default function SpeedChallengePage() {
                 )}
               </section>
 
+              {/* Instellingen: aftellen + detectie */}
+              <section style={sectionStyle}>
+                <div style={sectionTitle}>⚙️ Instellingen</div>
+
+                {/* Countdown duur */}
+                <div>
+                  <div style={labelStyle}>Aftellen (seconden)</div>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {[3, 5, 10].map(s => {
+                      const active = countdownSecs === s;
+                      return (
+                        <button key={s} onClick={() => setCountdownSecs(s)} style={{
+                          padding: '7px 16px', borderRadius: '8px', fontFamily: 'inherit', cursor: 'pointer',
+                          border: `1.5px solid ${active ? '#60a5fa' : '#334155'}`,
+                          backgroundColor: active ? '#3b82f622' : 'transparent',
+                          color: active ? '#60a5fa' : '#64748b',
+                          fontSize: '14px', fontWeight: active ? '800' : '500',
+                        }}>
+                          {s}s
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Detectie tuning (collapsed) */}
+                <DetectionTuningPanel
+                  config={detCfg}
+                  onChange={p => setDetCfg(prev => ({ ...prev, ...p }))}
+                />
+              </section>
+
               {/* Start button */}
               <button
                 onClick={goToCamera}
@@ -1090,6 +1209,20 @@ export default function SpeedChallengePage() {
               {phase !== 'running' && (
                 <button onClick={resetToSetup} style={{ ...btnGhost, alignSelf: 'center' }}>
                   <ArrowLeft size={14} /> Terug naar setup
+                </button>
+              )}
+
+              {/* Stop button during run */}
+              {phase === 'running' && (
+                <button onClick={stopChallenge} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+                  padding: '16px', borderRadius: '14px', border: 'none', fontFamily: 'inherit',
+                  backgroundColor: '#ef4444', color: 'white',
+                  fontSize: '16px', fontWeight: '800', cursor: 'pointer',
+                  boxShadow: '0 0 20px #ef444466',
+                }}>
+                  <Square size={20} fill="white" />
+                  STOP
                 </button>
               )}
             </>
