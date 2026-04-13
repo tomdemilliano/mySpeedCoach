@@ -964,7 +964,7 @@ export default function ClubAdmin() {
           )}
         </div>
 
-        <div style={{ display: 'flex', borderBottom: '1px solid #334155', marginTop: '4px' }}>
+        <div className="ca-tab-strip" style={{ display: 'flex', borderBottom: '1px solid #334155', marginTop: '4px' }}>
           {TABS.map(tab => {
             const isActive = activeTab === tab.key;
             return (
@@ -1483,6 +1483,8 @@ const css = `
   select option { background-color: #1e293b; }
   @media (max-width: 700px) { .card-grid { grid-template-columns: 1fr 1fr; gap: 10px; } }
   @media (max-width: 400px) { .card-grid { grid-template-columns: 1fr; } }
+  .ca-tab-strip { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex-shrink: 0; }
+  .ca-tab-strip::-webkit-scrollbar { display: none; }
 `;
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
