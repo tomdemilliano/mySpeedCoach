@@ -2475,7 +2475,6 @@ export const SpeedChallengeFactory = {
       collection(db, `clubs/${clubId}/speedChallengeResults`),
       where('challengeSteps', '==', filters.challengeSteps || 30),
       orderBy('timeMs', 'asc'),
-      limit(50),
     );
  
     // Firestore compound queries require composite indexes for
