@@ -154,13 +154,77 @@ function AlgemeenTab({ uid, currentUser, onSaved }) {
 }
 
 // ─── Tab: Meldingen ───────────────────────────────────────────────────────────
-function MeldingenTab({ uid }) {
+function MeldingenTab({ uid, currentUser, onUserUpdated }) {
+  const isClubAdmin = currentUser?.role === 'clubadmin';
+  const [notifyJoin, setNotifyJoin] = useState(
+    currentUser?.notifyJoinRequests !== false // default: true
+  );
+  const [saving, setSaving] = useState(false);
+
+  // Sync als currentUser later inlaadt
+  useEffect(() => {
+    if (currentUser) {
+      setNotifyJoin(currentUser.notifyJoinRequests !== false);
+    }
+  }, [currentUser?.notifyJoinRequests]);
+
+  const handleToggleJoinNotify = async (newValue) => {
+    setNotifyJoin(newValue);
+    setSaving(true);
+    try {
+      await UserFactory.updateNotifyJoinRequests(uid, newValue);
+      onUserUpdated?.({ notifyJoinRequests: newValue });
+    } catch (e) {
+      console.error('[MeldingenTab] updateNotifyJoinRequests:', e);
+      setNotifyJoin(!newValue); // revert on error
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div style={css.tabBody}>
       <SectionHeader title="Push-notificaties" subtitle="Ontvang meldingen als je coach een nieuw bericht plaatst" />
-      <div style={css.card}>
+      <div style={{ ...css.card, marginBottom: '16px' }}>
         <PushSettingsToggle uid={uid} />
       </div>
+
+      {/* Enkel zichtbaar voor clubadmins */}
+      {isClubAdmin && (
+        <>
+          <SectionHeader title="Clubbeheer meldingen" subtitle="Meldingen specifiek voor clubbeheerders" />
+          <div style={css.card}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '14px', fontWeight: '600', color: '#f1f5f9' }}>
+                  Nieuwe lidmaatschapsaanvragen
+                </div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px', lineHeight: 1.5 }}>
+                  Ontvang een push-notificatie wanneer een gebruiker zich aanmeldt bij je club.
+                </div>
+              </div>
+              <button
+                onClick={() => handleToggleJoinNotify(!notifyJoin)}
+                disabled={saving}
+                style={{
+                  width: '44px', height: '26px', borderRadius: '13px', border: 'none',
+                  backgroundColor: notifyJoin ? '#22c55e' : '#334155',
+                  position: 'relative', cursor: saving ? 'default' : 'pointer',
+                  flexShrink: 0, transition: 'background-color 0.2s',
+                  opacity: saving ? 0.65 : 1,
+                }}
+              >
+                <div style={{
+                  width: '20px', height: '20px', borderRadius: '50%', backgroundColor: 'white',
+                  position: 'absolute', top: '3px',
+                  left: notifyJoin ? '21px' : '3px',
+                  transition: 'left 0.2s',
+                }} />
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -901,7 +965,7 @@ export default function SettingsPage() {
         {/* ── Tab content ── */}
         <div style={{ padding: '24px 16px' }}>
           {activeTab === 'algemeen'     && <AlgemeenTab     uid={uid} currentUser={currentUser} onSaved={handleProfileSaved} />}
-          {activeTab === 'meldingen'    && <MeldingenTab    uid={uid} />}
+          {activeTab === 'meldingen'    && <MeldingenTab    uid={uid} currentUser={currentUser} onUserUpdated={handleProfileSaved} />}
           {activeTab === 'lidmaatschap' && <LidmaatschapTab uid={uid} currentUser={currentUser} />}
           {activeTab === 'labels'       && <LabelsTab       uid={uid} currentUser={currentUser} />}
           {activeTab === 'hartslag'     && <HartslagTab     uid={uid} currentUser={currentUser} onSaved={handleZonesSaved} />}
