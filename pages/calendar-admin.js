@@ -312,6 +312,7 @@ function TemplateFormModal({ template, clubId, uid, groups = [], locations = [],
               <option value="">+ Groep toevoegen…</option>
               {groups
                 .filter(g => !form.groupIds.includes(g.id))
+                .sort((a, b) => a.name.localeCompare(b.name))
                 .map(g => <option key={g.id} value={g.id}>{g.name}</option>)
               }
             </select>
