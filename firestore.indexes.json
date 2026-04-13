@@ -1,0 +1,19 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "speedChallengeResults",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "challengeSteps",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "timeMs",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
