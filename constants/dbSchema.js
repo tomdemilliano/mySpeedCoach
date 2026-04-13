@@ -448,9 +448,10 @@ export const UserFactory = {
     }
   },
 
-  updateProfile:   (uid, data)  => updateDoc(doc(db, "users", uid), data),
-  updateZones:     (uid, zones) => updateDoc(doc(db, "users", uid), { heartrateZones: zones }),
-
+  updateProfile:             (uid, data)  => updateDoc(doc(db, "users", uid), data),
+  updateZones:               (uid, zones) => updateDoc(doc(db, "users", uid), { heartrateZones: zones }),
+  updateNotifyJoinRequests:  (uid, enabled) => updateDoc(doc(db, 'users', uid), { notifyJoinRequests: enabled, updatedAt: serverTimestamp(), }),
+  
   assignDevice: (uid, deviceId, deviceName) =>
     updateDoc(doc(db, "users", uid), {
       "assignedDevice.deviceId":       deviceId,
@@ -621,13 +622,31 @@ export const LiveSessionFactory = {
 // ==========================================
 
 export const ClubJoinRequestFactory = {
-  create: (uid, userData, clubId, clubName, message = '') =>
-    addDoc(collection(db, 'clubJoinRequests'), {
-      uid, firstName: userData.firstName || '', lastName: userData.lastName || '',
-      email: userData.email || '', clubId, clubName, message,
-      status: 'pending', rejectionReason: '', hidden: false,
-      createdAt: serverTimestamp(), resolvedAt: null,
-    }),
+   create: async (uid, profile, clubId, clubName, message = '') => {
+     const ref = await addDoc(collection(db, 'clubJoinRequests'), {
+       uid, clubId, clubName,
+       firstName: profile.firstName || '',
+       lastName:  profile.lastName  || '',
+       email:     profile.email     || '',
+       message:   message,
+       status:    'pending',
+       createdAt: serverTimestamp(),
+     });
+
+     // Fire-and-forget push naar clubadmins
+     if (typeof fetch !== 'undefined') {
+       fetch('/api/push/notify-join-request', {
+         method:  'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body:    JSON.stringify({
+           clubId,
+           firstName: profile.firstName || '',
+           lastName:  profile.lastName  || '',
+         }),
+       }).catch(err => console.warn('[push] join-request notify failed:', err));
+     }
+     return ref;
+   },
 
   getByUser: (uid, callback) => {
     const q = query(collection(db, 'clubJoinRequests'), where('uid', '==', uid));
