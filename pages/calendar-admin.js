@@ -44,7 +44,6 @@ const FREQUENCY_OPTIONS = [
   { value: 'weekly',   label: 'Wekelijks' },
   { value: 'biweekly', label: 'Tweewekelijks' },
   { value: 'monthly',  label: 'Maandelijks' },
-  { value: 'none',     label: 'Eenmalig' },
 ];
 
 const TYPE_OPTIONS = [
@@ -199,7 +198,7 @@ function TemplateFormModal({ template, clubId, uid, groups = [], locations = [],
   const isEdit = !!template?.id;
 
   const [form, setForm] = useState({
-    type:                  template?.type || 'training',
+    type:                  'training',
     title:                 template?.title || '',
     groupIds:              template?.groupIds || [],
     locationId:            template?.locationId || '',
@@ -211,7 +210,7 @@ function TemplateFormModal({ template, clubId, uid, groups = [], locations = [],
       startDate:   template?.recurrence?.startDate   || '',
       endDate:     template?.recurrence?.endDate     || '',
       startTime:   template?.recurrence?.startTime   || '19:00',
-      durationMin: template?.recurrence?.durationMin || 90,
+      durationMin: template?.recurrence?.durationMin || 120,
     },
   });
   const [saving, setSaving] = useState(false);
@@ -229,8 +228,7 @@ function TemplateFormModal({ template, clubId, uid, groups = [], locations = [],
     if (form.groupIds.length === 0)                      { setError('Kies minstens één groep.');      return; }
     if (!form.recurrence.startDate)                      { setError('Startdatum is verplicht.');      return; }
     if (!form.recurrence.startTime)                      { setError('Starttijd is verplicht.');       return; }
-    if (form.recurrence.frequency !== 'none' &&
-        form.recurrence.frequency !== 'monthly' &&
+    if (form.recurrence.frequency !== 'monthly' &&
         form.recurrence.daysOfWeek.length === 0)         { setError('Kies minstens één dag.');        return; }
 
     setSaving(true);
@@ -271,60 +269,58 @@ function TemplateFormModal({ template, clubId, uid, groups = [], locations = [],
           <button style={s.iconBtn} onClick={onClose}><X size={18} /></button>
         </div>
 
-        {/* Type */}
-        <div style={{ marginBottom: '16px' }}>
-          <SectionLabel>Type evenement</SectionLabel>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {TYPE_OPTIONS.map(opt => {
-              const Icon = opt.icon;
-              const active = form.type === opt.value;
-              return (
-                <button key={opt.value} type="button" onClick={() => set('type', opt.value)} style={{
-                  flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '5px',
-                  padding: '10px 6px', borderRadius: '10px', fontFamily: 'inherit',
-                  border: `1.5px solid ${active ? opt.color : '#334155'}`,
-                  backgroundColor: active ? opt.color + '22' : 'transparent',
-                  color: active ? opt.color : '#64748b',
-                  cursor: 'pointer', transition: 'all 0.12s',
-                }}>
-                  <Icon size={16} />
-                  <span style={{ fontSize: '11px', fontWeight: active ? '700' : '500' }}>{opt.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
         {/* Title */}
         <div style={{ marginBottom: '14px' }}>
           <label style={s.label}>Titel *</label>
           <input style={s.input} value={form.title} onChange={e => set('title', e.target.value)} placeholder="Wekelijkse training Groep A" autoFocus />
         </div>
 
-        {/* Groups */}
+        {/* Groups — tag-input */}
         <div style={{ marginBottom: '16px' }}>
           <SectionLabel>Groepen *</SectionLabel>
-          {groups.length === 0 ? (
-            <p style={{ fontSize: '12px', color: '#475569' }}>Geen groepen gevonden.</p>
-          ) : (
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {groups.map(g => {
-                const active = form.groupIds.includes(g.id);
+          {/* Selected tags */}
+          {form.groupIds.length > 0 && (
+            <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginBottom: '8px' }}>
+              {form.groupIds.map(gid => {
+                const g = groups.find(x => x.id === gid);
+                if (!g) return null;
                 return (
-                  <button key={g.id} type="button" onClick={() => toggleGroup(g.id)} style={{
-                    padding: '6px 12px', borderRadius: '20px', fontFamily: 'inherit',
-                    border: `1px solid ${active ? '#3b82f6' : '#334155'}`,
-                    backgroundColor: active ? '#3b82f622' : 'transparent',
-                    color: active ? '#60a5fa' : '#64748b',
-                    fontSize: '12px', fontWeight: active ? '700' : '500', cursor: 'pointer',
+                  <span key={gid} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '5px',
+                    padding: '3px 8px 3px 10px', borderRadius: '20px',
+                    backgroundColor: '#22c55e22', border: '1px solid #22c55e44',
+                    color: '#22c55e', fontSize: '12px', fontWeight: '700',
                   }}>
-                    {g.name} {active ? '✓' : ''}
-                  </button>
+                    {g.name}
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(gid)}
+                      style={{ background: 'none', border: 'none', color: '#22c55e', cursor: 'pointer', padding: '0', lineHeight: 1, fontSize: '13px', display: 'flex', alignItems: 'center' }}
+                    >×</button>
+                  </span>
                 );
               })}
             </div>
           )}
+          {/* Dropdown to add groups */}
+          {groups.filter(g => !form.groupIds.includes(g.id)).length > 0 && (
+            <select
+              value=""
+              onChange={e => { if (e.target.value) toggleGroup(e.target.value); }}
+              style={{ ...s.select, color: form.groupIds.length === 0 ? '#ef4444' : '#94a3b8' }}
+            >
+              <option value="">+ Groep toevoegen…</option>
+              {groups
+                .filter(g => !form.groupIds.includes(g.id))
+                .map(g => <option key={g.id} value={g.id}>{g.name}</option>)
+              }
+            </select>
+          )}
+          {form.groupIds.length === 0 && (
+            <div style={{ fontSize: '11px', color: '#ef444488', marginTop: '4px' }}>Kies minstens één groep</div>
+          )}
         </div>
+
 
         {/* Location */}
         <div style={{ marginBottom: '14px' }}>
