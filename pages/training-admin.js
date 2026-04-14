@@ -604,6 +604,7 @@ export default function TrainingBeheerPage() {
   const [templates,   setTemplates]   = useState([]);
 
   const [activeTab, setActiveTab] = useState('trainingen');
+  const [activeMemberId, setActiveMemberId] = useState(null);
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
   useEffect(() => {
