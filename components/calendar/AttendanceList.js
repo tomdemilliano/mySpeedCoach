@@ -164,16 +164,19 @@ export default function AttendanceList({ event, clubId, coachUid, groups, onClos
   }, [event?.id, clubId, groups]);
 
   // ── Subscribe to attendance for this event ────────────────────────────────
+  const [materializedId, setMaterializedId] = useState(event?._virtual ? null : event?.id);
+  
   useEffect(() => {
-    if (!event?.id || !clubId || event._virtual) return;
-
-    const unsub = AttendanceFactory.getForEvent(clubId, event.id, (docs) => {
+    const eventId = materializedId;
+    if (!eventId || !clubId) return;
+    
+    const unsub = AttendanceFactory.getForEvent(clubId, eventId, (docs) => {
       const map = {};
       docs.forEach(d => { map[d.memberId] = d; });
       setAttendance(map);
     });
     return () => unsub();
-  }, [event?.id, event?._virtual, clubId]);
+  }, [materializedId, clubId]);
 
   // ── Compute stats ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -184,13 +187,14 @@ export default function AttendanceList({ event, clubId, coachUid, groups, onClos
     setStats({ total, present, absent, excused });
   }, [members, attendance]);
 
+// Nieuw:
   const handleMark = async (memberId, status) => {
     setSaving(memberId);
     try {
-      // Materialise event if virtual before writing attendance
-      if (event._virtual) {
+      if (event._virtual && !materializedId) {
         const { CalendarEventFactory } = await import('../../constants/dbSchema');
         await CalendarEventFactory.materializeVirtual(clubId, event, {}, coachUid);
+        setMaterializedId(event.id); // start de subscription
       }
       if (status === 'present') {
         await AttendanceFactory.coachCheckIn(clubId, event.id, memberId, coachUid);
