@@ -1232,7 +1232,7 @@ export default function ClubAdmin() {
             )}
 
             {!selectedGroup && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: '20px', alignItems: 'start' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '20px', alignItems: 'start' }} className="ca-groups-layout">
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
                     <div style={{ fontWeight: '800', fontSize: '16px', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1483,6 +1483,7 @@ const css = `
   select option { background-color: #1e293b; }
   @media (max-width: 700px) { .card-grid { grid-template-columns: 1fr 1fr; gap: 10px; } }
   @media (max-width: 400px) { .card-grid { grid-template-columns: 1fr; } }
+  @media (min-width: 640px) { .ca-groups-layout { grid-template-columns: 1fr 280px; } }
   .ca-tab-strip { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex-shrink: 0; }
   .ca-tab-strip::-webkit-scrollbar { display: none; }
 `;
