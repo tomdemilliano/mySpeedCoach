@@ -1243,7 +1243,7 @@ export default function ClubAdmin() {
                     </button>
                   </div>
                   <div className="card-grid">
-                    {groups.map(group => (
+                    {[...groups].sort((a, b) => a.name.localeCompare(b.name, 'nl')).map(group => (
                       <div key={group.id}
                         style={{ ...s.groupCard, ...(dragOver === group.id ? { borderColor: '#3b82f6', backgroundColor: '#1e3a5f' } : {}) }}
                         onDragOver={e => { e.preventDefault(); setDragOver(group.id); }}
