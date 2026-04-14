@@ -34,6 +34,7 @@ import AttendanceReport    from '../components/calendar/AttendanceReport';
 import TrainingPrepEditor  from '../components/calendar/TrainingPrepEditor';
 import TrainingPrepViewer  from '../components/calendar/TrainingPrepViewer';
 import TrainingPlanEditor  from '../components/calendar/TrainingPlanEditor';
+import EventDetailSheet    from '../components/calendar/EventDetailSheet';
 import {
   Dumbbell, Zap, Target, BarChart2,
   Plus, Edit2, Trash2, X, Save, Clock,
@@ -65,14 +66,19 @@ const pageCSS = `
   select option { background-color: #1e293b; }
 `;
 
+
+
 // ─── Tab: Trainingen ──────────────────────────────────────────────────────────
-function TrainingenTab({ clubId, uid, groups = [], locations = [], isCoachOnly, memberGroupIds = [] }) {
+function TrainingenTab({ clubId, uid, memberId, groups = [], locations = [], isCoachOnly, memberGroupIds = [] }) {
   const [events,       setEvents]       = useState([]);
   const [templates,    setTemplates]    = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [daysAhead,    setDaysAhead]    = useState(30);
   const [groupFilter,  setGroupFilter]  = useState('');
   const [showFilter,   setShowFilter]   = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [locationMap,   setLocationMap]   = useState({});
+  const [activeMemberId, setActiveMemberId] = useState(null);
   const unsubRef = useRef(null);
 
   // Laad templates eenmalig
@@ -81,6 +87,12 @@ function TrainingenTab({ clubId, uid, groups = [], locations = [], isCoachOnly, 
     EventTemplateFactory.getAllOnce(clubId).then(setTemplates).catch(console.error);
   }, [clubId]);
 
+  useEffect(() => {
+    const map = {};
+    locations.forEach(l => { map[l.id] = l; });
+    setLocationMap(map);
+  }, [locations]);
+  
   // Subscribe to real events in range
   useEffect(() => {
     if (!clubId) return;
@@ -216,6 +228,7 @@ function TrainingenTab({ clubId, uid, groups = [], locations = [], isCoachOnly, 
             return (
               <div
                 key={event.id}
+                onClick={() => setSelectedEvent(event)}
                 style={{
                   backgroundColor: '#1e293b',
                   borderRadius: '12px',
@@ -223,6 +236,7 @@ function TrainingenTab({ clubId, uid, groups = [], locations = [], isCoachOnly, 
                   borderLeft: `3px solid ${isCancelled ? '#ef4444' : color}`,
                   padding: '12px 14px',
                   opacity: isCancelled ? 0.65 : 1,
+                  cursor: 'pointer',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
@@ -286,6 +300,23 @@ function TrainingenTab({ clubId, uid, groups = [], locations = [], isCoachOnly, 
           })}
         </div>
       )}
+
+      {selectedEvent && (         
+        <EventDetailSheet
+          event={selectedEvent}
+          location={selectedEvent.locationId ? locationMap[selectedEvent.locationId] : null}
+          memberContext={{ clubId, uid, memberId: memberId || null }}
+          coachView={true}
+          groups={groups}
+          locations={locations}
+          onClose={() => setSelectedEvent(null)}
+          onEventChanged={() => {
+            EventTemplateFactory.getAllOnce(clubId).then(setTemplates).catch(console.error);
+            setSelectedEvent(null);
+          }}
+        />
+      )}
+
     </div>
   );
 }
@@ -640,7 +671,10 @@ export default function TrainingBeheerPage() {
               if (me.isCoach) isCoachHere = true;
             }
           }
-          if (isCoachHere) coachClubs.push(club);
+          if (isCoachHere) {
+            coachClubs.push(club);
+            if (!activeMemberId) setActiveMemberId(memberId);   // ← nieuw
+          }
         }
 
         if (!cancelled && coachClubs.length > 0) {
@@ -794,6 +828,7 @@ export default function TrainingBeheerPage() {
           <TrainingenTab
             clubId={activeClub.id}
             uid={uid}
+            memberId={activeMemberId}
             groups={groups}
             locations={locations}
             isCoachOnly={isCoachOnly}
