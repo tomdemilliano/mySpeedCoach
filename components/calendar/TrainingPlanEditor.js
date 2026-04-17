@@ -69,190 +69,278 @@ function dateToStr(d) {
 
 // ─── Step 1: Setup form ───────────────────────────────────────────────────────
 function SetupForm({ groups, templates, disciplines, onGenerate }) {
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${pad2(today.getMonth()+1)}-${pad2(today.getDate())}`;
+
+  const [title,           setTitle]           = useState('');
+  const [startDate,       setStartDate]       = useState(todayStr);
+  const [hasTarget,       setHasTarget]       = useState(true);
+  const [targetDate,      setTargetDate]      = useState('');
+  const [targetName,      setTargetName]      = useState('');
+  const [targetDiscs,     setTargetDiscs]     = useState([]);
+  const [isIndividual,    setIsIndividual]    = useState(false);
   const [groupId,         setGroupId]         = useState('');
-  const [competitionDate, setCompetitionDate] = useState('');
-  const [competitionName, setCompetitionName] = useState('');
+  const [skipperName,     setSkipperName]     = useState('');
+  const [injuryNotes,     setInjuryNotes]     = useState('');
   const [level,           setLevel]           = useState('intermediate');
   const [ageGroup,        setAgeGroup]        = useState('mixed');
   const [extraNotes,      setExtraNotes]      = useState('');
-  const [selectedDiscip,  setSelectedDiscip]  = useState([]);
   const [generating,      setGenerating]      = useState(false);
   const [error,           setError]           = useState('');
 
-  const selectedGroup = groups.find(g => g.id === groupId);
-
-  // Bereken trainingsdatums vanuit templates voor de geselecteerde groep
+  // Bereken trainingsdatums op basis van templates vanaf startDate
   const trainingDates = (() => {
-    if (!groupId || !competitionDate) return [];
-    const today    = new Date();
-    const compDate = new Date(competitionDate + 'T23:59:59');
-    if (compDate <= today) return [];
-
-    const groupTemplates = templates.filter(t =>
-      t.isActive && (t.groupIds || []).includes(groupId) && t.type === 'training'
-    );
-    const virtual = generateVirtualEvents(groupTemplates, startOfDay(today), endOfDay(compDate));
-    return [...new Set(virtual.map(e => {
-      const d = new Date((e.startAt?.seconds || 0) * 1000);
-      return dateToStr(d);
-    }))].sort();
+    if (!startDate) return [];
+    const start = new Date(startDate + 'T00:00:00');
+    const end   = hasTarget && targetDate
+      ? new Date(targetDate + 'T23:59:59')
+      : addDays(start, 84); // 12 weken als geen einddatum
+    const virtual = generateVirtualEvents(templates, start, end);
+    return virtual
+      .filter(e => e.type === 'training')
+      .map(e => {
+        const d = new Date((e.startAt.seconds) * 1000);
+        return dateToStr(d);
+      })
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .sort();
   })();
 
-  const toggleDisc = (d) =>
-    setSelectedDiscip(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
+  const selectedGroup = groups.find(g => g.id === groupId);
+
+  const toggleDisc = (disc) => {
+    setTargetDiscs(prev =>
+      prev.includes(disc) ? prev.filter(d => d !== disc) : [...prev, disc]
+    );
+  };
 
   const handleGenerate = async () => {
-    if (!groupId)          { setError('Kies een groep.'); return; }
-    if (!competitionDate)  { setError('Kies een wedstrijddatum.'); return; }
-    if (trainingDates.length === 0) { setError('Geen trainingen gevonden voor deze groep voor de wedstrijd.'); return; }
-
-    setGenerating(true); setError('');
+    if (trainingDates.length === 0) {
+      setError('Geen trainingen gevonden in de geselecteerde periode. Controleer de startdatum en trainingsreeksen.');
+      return;
+    }
+    if (hasTarget && !targetDate) {
+      setError('Geef een wedstrijddatum of doeldatum op.');
+      return;
+    }
+    setError(''); setGenerating(true);
     try {
       const res = await fetch('/api/ai-training-plan', {
-        method:  'POST',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          groupName:        selectedGroup?.name || '',
+        body: JSON.stringify({
+          groupName:       isIndividual ? skipperName : (selectedGroup?.name || ''),
           level,
           ageGroup,
-          competitionDate,
-          competitionName,
-          disciplines:      selectedDiscip.length > 0 ? selectedDiscip : disciplines,
-          trainingsPerWeek: 2,
+          targetDate:      hasTarget ? targetDate : '',
+          targetName:      hasTarget ? targetName : '',
+          disciplines:     targetDiscs.length > 0 ? targetDiscs : disciplines,
           trainingDates,
           extraNotes,
+          isIndividual,
+          skipperName:     isIndividual ? skipperName : '',
+          injuryNotes,
+          hasTarget,
         }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Generatie mislukt.'); return; }
+      if (!res.ok) { setError(data.error || 'Genereren mislukt.'); return; }
+
       onGenerate({
-        groupId, groupName: selectedGroup?.name || '',
-        competitionDate, competitionName,
-        level, ageGroup,
-        disciplines: selectedDiscip.length > 0 ? selectedDiscip : disciplines,
-        summary:   data.summary,
-        trainings: data.trainings,
+        title:        title || (hasTarget ? (targetName || 'Schema') : 'Trainingsschema'),
+        groupId:      isIndividual ? null : (groupId || null),
+        groupName:    isIndividual ? null : (selectedGroup?.name || ''),
+        isIndividual,
+        skipperName:  isIndividual ? skipperName : '',
+        injuryNotes,
+        targetDate:   hasTarget ? targetDate : '',
+        targetName:   hasTarget ? targetName : '',
+        startDate,
+        disciplines:  targetDiscs.length > 0 ? targetDiscs : disciplines,
+        level,
+        ageGroup,
+        summary:      data.summary,
+        trainings:    data.trainings,
       });
     } catch (e) {
       console.error('[SetupForm]', e);
-      setError('Netwerk- of serverfout. Probeer opnieuw.');
+      setError('Netwerkfout. Probeer opnieuw.');
     } finally {
       setGenerating(false);
     }
   };
 
-  const today = new Date().toISOString().split('T')[0];
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      {/* Group */}
+
+      {/* Titel */}
       <div>
-        <label style={labelStyle}>Groep *</label>
-        <select style={inputStyle} value={groupId} onChange={e => setGroupId(e.target.value)}>
-          <option value="">— Kies een groep —</option>
-          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-        </select>
+        <label style={labelStyle}>Schematitel</label>
+        <input
+          style={inputStyle}
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          placeholder={hasTarget ? (targetName || 'Automatisch bepaald') : 'Mijn trainingsschema'}
+        />
       </div>
 
-      {/* Age + Level */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-        <div>
-          <label style={labelStyle}>Leeftijdsgroep</label>
-          <select style={inputStyle} value={ageGroup} onChange={e => setAgeGroup(e.target.value)}>
-            {AGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+      {/* Groep of individueel */}
+      <div>
+        <label style={labelStyle}>Voor wie</label>
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+          {[
+            { val: false, label: '👥 Groep' },
+            { val: true,  label: '👤 Individu' },
+          ].map(opt => (
+            <button key={String(opt.val)} type="button"
+              onClick={() => setIsIndividual(opt.val)}
+              style={{ flex: 1, padding: '9px', borderRadius: '8px', fontFamily: 'inherit', fontSize: '13px', fontWeight: '600', cursor: 'pointer', border: `1px solid ${isIndividual === opt.val ? '#3b82f6' : '#334155'}`, backgroundColor: isIndividual === opt.val ? '#3b82f622' : 'transparent', color: isIndividual === opt.val ? '#60a5fa' : '#64748b' }}>
+              {opt.label}
+            </button>
+          ))}
         </div>
+        {!isIndividual && groups.length > 0 && (
+          <select style={inputStyle} value={groupId} onChange={e => setGroupId(e.target.value)}>
+            <option value="">— Geen specifieke groep —</option>
+            {[...groups].sort((a,b) => a.name.localeCompare(b.name,'nl')).map(g => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
+          </select>
+        )}
+        {isIndividual && (
+          <input
+            style={inputStyle}
+            value={skipperName}
+            onChange={e => setSkipperName(e.target.value)}
+            placeholder="Naam van de skipper"
+          />
+        )}
+      </div>
+
+      {/* Blessure (alleen individueel) */}
+      {isIndividual && (
+        <div>
+          <label style={labelStyle}>Blessure / aandachtspunten</label>
+          <textarea
+            style={{ ...inputStyle, resize: 'vertical', minHeight: '64px', lineHeight: 1.5 }}
+            value={injuryNotes}
+            onChange={e => setInjuryNotes(e.target.value)}
+            placeholder="bijv. enkel niet volledig hersteld, vermijd sprongen op één been…"
+          />
+        </div>
+      )}
+
+      {/* Niveau & leeftijd */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
         <div>
           <label style={labelStyle}>Niveau</label>
           <select style={inputStyle} value={level} onChange={e => setLevel(e.target.value)}>
             {LEVEL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
+        <div>
+          <label style={labelStyle}>Leeftijdscategorie</label>
+          <select style={inputStyle} value={ageGroup} onChange={e => setAgeGroup(e.target.value)}>
+            {AGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
       </div>
 
-      {/* Competition */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-        <div>
-          <label style={labelStyle}>Wedstrijddatum *</label>
-          <input type="date" style={inputStyle} value={competitionDate} min={today} onChange={e => setCompetitionDate(e.target.value)} />
+      {/* Startdatum */}
+      <div>
+        <label style={labelStyle}>Schema start vanaf</label>
+        <input type="date" style={inputStyle} value={startDate} onChange={e => setStartDate(e.target.value)} />
+      </div>
+
+      {/* Wedstrijd of vrij doel */}
+      <div>
+        <label style={labelStyle}>Einddoel</label>
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+          {[
+            { val: true,  label: '🏆 Wedstrijd' },
+            { val: false, label: '📅 Vrije periode' },
+          ].map(opt => (
+            <button key={String(opt.val)} type="button"
+              onClick={() => setHasTarget(opt.val)}
+              style={{ flex: 1, padding: '9px', borderRadius: '8px', fontFamily: 'inherit', fontSize: '13px', fontWeight: '600', cursor: 'pointer', border: `1px solid ${hasTarget === opt.val ? '#f97316' : '#334155'}`, backgroundColor: hasTarget === opt.val ? '#f9731622' : 'transparent', color: hasTarget === opt.val ? '#f97316' : '#64748b' }}>
+              {opt.label}
+            </button>
+          ))}
         </div>
-        <div>
-          <label style={labelStyle}>Naam wedstrijd</label>
-          <input style={inputStyle} value={competitionName} onChange={e => setCompetitionName(e.target.value)} placeholder="bijv. BK Springtouw 2025" />
-        </div>
+        {hasTarget && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <input style={inputStyle} value={targetName} onChange={e => setTargetName(e.target.value)} placeholder="Naam van de wedstrijd" />
+            <input type="date" style={inputStyle} value={targetDate} onChange={e => setTargetDate(e.target.value)} />
+          </div>
+        )}
       </div>
 
       {/* Disciplines */}
       {disciplines.length > 0 && (
         <div>
-          <label style={labelStyle}>Disciplines (leeg = alle)</label>
+          <label style={labelStyle}>Disciplines {hasTarget ? 'op deze wedstrijd' : 'in focus'}</label>
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {disciplines.map(d => {
-              const active = selectedDiscip.includes(d);
+            {disciplines.map(disc => {
+              const sel = targetDiscs.includes(disc);
               return (
-                <button key={d} onClick={() => toggleDisc(d)} style={{
-                  padding: '5px 10px', borderRadius: '20px', fontFamily: 'inherit',
-                  border: `1px solid ${active ? '#f97316' : '#334155'}`,
-                  backgroundColor: active ? '#f9731622' : 'transparent',
-                  color: active ? '#f97316' : '#64748b',
-                  fontSize: '12px', fontWeight: active ? '700' : '500', cursor: 'pointer',
-                }}>
-                  {d}
+                <button key={disc} type="button" onClick={() => toggleDisc(disc)}
+                  style={{ padding: '5px 11px', borderRadius: '20px', fontFamily: 'inherit', fontSize: '12px', fontWeight: '600', cursor: 'pointer', border: `1px solid ${sel ? '#3b82f6' : '#334155'}`, backgroundColor: sel ? '#3b82f622' : 'transparent', color: sel ? '#60a5fa' : '#64748b' }}>
+                  {disc}
                 </button>
               );
             })}
           </div>
-        </div>
-      )}
-
-      {/* Training dates preview */}
-      {groupId && competitionDate && (
-        <div style={{ backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #334155', padding: '10px 12px' }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '6px' }}>
-            Gevonden trainingen ({trainingDates.length})
-          </div>
-          {trainingDates.length === 0 ? (
-            <div style={{ fontSize: '12px', color: '#475569', fontStyle: 'italic' }}>
-              Geen trainingen gevonden voor deze groep vóór de wedstrijd. Controleer de trainingsreeksen.
-            </div>
-          ) : (
-            <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-              {trainingDates.slice(0, 12).map(d => (
-                <span key={d} style={{ fontSize: '11px', color: '#94a3b8', padding: '2px 6px', borderRadius: '4px', backgroundColor: '#1e293b' }}>
-                  {new Date(d + 'T12:00:00').toLocaleDateString('nl-BE', { day: '2-digit', month: 'short' })}
-                </span>
-              ))}
-              {trainingDates.length > 12 && (
-                <span style={{ fontSize: '11px', color: '#475569' }}>+{trainingDates.length - 12} meer</span>
-              )}
-            </div>
+          {targetDiscs.length === 0 && (
+            <p style={{ fontSize: '11px', color: '#475569', marginTop: '5px', margin: '5px 0 0' }}>
+              Niets geselecteerd = alle beschikbare disciplines
+            </p>
           )}
         </div>
       )}
 
-      {/* Extra notes */}
+      {/* Trainingen preview */}
+      <div style={{ backgroundColor: '#0f172a', borderRadius: '8px', padding: '10px 12px', border: '1px solid #1e293b' }}>
+        <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px', fontWeight: '600' }}>
+          Gevonden trainingen vanaf {startDate || '…'}
+        </div>
+        {trainingDates.length === 0 ? (
+          <p style={{ fontSize: '12px', color: '#475569', margin: 0 }}>
+            Geen trainingen gevonden. Controleer de startdatum en trainingsreeksen in de kalender.
+          </p>
+        ) : (
+          <p style={{ fontSize: '12px', color: '#22c55e', margin: 0, fontWeight: '600' }}>
+            {trainingDates.length} training{trainingDates.length !== 1 ? 'en' : ''} gevonden
+            {hasTarget && targetDate ? ` t/m ${targetDate}` : ''}
+          </p>
+        )}
+      </div>
+
+      {/* Extra notities */}
       <div>
-        <label style={labelStyle}>Extra info (optioneel)</label>
+        <label style={labelStyle}>Extra opmerkingen (optioneel)</label>
         <textarea
-          style={{ ...inputStyle, minHeight: '60px', resize: 'vertical', lineHeight: 1.5 }}
+          style={{ ...inputStyle, resize: 'vertical', minHeight: '56px', lineHeight: 1.5 }}
           value={extraNotes}
           onChange={e => setExtraNotes(e.target.value)}
-          placeholder="bijv. Groep heeft veel beginners, focus op techniek eerder dan snelheid…"
+          placeholder="bijv. groep heeft weinig ervaring met Endurance…"
         />
       </div>
 
       {error && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ef444422', color: '#ef4444', fontSize: '13px', padding: '10px 12px', borderRadius: '8px', border: '1px solid #ef444433' }}>
-          <AlertCircle size={14} /> {error}
+          <AlertCircle size={13} /> {error}
         </div>
       )}
 
-      <button onClick={handleGenerate} disabled={generating || trainingDates.length === 0} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '13px', backgroundColor: '#a78bfa', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '15px', cursor: generating ? 'default' : 'pointer', opacity: (generating || trainingDates.length === 0) ? 0.65 : 1, fontFamily: 'inherit' }}>
-        {generating ? (
-          <><div style={{ width: '16px', height: '16px', border: '2px solid rgba(255,255,255,0.4)', borderTop: '2px solid white', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Schema genereren…</>
-        ) : (
-          <><Sparkles size={16} /> Schema genereren voor {trainingDates.length} trainingen</>
-        )}
+      <button
+        onClick={handleGenerate}
+        disabled={generating || trainingDates.length === 0}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '13px', backgroundColor: '#f97316', border: 'none', borderRadius: '10px', color: 'white', fontWeight: '700', fontSize: '14px', cursor: generating || trainingDates.length === 0 ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: generating || trainingDates.length === 0 ? 0.65 : 1 }}
+      >
+        {generating
+          ? <><div style={{ width: '16px', height: '16px', border: '2px solid #ffffff44', borderTop: '2px solid white', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Genereren…</>
+          : <><Sparkles size={16} /> Schema genereren ({trainingDates.length} trainingen)</>
+        }
       </button>
     </div>
   );
@@ -557,6 +645,16 @@ export default function TrainingPlanEditor({
 
         {step === 'preview' && generatedPlan && (
           <>
+            {/* Titel bewerken */}
+            <div style={{ marginBottom: '8px' }}>
+              <label style={labelStyle}>Schematitel</label>
+              <input
+                style={inputStyle}
+                value={generatedPlan?.title || ''}
+                onChange={e => setGeneratedPlan(p => ({ ...p, title: e.target.value }))}
+                placeholder="Schematitel"
+              />
+            </div>
             <PlanViewer
               plan={generatedPlan}
               clubId={clubId}
