@@ -453,7 +453,18 @@ function PlanLibraryTab({ clubId, uid, groups = [], templates = [], disciplines 
   const [loading,     setLoading]     = useState(true);
   const [editorOpen,  setEditorOpen]  = useState(false);
   const [viewingPlan, setViewingPlan] = useState(null);
+  const [filterAgeGroup,   setFilterAgeGroup]   = useState('');
+  const [filterLevel,      setFilterLevel]      = useState('');
+  const [filterIndividual, setFilterIndividual] = useState(''); // '' | 'group' | 'individual'
 
+  const filteredPlans = plans.filter(plan => {
+    if (filterAgeGroup   && plan.ageGroup    !== filterAgeGroup)   return false;
+    if (filterLevel      && plan.level       !== filterLevel)       return false;
+    if (filterIndividual === 'individual' && !plan.isIndividual)    return false;
+    if (filterIndividual === 'group'      &&  plan.isIndividual)    return false;
+    return true;
+  });
+  
   useEffect(() => {
     if (!clubId) return;
     const unsub = TrainingPlanFactory.getAll(clubId, (data) => {
@@ -476,12 +487,47 @@ function PlanLibraryTab({ clubId, uid, groups = [], templates = [], disciplines 
             <Target size={16} color="#f97316" /> Trainingsschema's
           </div>
           <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-            {plans.length} schema{plans.length !== 1 ? "'s" : ''} richting wedstrijden
+            {filteredPlans.length}{filteredPlans.length !== plans.length ? ` van ${plans.length}` : ''} schema{plans.length !== 1 ? "'s" : ''}
           </div>
         </div>
         <button onClick={() => setEditorOpen(true)} style={bs.primary}>
           <Plus size={15} /> Nieuw schema
         </button>
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+        <select
+          value={filterAgeGroup}
+          onChange={e => setFilterAgeGroup(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: filterAgeGroup ? '#f1f5f9' : '#64748b', fontSize: '12px', fontFamily: 'inherit', cursor: 'pointer' }}
+        >
+          <option value="">Alle leeftijden</option>
+          <option value="u12">U12</option>
+          <option value="u16">U16</option>
+          <option value="senior">Senior</option>
+          <option value="mixed">Gemengd</option>
+        </select>
+        <select
+          value={filterLevel}
+          onChange={e => setFilterLevel(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: filterLevel ? '#f1f5f9' : '#64748b', fontSize: '12px', fontFamily: 'inherit', cursor: 'pointer' }}
+        >
+          <option value="">Alle niveaus</option>
+          <option value="recreatief">Recreatief</option>
+          <option value="beginner">Beginner</option>
+          <option value="intermediate">Gevorderd</option>
+          <option value="advanced">Wedstrijdniveau</option>
+        </select>
+        <select
+          value={filterIndividual}
+          onChange={e => setFilterIndividual(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0f172a', color: filterIndividual ? '#f1f5f9' : '#64748b', fontSize: '12px', fontFamily: 'inherit', cursor: 'pointer' }}
+        >
+          <option value="">Groep + individueel</option>
+          <option value="group">Alleen groep</option>
+          <option value="individual">Alleen individueel</option>
+        </select>
       </div>
 
       {loading ? (
@@ -530,7 +576,11 @@ function PlanLibraryTab({ clubId, uid, groups = [], templates = [], disciplines 
                         {daysLeft !== null && daysLeft > 0 && (
                           <span style={{ color: daysLeft < 14 ? '#f59e0b' : '#64748b' }}>nog {daysLeft}d</span>
                         )}
-                        {group && <span>👥 {group.name}</span>}
+                        {plan.isIndividual
+                          ? <span>👤 {plan.skipperName || 'Individueel'}</span>
+                          : group && <span>👥 {group.name}</span>
+                        }
+                        {plan.ageGroup && plan.ageGroup !== 'mixed' && <span>🎂 {plan.ageGroup.toUpperCase()}</span>}
                         <span>🏋️ {trainingCount} trainingen</span>
                         <span style={{ color: prepCount > 0 ? '#a78bfa' : '#475569' }}>
                           ✨ {prepCount}/{trainingCount} met prep
