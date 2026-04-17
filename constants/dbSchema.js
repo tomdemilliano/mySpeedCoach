@@ -330,18 +330,27 @@ export const SCHEMA = {
       createdBy:       "uid",
       updatedAt:       "timestamp",
     },
+    
     "clubs/{clubId}/trainingPlans/{planId}": {
-      groupId:          "string",
+      title:            "string",
+      groupId:          "string|null",
       groupName:        "string",
-      competitionDate:  "string",       // YYYY-MM-DD
-      competitionName:  "string",
+      isIndividual:     "boolean",
+      skipperName:      "string",
+      injuryNotes:      "string",
+      competitionDate:  "string",       // YYYY-MM-DD (legacy, = targetDate)
+      competitionName:  "string",       // legacy, = targetName
+      targetDate:       "string",       // YYYY-MM-DD — wedstrijd of vrij einddoel
+      targetName:       "string",       // naam wedstrijd of vrij doel
+      startDate:        "string",       // YYYY-MM-DD — startdatum schema
+      hasTarget:        "boolean",
       disciplines:      ["string"],
       level:            "recreatief|beginner|intermediate|advanced",
       ageGroup:         "u12|u16|senior|mixed",
       summary:          "string",       // AI-gegenereerde samenvatting
-      trainings: [{                     // per-training thema's
-        date:        "string",          // YYYY-MM-DD (koppelt aan calendarEvent via datum)
-        eventId:     "string|null",     // optioneel: gekoppeld calendarEvent id
+      trainings: [{
+        date:        "string",          // YYYY-MM-DD
+        eventId:     "string|null",
         weekNumber:  "number",
         weekLabel:   "string",
         theme:       "string",
@@ -349,7 +358,7 @@ export const SCHEMA = {
         focus:       ["string"],
         intensity:   "low|medium|high",
         notes:       "string",
-        prepIds:     ["string"],        // gekoppelde TrainingPreps
+        prepIds:     ["string"],
       }],
       createdAt:   "timestamp",
       createdBy:   "uid",
@@ -2402,10 +2411,18 @@ export const TrainingPrepFactory = {
 export const TrainingPlanFactory = {
   create: (clubId, data, createdByUid) =>
     addDoc(collection(db, `clubs/${clubId}/trainingPlans`), {
+      title:           data.title           || data.targetName || data.competitionName || 'Schema',
       groupId:         data.groupId         || null,
       groupName:       data.groupName       || '',
-      competitionDate: data.competitionDate || '',
-      competitionName: data.competitionName || '',
+      isIndividual:    data.isIndividual     ?? false,
+      skipperName:     data.skipperName     || '',
+      injuryNotes:     data.injuryNotes     || '',
+      competitionDate: data.targetDate      || data.competitionDate || '',
+      competitionName: data.targetName      || data.competitionName || '',
+      targetDate:      data.targetDate      || data.competitionDate || '',
+      targetName:      data.targetName      || data.competitionName || '',
+      startDate:       data.startDate       || '',
+      hasTarget:       data.hasTarget       ?? true,
       disciplines:     data.disciplines     || [],
       level:           data.level           || 'intermediate',
       ageGroup:        data.ageGroup        || 'mixed',
