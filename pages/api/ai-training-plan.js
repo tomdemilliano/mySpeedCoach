@@ -44,6 +44,7 @@ export default async function handler(req, res) {
     skipperName       = '',
     injuryNotes       = '',
     hasTarget         = true,     // false = geen wedstrijd/einddatum
+    manualDurMin = null,
     } = req.body || {};
   
   if (trainingDates.length === 0) {
@@ -74,7 +75,8 @@ export default async function handler(req, res) {
   const injuryLine   = injuryNotes
     ? `BLESSURE/AANDACHTSPUNTEN: ${injuryNotes} — houd hier rekening mee in intensiteit en oefenkeuze.`
     : '';
-
+  const durLine = manualDurMin ? `Trainingsduur: ${manualDurMin} minuten per training` : '';
+  
   const prompt = `Je bent een ervaren touwspringen-coach. Maak een trainingsplan.
   
   ${skipperLine}
@@ -84,6 +86,8 @@ export default async function handler(req, res) {
   
   ${targetLine}
   Totaal beschikbaar: ${totalWeeks} week(en), ${trainingDates.length} trainingen
+  Beschikbare disciplines: ${discStr}
+  ${durLine}
   
   TRAININGSDATUMS (in volgorde):
   ${datesStr}
