@@ -72,40 +72,61 @@ function SetupForm({ groups, templates, disciplines, onGenerate }) {
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${pad2(today.getMonth()+1)}-${pad2(today.getDate())}`;
 
-  const [title,           setTitle]           = useState('');
-  const [startDate,       setStartDate]       = useState(todayStr);
-  const [hasTarget,       setHasTarget]       = useState(true);
-  const [targetDate,      setTargetDate]      = useState('');
-  const [targetName,      setTargetName]      = useState('');
-  const [targetDiscs,     setTargetDiscs]     = useState([]);
-  const [isIndividual,    setIsIndividual]    = useState(false);
-  const [groupId,         setGroupId]         = useState('');
-  const [skipperName,     setSkipperName]     = useState('');
-  const [injuryNotes,     setInjuryNotes]     = useState('');
-  const [level,           setLevel]           = useState('intermediate');
-  const [ageGroup,        setAgeGroup]        = useState('mixed');
-  const [extraNotes,      setExtraNotes]      = useState('');
-  const [generating,      setGenerating]      = useState(false);
-  const [error,           setError]           = useState('');
+  const [title,           setTitle]               = useState('');
+  const [startDate,       setStartDate]           = useState(todayStr);
+  const [hasTarget,       setHasTarget]           = useState(true);
+  const [targetDate,      setTargetDate]          = useState('');
+  const [targetName,      setTargetName]          = useState('');
+  const [targetDiscs,     setTargetDiscs]         = useState([]);
+  const [isIndividual,    setIsIndividual]        = useState(false);
+  const [groupId,         setGroupId]             = useState('');
+  const [skipperName,     setSkipperName]         = useState('');
+  const [injuryNotes,     setInjuryNotes]         = useState('');
+  const [level,           setLevel]               = useState('intermediate');
+  const [ageGroup,        setAgeGroup]            = useState('mixed');
+  const [extraNotes,      setExtraNotes]          = useState('');
+  const [generating,      setGenerating]          = useState(false);
+  const [error,           setError]               = useState('');
+  const [individualGroupId, setIndividualGroupId] = useState('');
+  const [scheduleMode, setScheduleMode]           = useState('calendar'); // 'calendar' | 'manual'
+  const [manualDays,   setManualDays]             = useState([]);         // 0=ma … 6=zo
+  const [manualDurMin, setManualDurMin]           = useState(90);
 
   // Bereken trainingsdatums op basis van templates vanaf startDate
   const trainingDates = (() => {
     if (!startDate) return [];
     const start = new Date(startDate + 'T00:00:00');
-    const end   = hasTarget && targetDate
+    const end   = targetDate
       ? new Date(targetDate + 'T23:59:59')
-      : addDays(start, 84); // 12 weken als geen einddatum
+      : addDays(start, 84);
+    
+    if (scheduleMode === 'manual') {
+      if (manualDays.length === 0) return [];
+      const dates = [];
+      // 0=ma…6=zo → JS: ma=1,di=2,…,zo=0
+      const jsDay = d => d === 6 ? 0 : d + 1;
+      let cursor = new Date(start);
+      while (cursor <= end) {
+        const ourDay = cursor.getDay() === 0 ? 6 : cursor.getDay() - 1;
+        if (manualDays.includes(ourDay)) {
+          dates.push(dateToStr(cursor));
+        }
+        cursor = addDays(cursor, 1);
+      }
+      return dates;
+    }
+    
+    // calendar mode
     const virtual = generateVirtualEvents(templates, start, end);
+    const activeGroupId = isIndividual ? individualGroupId : groupId;
     return virtual
       .filter(e => e.type === 'training')
-      .map(e => {
-        const d = new Date((e.startAt.seconds) * 1000);
-        return dateToStr(d);
-      })
+      .filter(e => !activeGroupId || !e.groupIds?.length || e.groupIds.includes(activeGroupId))
+      .map(e => dateToStr(new Date(e.startAt.seconds * 1000)))
       .filter((v, i, a) => a.indexOf(v) === i)
       .sort();
   })();
-
+  
   const selectedGroup = groups.find(g => g.id === groupId);
 
   const toggleDisc = (disc) => {
@@ -141,6 +162,7 @@ function SetupForm({ groups, templates, disciplines, onGenerate }) {
           skipperName:     isIndividual ? skipperName : '',
           injuryNotes,
           hasTarget,
+          manualDurMin: scheduleMode === 'manual' ? manualDurMin : null,
         }),
       });
       const data = await res.json();
@@ -148,8 +170,10 @@ function SetupForm({ groups, templates, disciplines, onGenerate }) {
 
       onGenerate({
         title:        title || (hasTarget ? (targetName || 'Schema') : 'Trainingsschema'),
-        groupId:      isIndividual ? null : (groupId || null),
-        groupName:    isIndividual ? null : (selectedGroup?.name || ''),
+        groupId:      isIndividual ? (individualGroupId || null) : (groupId || null),
+        groupName:    isIndividual
+          ? (groups.find(g => g.id === individualGroupId)?.name || '')
+          : (selectedGroup?.name || ''),
         isIndividual,
         skipperName:  isIndividual ? skipperName : '',
         injuryNotes,
@@ -208,12 +232,25 @@ function SetupForm({ groups, templates, disciplines, onGenerate }) {
           </select>
         )}
         {isIndividual && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <input
             style={inputStyle}
             value={skipperName}
             onChange={e => setSkipperName(e.target.value)}
             placeholder="Naam van de skipper"
           />
+            {groups.length > 0 && (
+              <div>
+                <label style={labelStyle}>Trainingsgroep (voor ophalen trainingen)</label>
+                <select style={inputStyle} value={individualGroupId} onChange={e => setIndividualGroupId(e.target.value)}>
+                  <option value="">— Geen specifieke groep —</option>
+                  {[...groups].sort((a,b) => a.name.localeCompare(b.name,'nl')).map(g => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -252,6 +289,51 @@ function SetupForm({ groups, templates, disciplines, onGenerate }) {
         <input type="date" style={inputStyle} value={startDate} onChange={e => setStartDate(e.target.value)} />
       </div>
 
+      {/* Trainingspatroon */}
+      <div>
+        <label style={labelStyle}>Trainingen ophalen uit</label>
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+          {[
+            { val: 'calendar', label: '📅 Kalender' },
+            { val: 'manual',   label: '✏️ Zelf ingeven' },
+          ].map(opt => (
+            <button key={opt.val} type="button"
+              onClick={() => setScheduleMode(opt.val)}
+              style={{ flex: 1, padding: '9px', borderRadius: '8px', fontFamily: 'inherit', fontSize: '13px', fontWeight: '600', cursor: 'pointer', border: `1px solid ${scheduleMode === opt.val ? '#3b82f6' : '#334155'}`, backgroundColor: scheduleMode === opt.val ? '#3b82f622' : 'transparent', color: scheduleMode === opt.val ? '#60a5fa' : '#64748b' }}>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {scheduleMode === 'manual' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div>
+               <label style={labelStyle}>Trainingsdagen</label>
+              <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                {['Ma','Di','Wo','Do','Vr','Za','Zo'].map((dag, i) => {
+                  const sel = manualDays.includes(i);
+                  return (
+                    <button key={i} type="button"
+                      onClick={() => setManualDays(prev => sel ? prev.filter(d => d !== i) : [...prev, i].sort())}
+                      style={{ width: '36px', height: '36px', borderRadius: '8px', fontFamily: 'inherit', fontSize: '12px', fontWeight: '700', cursor: 'pointer', border: `1px solid ${sel ? '#3b82f6' : '#334155'}`, backgroundColor: sel ? '#3b82f622' : 'transparent', color: sel ? '#60a5fa' : '#64748b' }}>
+                      {dag}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <label style={labelStyle}>Duur per training (minuten)</label>
+              <input
+                type="number" min="30" max="180" step="15"
+                style={inputStyle}
+                value={manualDurMin}
+                onChange={e => setManualDurMin(parseInt(e.target.value) || 90)}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Wedstrijd of vrij doel */}
       <div>
         <label style={labelStyle}>Einddoel</label>
@@ -267,12 +349,20 @@ function SetupForm({ groups, templates, disciplines, onGenerate }) {
             </button>
           ))}
         </div>
-        {hasTarget && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <input style={inputStyle} value={targetName} onChange={e => setTargetName(e.target.value)} placeholder="Naam van de wedstrijd" />
-            <input type="date" style={inputStyle} value={targetDate} onChange={e => setTargetDate(e.target.value)} />
-          </div>
-        )}
+          {hasTarget ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <input style={inputStyle} value={targetName} onChange={e => setTargetName(e.target.value)} placeholder="Naam van de wedstrijd" />    
+              <input type="date" style={inputStyle} value={targetDate} onChange={e => setTargetDate(e.target.value)} />
+            </div>
+          ) : (
+            <div>
+              <label style={{ ...labelStyle, marginTop: '8px' }}>Einddatum (optioneel)</label>
+              <input type="date" style={inputStyle} value={targetDate} onChange={e => setTargetDate(e.target.value)} />
+              <p style={{ fontSize: '11px', color: '#475569', margin: '5px 0 0' }}>
+                Leeg = 12 weken vanaf de startdatum
+              </p>
+            </div>
+          )}
       </div>
 
       {/* Disciplines */}
