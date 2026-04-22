@@ -311,6 +311,7 @@ export default function CounterPage() {
   const [relayIsActive,       setRelayIsActive]       = useState(false);
   const [relayIsFinished,     setRelayIsFinished]     = useState(false);
   const [relaySkipperStart,   setRelaySkipperStart]   = useState(null);
+  const [isStarting, setIsStarting]                   = useState(false);
   const relayTimerRef        = useRef(null);
   const relayCurrentStepsRef = useRef(0);
   const relayLeadUidRef      = useRef(null);
@@ -456,13 +457,15 @@ export default function CounterPage() {
     }
 
     // Individual
+    setIsStarting(true);
     await LiveSessionFactory.startCounter(selectedSkipper.rtdbUid, disciplineId, sessionType);
+    setIsStarting(false);
   };
 
   const handleCountStep = () => {
     if (sessionMode === 'triple_under') { handleTuStep(); return; }
     if (sessionMode === 'relay')        { handleRelayStep(); return; }
-    if (!currentData || currentData?.isFinished) return;
+    if (!currentData?.isActive || currentData?.isFinished) return;
     if (!sessionStartRef.current) sessionStartRef.current = Date.now();
     LiveSessionFactory.incrementSteps(selectedSkipper.rtdbUid, liveBpm, sessionStartRef.current);
     telemetryRef.current.push({ time: Date.now() - sessionStartRef.current, steps: (currentData?.steps || 0) + 1, heartRate: liveBpm });
@@ -875,7 +878,7 @@ export default function CounterPage() {
 
   // ── Screen: INDIVIDUAL counter ────────────────────────────────────────────
   // Not yet started — show start button
-  if (!currentData) {
+  if (!currentData && !isStarting) {
     return (
       <div style={st.container}>
         <div style={st.activeHeader}>
