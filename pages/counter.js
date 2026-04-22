@@ -468,7 +468,12 @@ export default function CounterPage() {
   const handleCountStep = () => {
     if (sessionMode === 'triple_under') { handleTuStep(); return; }
     if (sessionMode === 'relay')        { handleRelayStep(); return; }
-    if (!currentData?.isActive || currentData?.isFinished) return;
+    
+    if (currentData?.isFinished) return;
+    if (!currentData || !currentData.isActive) {
+      handleStartSession();
+      return;
+    }
     if (!sessionStartRef.current) sessionStartRef.current = Date.now();
     LiveSessionFactory.incrementSteps(selectedSkipper.rtdbUid, liveBpm, sessionStartRef.current);
     telemetryRef.current.push({ time: Date.now() - sessionStartRef.current, steps: (currentData?.steps || 0) + 1, heartRate: liveBpm });
