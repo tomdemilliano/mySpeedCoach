@@ -331,7 +331,9 @@ export default function CounterPage() {
   useEffect(() => {
     if (!selectedSkipper?.rtdbUid || sessionMode !== 'individual') return;
     const unsub = LiveSessionFactory.subscribeToLive(selectedSkipper.rtdbUid, data => {
+      console.log('RTDB update:', data);
       if (!data) return;
+      console.log('er is data');
       setLiveBpm(data.bpm || 0);
       setCurrentData(data.session || null);
     });
@@ -459,6 +461,7 @@ export default function CounterPage() {
     // Individual
     setIsStarting(true);
     await LiveSessionFactory.startCounter(selectedSkipper.rtdbUid, disciplineId, sessionType);
+    console.log('startCounter done, rtdbUid:', selectedSkipper.rtdbUid);
     setIsStarting(false);
   };
 
