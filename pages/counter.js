@@ -311,7 +311,6 @@ export default function CounterPage() {
   const [relayIsActive,       setRelayIsActive]       = useState(false);
   const [relayIsFinished,     setRelayIsFinished]     = useState(false);
   const [relaySkipperStart,   setRelaySkipperStart]   = useState(null);
-  const [isStarting, setIsStarting]                   = useState(false);
   const relayTimerRef        = useRef(null);
   const relayCurrentStepsRef = useRef(0);
   const relayLeadUidRef      = useRef(null);
@@ -331,9 +330,7 @@ export default function CounterPage() {
   useEffect(() => {
     if (!selectedSkipper?.rtdbUid || sessionMode !== 'individual') return;
     const unsub = LiveSessionFactory.subscribeToLive(selectedSkipper.rtdbUid, data => {
-      console.log('RTDB update:', data);
       if (!data) return;
-      console.log('er is data');
       setLiveBpm(data.bpm || 0);
       setCurrentData(data.session || null);
     });
@@ -459,21 +456,13 @@ export default function CounterPage() {
     }
 
     // Individual
-    setIsStarting(true);
     await LiveSessionFactory.startCounter(selectedSkipper.rtdbUid, disciplineId, sessionType);
-    console.log('startCounter done, rtdbUid:', selectedSkipper.rtdbUid);
-    setIsStarting(false);
   };
 
   const handleCountStep = () => {
     if (sessionMode === 'triple_under') { handleTuStep(); return; }
     if (sessionMode === 'relay')        { handleRelayStep(); return; }
-    
-    if (currentData?.isFinished) return;
-    if (!currentData || !currentData.isActive) {
-      handleStartSession();
-      return;
-    }
+    if (!currentData || currentData?.isFinished) return;
     if (!sessionStartRef.current) sessionStartRef.current = Date.now();
     LiveSessionFactory.incrementSteps(selectedSkipper.rtdbUid, liveBpm, sessionStartRef.current);
     telemetryRef.current.push({ time: Date.now() - sessionStartRef.current, steps: (currentData?.steps || 0) + 1, heartRate: liveBpm });
@@ -886,7 +875,7 @@ export default function CounterPage() {
 
   // ── Screen: INDIVIDUAL counter ────────────────────────────────────────────
   // Not yet started — show start button
-  if (!currentData && !isStarting) {
+  if (!currentData) {
     return (
       <div style={st.container}>
         <div style={st.activeHeader}>
