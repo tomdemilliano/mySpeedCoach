@@ -7,6 +7,7 @@ import {
 } from '../constants/dbSchema';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import AppLayout from '../components/AppLayout';
+import IosInstallBanner from '../components/IosInstallBanner';
 
 const COOKIE_KEY      = 'msc_uid';
 const VIEW_MODE_KEY   = 'msc_viewmode';
@@ -265,6 +266,7 @@ useEffect(() => {
       <AppLayout userRole={userRole} coachView={coachView} announcementCount={announcementCount}>
         <Component {...pageProps} />
       </AppLayout>
+      <IosInstallBanner />
     </>
   );
 }
