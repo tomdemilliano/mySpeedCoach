@@ -26,8 +26,7 @@ import {
   X, Users, User, Calendar,
 } from 'lucide-react';
 import {
-  UserFactory, ClubMemberFactory, UserMemberLinkFactory, GroupFactory,
-} from '../constants/dbSchema';
+  UserFactory, ClubMemberFactory, UserMemberLinkFactory, GroupFactory, authFetch } from '../constants/dbSchema';
 import { useAuth }       from '../contexts/AuthContext';
 import { useDisciplines } from '../hooks/useDisciplines';
 
@@ -199,7 +198,7 @@ Geef in het Nederlands (max 300 woorden):
 5) Prioriteit volgende sessie`;
 
     try {
-      const res  = await fetch('/api/ai-analysis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
+      const res  = await authFetch('/api/ai-analysis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
       const data = await res.json();
       if (data.text) setAnalysis(data.text);
       else setError(data.error || 'Kon geen analyse genereren.');

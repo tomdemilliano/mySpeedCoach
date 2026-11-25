@@ -2,8 +2,13 @@
 //
 // POST { announcementId, title, body, groupIds, clubId }
 //
-// Internal API — called by the announcements page after creating a new announcement.
-// NOT meant to be called directly from the browser by end-users.
+// Called by the announcements page after creating a new announcement.
+//
+// Access (verified via Firebase ID token):
+//   - broadcast groupIds (__ALL_USERS__, __ALL_CLUBADMINS__) → superadmin only
+//   - superadmin → any club / group
+//   - clubadmin  → only clubs they are linked to via userMemberLinks
+//   - user       → only groups where one of their linked members has isCoach
 //
 // Flow:
 //   1. For each groupId, fetch all members from the group's Firestore sub-collection
@@ -16,24 +21,11 @@
 //   __ALL_USERS__      → send to every user in the system
 //   __ALL_CLUBADMINS__ → send to every user with role === 'clubadmin'
 
-const { initializeApp, getApps, cert } = require('firebase-admin/app');
-const { getFirestore }                  = require('firebase-admin/firestore');
-const { sendPushNotification }          = require('../../../lib/webpush');
-
-const PROJECT_ID = 'myspeedcoach-416ac';
-
-function getAdminDb() {
-  if (!getApps().length) {
-    initializeApp({
-      credential: cert({
-        projectId:   PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey:  process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      }),
-    });
-  }
-  return getFirestore();
-}
+const { getAdminDb }           = require('../../../lib/firebaseAdmin');
+const { sendPushNotification } = require('../../../lib/webpush');
+const {
+  requireUser, getLinkedClubIds, getLinkedMemberIds, isCoachOfGroup,
+} = require('../../../lib/apiAuth');
 
 const BROADCAST_ALL       = '__ALL_USERS__';
 const BROADCAST_CLUBADMIN = '__ALL_CLUBADMINS__';
@@ -93,10 +85,46 @@ async function resolveTargetUids(db, groupIds, clubId) {
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  const caller = await requireUser(req, res);
+  if (!caller) return;
+
   const { title, body, groupIds, clubId, url } = req.body || {};
 
-  if (!title || !Array.isArray(groupIds) || groupIds.length === 0) {
+  if (!title || typeof title !== 'string' || !Array.isArray(groupIds) || groupIds.length === 0) {
     return res.status(400).json({ error: 'Missing title or groupIds' });
+  }
+  if (groupIds.length > 30 || groupIds.some(g => typeof g !== 'string')) {
+    return res.status(400).json({ error: 'Invalid groupIds' });
+  }
+
+  // ── Authorisation ──────────────────────────────────────────────────────────
+  try {
+    const db = getAdminDb();
+    const hasBroadcast = groupIds.some(g => g === BROADCAST_ALL || g === BROADCAST_CLUBADMIN);
+
+    if (caller.role !== 'superadmin') {
+      if (hasBroadcast || !clubId || typeof clubId !== 'string') {
+        return res.status(403).json({ error: 'Geen toegang.' });
+      }
+
+      const linkedClubs = await getLinkedClubIds(db, caller.uid);
+      if (!linkedClubs.has(clubId)) {
+        return res.status(403).json({ error: 'Geen toegang tot deze club.' });
+      }
+
+      if (caller.role !== 'clubadmin') {
+        // Regular user: must be coach of every targeted group
+        const memberIds = await getLinkedMemberIds(db, caller.uid, clubId);
+        for (const gid of groupIds) {
+          if (!(await isCoachOfGroup(db, clubId, gid, memberIds))) {
+            return res.status(403).json({ error: 'Geen toegang tot deze groep.' });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[push/send] auth check failed', err);
+    return res.status(500).json({ error: 'Push send failed' });
   }
 
   try {
@@ -108,9 +136,10 @@ module.exports = async function handler(req, res) {
     }
 
     const payload = {
-      title,
-      body:  body  || '',
-      url:   url   || '/announcements',
+      title: title.slice(0, 120),
+      body:  String(body || '').slice(0, 200),
+      // Only allow same-origin relative paths as click target
+      url:   (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//')) ? url : '/announcements',
       tag:   'msc-announcement',
     };
 
@@ -165,6 +194,6 @@ module.exports = async function handler(req, res) {
 
   } catch (err) {
     console.error('[push/send]', err);
-    return res.status(500).json({ error: 'Push send failed', detail: err.message });
+    return res.status(500).json({ error: 'Push send failed' });
   }
 };

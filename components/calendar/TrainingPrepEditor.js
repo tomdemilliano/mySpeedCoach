@@ -23,7 +23,7 @@ import {
   Edit2, Check, AlertCircle, Clock, Wind, TrendingUp,
   Sparkles, RotateCcw,
 } from 'lucide-react';
-import { TrainingPrepFactory } from '../../constants/dbSchema';
+import { TrainingPrepFactory, authFetch } from '../../constants/dbSchema';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PHASE_OPTIONS = [
@@ -216,7 +216,7 @@ function AiPromptPanel({ disciplines, onGenerated, onClose }) {
   const handleGenerate = async () => {
     setGenerating(true); setError('');
     try {
-      const res = await fetch('/api/ai-training-prep', {
+      const res = await authFetch('/api/ai-training-prep', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({

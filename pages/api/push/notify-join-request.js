@@ -1,40 +1,55 @@
 // pages/api/push/notify-join-request.js
 //
-// POST { clubId, firstName, lastName }
+// POST { clubId }
 //
 // Stuurt een push-notificatie naar alle clubadmins van de opgegeven club
 // die push-notificaties hebben ingeschakeld EN de instelling
 // `notifyJoinRequests` niet hebben uitgeschakeld.
 //
 // Aangeroepen vanuit ClubJoinRequestFactory.create() via een fire-and-forget
-// fetch() in de settings.js / register flow.
+// authFetch() nadat het clubJoinRequests-document is aangemaakt.
+//
+// Access: any verified user, but only for a pending join request of their own
+// that was created in the last 10 minutes. The name in the notification comes
+// from that request document, never from the request body.
 
-const { initializeApp, getApps, cert } = require('firebase-admin/app');
-const { getFirestore }                  = require('firebase-admin/firestore');
-const { sendPushNotification }          = require('../../../lib/webpush');
+const { getAdminDb }           = require('../../../lib/firebaseAdmin');
+const { sendPushNotification } = require('../../../lib/webpush');
+const { requireUser }          = require('../../../lib/apiAuth');
 
-function getAdminDb() {
-  if (!getApps().length) {
-    initializeApp({
-      credential: cert({
-        projectId:   'myspeedcoach-416ac',
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey:  process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      }),
-    });
-  }
-  return getFirestore();
-}
+const MAX_REQUEST_AGE_MS = 10 * 60 * 1000;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { clubId, firstName, lastName } = req.body;
-  if (!clubId) return res.status(400).json({ error: 'clubId required' });
+  const caller = await requireUser(req, res);
+  if (!caller) return;
+
+  const { clubId } = req.body || {};
+  if (!clubId || typeof clubId !== 'string') return res.status(400).json({ error: 'clubId required' });
 
   const db = getAdminDb();
 
   try {
+    // 0. The caller must have a fresh, pending join request for this club
+    const reqSnap = await db.collection('clubJoinRequests')
+      .where('uid', '==', caller.uid)
+      .where('clubId', '==', clubId)
+      .where('status', '==', 'pending')
+      .get();
+
+    const now = Date.now();
+    const joinRequest = reqSnap.docs
+      .map(d => d.data())
+      .find(d => d.createdAt?.toMillis && now - d.createdAt.toMillis() < MAX_REQUEST_AGE_MS);
+
+    if (!joinRequest) {
+      return res.status(403).json({ error: 'Geen recente aanvraag gevonden.' });
+    }
+
+    const firstName = String(joinRequest.firstName || '').slice(0, 60);
+    const lastName  = String(joinRequest.lastName  || '').slice(0, 60);
+
     // 1. Zoek alle users met role === 'clubadmin'
     const usersSnap = await db.collection('users')
       .where('role', '==', 'clubadmin')
@@ -76,7 +91,8 @@ export default async function handler(req, res) {
         .get();
 
       await Promise.all(subsSnap.docs.map(async (subDoc) => {
-        const subscription = subDoc.data();
+        const { subscription } = subDoc.data();
+        if (!subscription?.endpoint) return;
         try {
           await sendPushNotification(subscription, {
             title: 'Nieuwe lidmaatschapsaanvraag',
@@ -86,7 +102,7 @@ export default async function handler(req, res) {
           });
           sent++;
         } catch (err) {
-          if (err.statusCode === 410) {
+          if (err.statusCode === 410 || err.statusCode === 404) {
             expiredEndpoints.push({ uid, docId: subDoc.id });
           }
         }
@@ -103,6 +119,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ sent });
   } catch (e) {
     console.error('[notify-join-request]', e);
-    return res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: 'Push failed' });
   }
 }

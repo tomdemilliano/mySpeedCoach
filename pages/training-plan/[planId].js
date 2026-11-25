@@ -14,8 +14,7 @@ import {
 } from 'lucide-react';
 import {
   TrainingPlanFactory, TrainingPrepFactory,
-  UserMemberLinkFactory, ClubMemberFactory,
-} from '../../constants/dbSchema';
+  UserMemberLinkFactory, ClubMemberFactory, authFetch } from '../../constants/dbSchema';
 import TrainingPrepEditor from '../../components/calendar/TrainingPrepEditor';
 import TrainingPrepViewer from '../../components/calendar/TrainingPrepViewer';
 
@@ -64,7 +63,7 @@ function TrainingCard({ training, isCoach, clubId, uid, planId, disciplines, onU
   const handleGeneratePrep = async () => {
     setGenerating(true);
     try {
-      const res = await fetch('/api/ai-training-prep', {
+      const res = await authFetch('/api/ai-training-prep', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           level: 'intermediate', ageGroup: 'mixed', totalMin: 90,

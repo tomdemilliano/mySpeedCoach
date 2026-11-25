@@ -22,8 +22,7 @@ import {
 } from 'lucide-react';
 import {
   TrainingPlanFactory, TrainingPrepFactory,
-  EventTemplateFactory, CalendarEventFactory,
-} from '../../constants/dbSchema';
+  EventTemplateFactory, CalendarEventFactory, authFetch } from '../../constants/dbSchema';
 import {
   generateVirtualEvents, startOfDay, endOfDay, addDays,
 } from '../../utils/calendarUtils';
@@ -146,7 +145,7 @@ function SetupForm({ groups, templates, disciplines, onGenerate }) {
     }
     setError(''); setGenerating(true);
     try {
-      const res = await fetch('/api/ai-training-plan', {
+      const res = await authFetch('/api/ai-training-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -459,7 +458,7 @@ function TrainingRow({ training, clubId, uid, planId, disciplines, onPrepAdded }
   const handleGeneratePrep = async () => {
     setGenerating(true);
     try {
-      const res = await fetch('/api/ai-training-prep', {
+      const res = await authFetch('/api/ai-training-prep', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({

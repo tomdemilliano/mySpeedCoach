@@ -1,0 +1,59 @@
+{
+  "rules": {
+    "live_sessions": {
+      "$uid": {
+        ".read": "auth != null && auth.token.email_verified == true",
+        ".write": "auth != null && auth.token.email_verified == true",
+
+        "bpm":              { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 300" },
+        "lastHeartbeat":    { ".validate": "newData.isNumber()" },
+        "connectionStatus": { ".validate": "newData.isString() && (newData.val() == 'online' || newData.val() == 'offline')" },
+
+        "session": {
+          "isActive":     { ".validate": "newData.isBoolean()" },
+          "isFinished":   { ".validate": "newData.isBoolean()" },
+          "startTime":    { ".validate": "newData.isNumber()" },
+          "lastStepTime": { ".validate": "newData.isNumber()" },
+          "steps":        { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000" },
+          "discipline":   { ".validate": "newData.isString() && newData.val().length <= 100" },
+          "sessionType":  { ".validate": "newData.isString() && newData.val().length <= 50" },
+          "telemetry": {
+            "$point": {
+              ".validate": "newData.hasChildren(['time', 'heartRate'])",
+              "time":      { ".validate": "newData.isNumber()" },
+              "heartRate": { ".validate": "newData.isNumber()" },
+              "$other":    { ".validate": false }
+            }
+          },
+          "$other": { ".validate": false }
+        },
+
+        "relaySession": {
+          "isActive":               { ".validate": "newData.isBoolean()" },
+          "isFinished":             { ".validate": "newData.isBoolean()" },
+          "currentSkipperIndex":    { ".validate": "newData.isNumber()" },
+          "currentSkipperName":     { ".validate": "newData.isString() && newData.val().length <= 200" },
+          "currentSkipperMemberId": { ".validate": "newData.isString() && newData.val().length <= 200" },
+          "totalSteps":             { ".validate": "newData.isNumber()" },
+          "skipperCount":           { ".validate": "newData.isNumber() && newData.val() <= 50" },
+          "updatedAt":              { ".validate": "newData.isNumber()" },
+          "results": {
+            "$i": {
+              "memberId": { ".validate": "newData.isString() && newData.val().length <= 200" },
+              "name":     { ".validate": "newData.isString() && newData.val().length <= 200" },
+              "steps":    { ".validate": "newData.isNumber()" },
+              "$other":   { ".validate": false }
+            }
+          },
+          "$other": { ".validate": false }
+        },
+
+        "$other": { ".validate": false }
+      }
+    },
+    "$other": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}

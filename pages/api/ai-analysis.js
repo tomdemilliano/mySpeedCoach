@@ -1,11 +1,18 @@
 import fs from 'fs';
 import path from 'path';
+import { requireUser } from '../../lib/apiAuth';
+
+const MAX_PROMPT_CHARS = 8000;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Geen prompt meegegeven.' });
+  const caller = await requireUser(req, res);
+  if (!caller) return;
+
+  const { prompt } = req.body || {};
+  if (!prompt || typeof prompt !== 'string') return res.status(400).json({ error: 'Geen prompt meegegeven.' });
+  if (prompt.length > MAX_PROMPT_CHARS)      return res.status(400).json({ error: 'Prompt is te lang.' });
 
   // Lees de skill-file in (eenmalig per request, ~2KB)
   const skillPath = path.join(process.cwd(), 'skills', 'rope-skipping-analysis.skill.md');

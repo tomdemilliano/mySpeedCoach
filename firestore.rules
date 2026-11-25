@@ -1,0 +1,47 @@
+rules_version = '2';
+
+// Phase 1 hardening for MySpeedCoach.
+// - Bare auth accounts (e.g. created directly via the Auth REST API) get no access
+//   to club data: email must be verified AND a users/{uid} doc must exist.
+// - Nobody can change their own `role`; only superadmins can write other users' docs.
+// Paste into Firebase Console → Firestore → Rules, then test with the Rules Playground.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn()    { return request.auth != null; }
+    function verified()    { return signedIn() && request.auth.token.email_verified == true; }
+    function myUserPath()  { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function hasUserDoc()  { return exists(myUserPath()); }
+    function isSuperadmin() {
+      return verified() && hasUserDoc() && get(myUserPath()).data.role == 'superadmin';
+    }
+
+    // ── users ────────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      // Own doc is readable during registration (before email verification).
+      allow read: if (signedIn() && request.auth.uid == userId)
+                  || (verified() && hasUserDoc());
+
+      // Self-provisioning (AuthContext / register.js) may only create role 'user'.
+      allow create: if (signedIn()
+                        && request.auth.uid == userId
+                        && request.resource.data.role == 'user')
+                    || isSuperadmin();
+
+      // Users may edit their own profile, but never their role.
+      allow update: if (signedIn()
+                        && request.auth.uid == userId
+                        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']))
+                    || isSuperadmin();
+
+      allow delete: if isSuperadmin();
+    }
+
+    // ── everything else (temporary catch-all, to be tightened per collection) ─
+    // Excludes `users`, so the rules above cannot be bypassed.
+    match /{coll}/{rest=**} {
+      allow read, write: if coll != 'users' && verified() && hasUserDoc();
+    }
+  }
+}

@@ -443,10 +443,9 @@ export const UserFactory = {
     }
     await deleteDoc(doc(db, "users", uid));
     try {
-      const res = await fetch('/api/delete-user', {
-        method:  'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ uid }),
+      const res = await authFetch('/api/delete-user', {
+        method: 'DELETE',
+        body:   { uid },
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -644,14 +643,9 @@ export const ClubJoinRequestFactory = {
 
      // Fire-and-forget push naar clubadmins
      if (typeof fetch !== 'undefined') {
-       fetch('/api/push/notify-join-request', {
-         method:  'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body:    JSON.stringify({
-           clubId,
-           firstName: profile.firstName || '',
-           lastName:  profile.lastName  || '',
-         }),
+       authFetch('/api/push/notify-join-request', {
+         method: 'POST',
+         body:   { clubId },
        }).catch(err => console.warn('[push] join-request notify failed:', err));
      }
      return ref;
@@ -1724,6 +1718,25 @@ export const AuthFactory = {
   signOut:         () => signOut(auth),
   sendPasswordReset:(email) => sendPasswordResetEmail(auth, email),
   updatePassword:  (newPassword) => updatePassword(auth.currentUser, newPassword),
+
+  // Firebase ID token of the signed-in user (null when signed out)
+  getIdToken: () => auth.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null),
+};
+
+// fetch() wrapper for our own pages/api/* routes.
+// Adds `Authorization: Bearer <idToken>` so the route can verify the caller.
+// Usage is identical to fetch(); `options.body` may be a plain object (sent as JSON).
+export const authFetch = async (url, options = {}) => {
+  const token   = await AuthFactory.getIdToken();
+  const headers = { ...(options.headers || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let body = options.body;
+  if (body && typeof body === 'object' && !(body instanceof FormData)) {
+    body = JSON.stringify(body);
+    headers['Content-Type'] = 'application/json';
+  }
+  return fetch(url, { ...options, headers, body });
 };
 
 // ==========================================
