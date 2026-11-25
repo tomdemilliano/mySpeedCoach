@@ -1,54 +1,29 @@
 // pages/api/delete-user.js
 //
+// DELETE { uid }
+//
 // Deletes a Firebase Auth account server-side using the Admin SDK.
 // Called by UserFactory.delete() after it has cleaned up Firestore.
 //
-// projectId is hardcoded from firebaseConfig.js (it's already public).
-// Only two env vars are needed (Vercel dashboard or .env.local):
-//   FIREBASE_CLIENT_EMAIL
-//   FIREBASE_PRIVATE_KEY
-//
-// Generate these from: Firebase Console → Project Settings → Service Accounts
-//   → Generate new private key
+// Access: superadmin only (verified via Firebase ID token).
 
-const { initializeApp, getApps, cert } = require('firebase-admin/app');
-const { getAuth } = require('firebase-admin/auth');
-
-// Safe to hardcode — already public in firebaseConfig.js
-const PROJECT_ID = 'myspeedcoach-416ac';
-
-// Initialise the Admin SDK once (Next.js hot-reloads can call this file
-// multiple times, so we guard against re-initialisation).
-function getAdminAuth() {
-  if (!getApps().length) {
-    initializeApp({
-      credential: cert({
-        projectId:   PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        // Vercel stores the key with literal \n — convert back to real newlines.
-        privateKey:  process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      }),
-    });
-  }
-  return getAuth();
-}
+const { getAdminAuth } = require('../../lib/firebaseAdmin');
+const { requireUser }  = require('../../lib/apiAuth');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'DELETE') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Simple protection: only allow calls from the same origin.
-  // In a production app you would verify a session cookie or signed token here.
-  const origin = req.headers.origin || req.headers.referer || '';
-  const host   = req.headers.host || '';
-  if (origin && !origin.includes(host)) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+  const caller = await requireUser(req, res, { roles: ['superadmin'] });
+  if (!caller) return;
 
-  const { uid } = req.body;
+  const { uid } = req.body || {};
   if (!uid || typeof uid !== 'string') {
     return res.status(400).json({ error: 'Missing uid' });
+  }
+  if (uid === caller.uid) {
+    return res.status(400).json({ error: 'Je kan je eigen account niet verwijderen.' });
   }
 
   try {
@@ -56,10 +31,11 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ success: true });
   } catch (err) {
     // auth/user-not-found is fine — the account may have already been removed
+    // (e.g. superadmin-created docs with a Date.now() id have no Auth account)
     if (err.code === 'auth/user-not-found') {
       return res.status(200).json({ success: true, note: 'user not found in Auth' });
     }
     console.error('Admin SDK deleteUser error:', err);
-    return res.status(500).json({ error: err.message || 'Failed to delete user' });
+    return res.status(500).json({ error: 'Failed to delete user' });
   }
-}
+};

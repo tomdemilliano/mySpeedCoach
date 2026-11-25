@@ -10,6 +10,7 @@
 //   const { permission, isSubscribed, subscribe, unsubscribe, isSupported } = usePushNotifications(uid);
 
 import { useState, useEffect, useCallback } from 'react';
+import { authFetch } from '../constants/dbSchema';
 
 // Convert the URL-safe base64 VAPID public key to a Uint8Array
 function urlBase64ToUint8Array(base64String) {
@@ -78,10 +79,10 @@ export function usePushNotifications(uid) {
       });
 
       // 4. Save to Firestore via API
-      const res = await fetch('/api/push/subscribe', {
+      const res = await authFetch('/api/push/subscribe', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ uid, subscription: sub.toJSON() }),
+        body:    JSON.stringify({ subscription: sub.toJSON() }),
       });
 
       if (!res.ok) throw new Error('Failed to save subscription on server');
@@ -109,10 +110,10 @@ export function usePushNotifications(uid) {
       await subscription.unsubscribe();
 
       // 2. Remove from Firestore via API
-      await fetch('/api/push/unsubscribe', {
+      await authFetch('/api/push/unsubscribe', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ uid, endpoint }),
+        body:    JSON.stringify({ endpoint }),
       });
 
       setSubscription(null);

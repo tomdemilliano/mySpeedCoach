@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   AnnouncementFactory, ClubFactory, GroupFactory,
-  UserFactory, UserMemberLinkFactory,
-} from '../constants/dbSchema';
+  UserFactory, UserMemberLinkFactory, authFetch } from '../constants/dbSchema';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Megaphone, Plus, Trash2, Pin, X, ChevronDown, ChevronUp,
@@ -494,7 +493,7 @@ const handleSave = async (form) => {
     await AnnouncementFactory.create(payload, uid, authorName);
  
     // Fire-and-forget push — don't let a push failure block the UI
-    fetch('/api/push/send', {
+    authFetch('/api/push/send', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

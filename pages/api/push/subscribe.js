@@ -1,31 +1,17 @@
 // pages/api/push/subscribe.js
 //
-// POST { uid, subscription }
+// POST { subscription }
 //
-// Saves a Web Push PushSubscription object to:
+// Saves a Web Push PushSubscription object for the CALLER to:
 //   Firestore: users/{uid}/pushSubscriptions/{endpoint-hash}
 //
-// The endpoint URL itself is used as the document ID (URL-safe base64 hash)
-// so that re-subscribing the same device upserts rather than duplicates.
+// The uid is taken from the verified ID token — never from the request body.
+// The endpoint URL hash is used as the document ID so that re-subscribing the
+// same device upserts rather than duplicates.
 
-const { initializeApp, getApps, cert } = require('firebase-admin/app');
-const { getFirestore }                  = require('firebase-admin/firestore');
-const crypto                            = require('crypto');
-
-const PROJECT_ID = 'myspeedcoach-416ac';
-
-function getAdminDb() {
-  if (!getApps().length) {
-    initializeApp({
-      credential: cert({
-        projectId:   PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey:  process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      }),
-    });
-  }
-  return getFirestore();
-}
+const crypto          = require('crypto');
+const { getAdminDb }  = require('../../../lib/firebaseAdmin');
+const { requireUser } = require('../../../lib/apiAuth');
 
 // Stable document ID derived from the subscription endpoint
 function endpointHash(endpoint) {
@@ -35,28 +21,36 @@ function endpointHash(endpoint) {
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { uid, subscription } = req.body || {};
+  const caller = await requireUser(req, res);
+  if (!caller) return;
 
-  if (!uid || typeof uid !== 'string') {
-    return res.status(400).json({ error: 'Missing uid' });
-  }
-  if (!subscription?.endpoint || !subscription?.keys) {
+  const { subscription } = req.body || {};
+  if (
+    !subscription?.endpoint || typeof subscription.endpoint !== 'string' ||
+    !subscription.endpoint.startsWith('https://') ||
+    !subscription?.keys?.p256dh || !subscription?.keys?.auth
+  ) {
     return res.status(400).json({ error: 'Invalid subscription object' });
   }
 
   try {
-    const db  = getAdminDb();
+    const db    = getAdminDb();
     const docId = endpointHash(subscription.endpoint);
 
     await db
       .collection('users')
-      .doc(uid)
+      .doc(caller.uid)
       .collection('pushSubscriptions')
       .doc(docId)
       .set({
-        subscription,           // full PushSubscription JSON
+        // Store only the fields web-push needs
+        subscription: {
+          endpoint:       subscription.endpoint,
+          expirationTime: subscription.expirationTime ?? null,
+          keys: { p256dh: subscription.keys.p256dh, auth: subscription.keys.auth },
+        },
         createdAt: new Date(),
-        userAgent: req.headers['user-agent'] || '',
+        userAgent: String(req.headers['user-agent'] || '').slice(0, 300),
       }, { merge: true });
 
     return res.status(200).json({ ok: true });

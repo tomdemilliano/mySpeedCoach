@@ -1,28 +1,13 @@
 // pages/api/push/unsubscribe.js
 //
-// POST { uid, endpoint }
+// POST { endpoint }
 //
-// Removes the push subscription matching the given endpoint from Firestore.
-// Called when the user opts out or when web-push returns a 410 Gone (expired subscription).
+// Removes the CALLER's push subscription matching the given endpoint.
+// The uid is taken from the verified ID token — never from the request body.
 
-const { initializeApp, getApps, cert } = require('firebase-admin/app');
-const { getFirestore }                  = require('firebase-admin/firestore');
-const crypto                            = require('crypto');
-
-const PROJECT_ID = 'myspeedcoach-416ac';
-
-function getAdminDb() {
-  if (!getApps().length) {
-    initializeApp({
-      credential: cert({
-        projectId:   PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey:  process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      }),
-    });
-  }
-  return getFirestore();
-}
+const crypto          = require('crypto');
+const { getAdminDb }  = require('../../../lib/firebaseAdmin');
+const { requireUser } = require('../../../lib/apiAuth');
 
 function endpointHash(endpoint) {
   return crypto.createHash('sha256').update(endpoint).digest('base64url').slice(0, 40);
@@ -31,9 +16,13 @@ function endpointHash(endpoint) {
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { uid, endpoint } = req.body || {};
+  const caller = await requireUser(req, res);
+  if (!caller) return;
 
-  if (!uid || !endpoint) return res.status(400).json({ error: 'Missing uid or endpoint' });
+  const { endpoint } = req.body || {};
+  if (!endpoint || typeof endpoint !== 'string') {
+    return res.status(400).json({ error: 'Missing endpoint' });
+  }
 
   try {
     const db    = getAdminDb();
@@ -41,7 +30,7 @@ module.exports = async function handler(req, res) {
 
     await db
       .collection('users')
-      .doc(uid)
+      .doc(caller.uid)
       .collection('pushSubscriptions')
       .doc(docId)
       .delete();
